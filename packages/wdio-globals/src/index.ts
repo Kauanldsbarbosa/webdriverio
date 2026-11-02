@@ -2,7 +2,7 @@
 
 /// <reference path="../types.d.ts" />
 
-type SupportedGlobals = 'browser' | 'driver' | 'multiremotebrowser' | '$' | '$$' | 'expect' | 'multiRemoteBrowser'
+type SupportedGlobals = 'browser' | 'driver' | '$' | '$$' | 'expect' | 'multiRemoteBrowser'
 
 declare global {
 
@@ -11,6 +11,10 @@ declare global {
         interface Browser {}
         interface Element {}
         interface MultiRemoteBrowser {}
+        /**
+         * The type of the global `expect`. A framework adapter can add call signatures to it.
+         */
+        interface GlobalExpect extends ExpectWebdriverIO.Expect {}
     }
 }
 
@@ -37,7 +41,14 @@ function proxyHandler (key: SupportedGlobals) {
             return typeof field === 'function'
                 ? field.bind(receiver)
                 : field
-        }
+        },
+        /**
+         * `in` checks the installed instance too, e.g. `Symbol.for('wdio.kind') in browser`.
+         * Keep the result of the target, a proxy can not hide its non-configurable `prototype`.
+         */
+        has: (self: never, prop: PropertyKey) => (
+            (globals.has(key) && prop in globals.get(key)) || Reflect.has(self, prop)
+        )
     }
 }
 
@@ -48,13 +59,6 @@ export const browser: WebdriverIO.Browser = new Proxy(
 export const driver: WebdriverIO.Browser = new Proxy(
     class Browser {} as unknown as WebdriverIO.Browser,
     proxyHandler('driver')
-)
-/**
- * @deprecated Use `multiRemoteBrowser` instead.
- */
-export const multiremotebrowser: WebdriverIO.MultiRemoteBrowser = new Proxy(
-    class Browser {} as unknown as WebdriverIO.MultiRemoteBrowser,
-    proxyHandler('multiremotebrowser')
 )
 export const multiRemoteBrowser: WebdriverIO.MultiRemoteBrowser = new Proxy(
     class Browser {} as unknown as WebdriverIO.MultiRemoteBrowser,
@@ -75,12 +79,12 @@ export const $$: WebdriverIO.Browser['$$'] = (...args: any) => {
     }
     return globals.get('$$')(...args)
 }
-export const expect: ExpectWebdriverIO.Expect = ((...args: any) => {
+export const expect: WebdriverIO.GlobalExpect = ((...args: any) => {
     if (!globals.has('expect')) {
         throw new Error(GLOBALS_ERROR_MESSAGE)
     }
     return globals.get('expect')(...args)
-}) as ExpectWebdriverIO.Expect
+}) as WebdriverIO.GlobalExpect
 
 const ASYNC_MATCHERS = [
     'any',
@@ -89,6 +93,8 @@ const ASYNC_MATCHERS = [
     'objectContaining',
     'stringContaining',
     'stringMatching',
+    'oneOf',
+    'closeTo'
 ] as const
 
 for (const matcher of ASYNC_MATCHERS) {
@@ -98,6 +104,28 @@ for (const matcher of ASYNC_MATCHERS) {
         }
         return globals.get('expect')[matcher](...args)
     }
+}
+
+/**
+ * Custom modifiers exposed on expect for the browser-runner for now!
+ * Outside the browser-runner context, use `import { some } from 'expect-webdriverio/api'` to get access to the same modifiers.
+ */
+(expect as any).some = (...args: any) => {
+    if (!globals.has('expect')) {
+        throw new Error(GLOBALS_ERROR_MESSAGE)
+    }
+    return globals.get('expect')['some'](...args)
+}
+
+/**
+ * One expected value per multi-remote instance, e.g. `expect.multiRemote({ chrome: 'A', firefox: 'B' })`.
+ * Not part of `ASYNC_MATCHERS` since there is no `expect.not.multiRemote`.
+ */
+expect.multiRemote = (...args: any) => {
+    if (!globals.has('expect')) {
+        throw new Error(GLOBALS_ERROR_MESSAGE)
+    }
+    return globals.get('expect').multiRemote(...args)
 }
 
 expect.not = ASYNC_MATCHERS.reduce((acc, matcher) => {

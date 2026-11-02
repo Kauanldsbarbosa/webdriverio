@@ -1,6 +1,7 @@
 ---
 id: customcommands
 title: Custom Commands
+description: "Add your own browser and element commands with addCommand, overwrite existing commands and extend the TypeScript type definitions."
 ---
 
 If you want to extend the `browser` instance with your own set of commands, the browser method `addCommand` is here for you. You can write your command in an asynchronous way, just as in your specs.
@@ -9,15 +10,19 @@ If you want to extend the `browser` instance with your own set of commands, the 
 
 ### Command Name
 
+<Option type="String">
+
 A name that defines the command and will be attached to the browser or element scope.
 
-Type: `String`
+</Option>
 
 ### Custom Function
 
-A function that is being executed when the command is called. The `this` scope is either [`WebdriverIO.Browser`](/docs/api/browser) or [`WebdriverIO.Element`](/docs/api/element) depending whether the command gets attached to the browser or element scope.
+<Option type="Function">
 
-Type: `Function`
+A function that is being executed when the command is called. The `this` scope is [`WebdriverIO.Browser`](/docs/api/browser), [`WebdriverIO.Element`](/docs/api/element) or `WebdriverIO.BrowsingContext`, depending on whether the command gets attached to the browser, to elements or to browsing contexts.
+
+</Option>
 
 ### Options
 
@@ -25,19 +30,25 @@ Object with configuration options modifying the custom command behavior
 
 #### Target Scope
 
+<Option type="Boolean" default="false" name="attachToElement">
+
 Flag to decide whether to attach the command to the browser or element scope. If set to `true` the command will be an element command.
 
-Option Name: `attachToElement`
-Type: `Boolean`<br />
-Default: `false`
+</Option>
+
+<Option type="Boolean" default="false" name="attachToBrowsingContext">
+
+Flag to attach the command to every browsing context: the tabs, windows and frames that `browser.url()`, `browser.newWindow()`, `browser.browsingContexts()` and `context.frame()` return in a WebDriver BiDi session. It cannot be combined with `attachToElement`. See [Browsing contexts](#browsing-contexts).
+
+</Option>
 
 #### Disable implicitWait
 
+<Option type="Boolean" default="false" name="disableElementImplicitWait">
+
 Flag to decide whether to implicitly wait for the element to exist before calling the custom command.
 
-Option Name: `disableElementImplicitWait`
-Type: `Boolean`<br />
-Default: `false`
+</Option>
 
 ## Examples
 
@@ -54,7 +65,7 @@ browser.addCommand('getUrlAndTitle', async function (customVar) {
 })
 ```
 
-Additionally, you can extend the element instance with your own set of commands, by passing `true` as the final argument. The scope (`this`) in this case is a [`WebdriverIO.Element`](/docs/api/element) object.
+Additionally, you can extend the element instance with your own set of commands by setting `attachToElement` to `true`. The scope (`this`) in this case is a [`WebdriverIO.Element`](/docs/api/element) object.
 
 ```js
 browser.addCommand("waitAndClick", async function () {
@@ -73,7 +84,6 @@ browser.addCommand("waitAndClick", async function () {
     await this.click()
 }, { attachToElement: true, disableElementImplicitWait: true })
 ```
-
 
 Custom commands give you the opportunity to bundle a specific sequence of commands you use frequently as a single call. You can define custom commands at any point in your test suite; just make sure that the command is defined *before* its first use. (The `before` hook in your `wdio.conf.js` is one good place to create them.)
 
@@ -121,11 +131,32 @@ Be careful to not overload the `browser` scope with too many custom commands.
 
 We recommend defining custom logic in [page objects](pageobjects), so they are bound to a specific page.
 
-### Multiremote
+### Browsing contexts
 
-`addCommand` works in a similar way for multiremote, except the new command will propagate down to the children instances. You have to be mindful when using `this` object since the multiremote `browser` and its children instances have different `this`.
+In a WebDriver BiDi session, a tab, a window and a frame are each a `WebdriverIO.BrowsingContext`. Set `attachToBrowsingContext` to `true` to add a command to all of them. The scope (`this`) is the context the command was called on, and `this.browser` is the browser it belongs to:
 
-This example shows how to add a new command for multiremote.
+```js
+browser.addCommand('heading', async function () {
+    // `this` is the tab, window or frame
+    return this.$('h1').getText()
+}, { attachToBrowsingContext: true })
+
+const page = await browser.url('https://webdriver.io')
+console.log(await page.heading())
+
+const frame = await page.frame('iframe')
+console.log(await frame.heading())
+```
+
+The command is available on contexts that exist already and on every context created later, including frames from another origin. A command that only makes sense for a tab or window can check `this.isFrame`.
+
+`addCommand` and `overwriteCommand` on a browsing context itself throw. Register the command on the browser.
+
+### Multi-remote
+
+`addCommand` works in a similar way for multi-remote, except the new command will propagate down to the children instances. You have to be mindful when using `this` object since the multi-remote `browser` and its children instances have different `this`.
+
+This example shows how to add a new command for multi-remote.
 
 ```js
 import { multiRemoteBrowser } from '@wdio/globals'
@@ -228,6 +259,10 @@ declare global {
         interface Element {
             elementCustomCommand: (arg: any) => Promise<number>
         }
+
+        interface BrowsingContext {
+            contextCustomCommand: (arg: any) => Promise<string>
+        }
     }
 }
 ```
@@ -247,6 +282,10 @@ declare namespace WebdriverIO {
 
     interface Element {
         elementCustomCommand: (arg: any) => Promise<number>
+    }
+
+    interface BrowsingContext {
+        contextCustomCommand: (arg: any) => Promise<string>
     }
 }
 ```
@@ -310,7 +349,7 @@ console.log(`was sleeping for ${await browser.pause(1000)}`)
 
 ### Overwriting Element Commands
 
-Overwriting commands on element level is almost the same. Simply pass `true` as the third argument to `overwriteCommand`:
+Overwriting commands on element level is almost the same. Set `attachToElement` to `true`:
 
 ```js
 /**
@@ -358,6 +397,21 @@ await elem.click()
 
 // or pass params
 await elem.click({ force: true })
+```
+
+### Overwriting Browsing Context Commands
+
+Set `attachToBrowsingContext` to `true` to overwrite a built-in or custom command of every tab, window and frame. The original command is bound to the context it was called on:
+
+```js
+browser.overwriteCommand('getTitle', async function (this, originalGetTitle) {
+    const title = await originalGetTitle()
+    return this.isFrame ? `frame: ${title}` : title
+}, { attachToBrowsingContext: true })
+
+const page = await browser.url('https://webdriver.io')
+const frame = await page.frame('iframe')
+console.log(await frame.getTitle()) // "frame: ..."
 ```
 
 ## Add More WebDriver Commands
@@ -412,3 +466,5 @@ The `:sessionId` url parameter will be automatically substituted with the sessio
 :::
 
 See examples of how protocol commands can be defined in the [`@wdio/protocols`](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-protocols/src/protocols) package.
+
+

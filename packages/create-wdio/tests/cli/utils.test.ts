@@ -1,7 +1,7 @@
 import os from 'node:os'
 import fs from 'node:fs/promises'
 import { vi, test, expect, describe, beforeEach, it } from 'vitest'
-import { canAccessConfigPath, missingConfigurationPrompt, parseAnswers, runConfigCommand } from '../../src/cli/utils.js'
+import { canAccessConfigPath, missingConfigurationPrompt, parseAnswers, runConfigCommand, resolveTsConfigFilePath } from '../../src/cli/utils.js'
 import { createPackageJSON, npmInstall, createWDIOConfig, createWDIOScript, runAppiumInstaller, getAnswers } from '../../src/utils.js'
 import { BackendChoice } from '../../src/constants.js'
 
@@ -110,8 +110,16 @@ test('missingConfigurationPrompt does not init wizard if user does not want to',
     } as any)
     const runConfigCmd = vi.fn()
     vi.mocked(inquirer.prompt).mockResolvedValue({})
-    await missingConfigurationPrompt('config', 'foobar', runConfigCmd)
-    expect(runConfigCmd).toBeCalledTimes(0)
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`exit:${code}`)
+    }) as any)
+    try {
+        await expect(missingConfigurationPrompt('config', 'foobar', runConfigCmd)).rejects.toThrow('exit:0')
+        expect(runConfigCmd).toBeCalledTimes(0)
+        expect(exit).toHaveBeenCalledWith(0)
+    } finally {
+        exit.mockRestore()
+    }
 })
 
 test.skipIf(isUsingWindows)('parseAnswers', async () => {
@@ -234,11 +242,9 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
                 '@serenity-js/cucumber',
+                '@serenity-js/html-reporter',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
 
@@ -262,12 +268,10 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
                 '@serenity-js/cucumber',
+                '@serenity-js/html-reporter',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
                 '@types/node',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
     })
@@ -288,13 +292,11 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/assertions',
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
+                '@serenity-js/html-reporter',
                 '@serenity-js/jasmine',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
                 'jasmine',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
 
@@ -314,15 +316,13 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/assertions',
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
+                '@serenity-js/html-reporter',
                 '@serenity-js/jasmine',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
                 '@types/jasmine',
                 '@types/node',
                 'jasmine',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
     })
@@ -345,13 +345,11 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/assertions',
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
+                '@serenity-js/html-reporter',
                 '@serenity-js/mocha',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
                 'mocha',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
 
@@ -372,17 +370,72 @@ describe('Serenity/JS project generation', () => {
                 '@serenity-js/assertions',
                 '@serenity-js/console-reporter',
                 '@serenity-js/core',
+                '@serenity-js/html-reporter',
                 '@serenity-js/mocha',
                 '@serenity-js/rest',
-                '@serenity-js/serenity-bdd',
                 '@serenity-js/web',
                 '@types/mocha',
                 '@types/node',
                 'mocha',
-                'npm-failsafe',
-                'rimraf',
             ])
         })
+    })
+})
+
+describe('resolveTsConfigFilePath', () => {
+    const projectRootDir = path.resolve('/foo/bar')
+
+    it('creates a root tsconfig when none exists', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: false,
+            specs: path.join(projectRootDir, 'e2e', '*.ts'),
+            runnerShort: 'local'
+        })).toBe(path.join(projectRootDir, 'tsconfig.json'))
+    })
+
+    it('does not overwrite an existing root tsconfig for a direct-child spec glob', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: true,
+            specs: path.join(projectRootDir, 'e2e', '*.ts'),
+            runnerShort: 'local'
+        })).toBe(path.join(projectRootDir, 'tsconfig.e2e.json'))
+    })
+
+    it('does not overwrite an existing root tsconfig for a relative direct-child spec glob', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: true,
+            specs: path.join('e2e', '*.ts'),
+            runnerShort: 'local'
+        })).toBe(path.join(projectRootDir, 'tsconfig.e2e.json'))
+    })
+
+    it('does not overwrite an existing root tsconfig for the browser runner src glob', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: true,
+            specs: path.join(projectRootDir, 'src', '**', '*.test.ts'),
+            runnerShort: 'browser'
+        })).toBe(path.join(projectRootDir, 'tsconfig.wdio.json'))
+    })
+
+    it('places a nested tsconfig one directory above autogenerated specs', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: true,
+            specs: path.join(projectRootDir, 'test', 'specs', '**', '*.ts'),
+            runnerShort: 'local'
+        })).toBe(path.join(projectRootDir, 'test', 'tsconfig.json'))
+    })
+
+    it('uses a dedicated wdio tsconfig when no specs are generated', () => {
+        expect(resolveTsConfigFilePath({
+            projectRootDir,
+            hasRootTSConfig: true,
+            runnerShort: 'local'
+        })).toBe(path.join(projectRootDir, 'tsconfig.e2e.json'))
     })
 })
 

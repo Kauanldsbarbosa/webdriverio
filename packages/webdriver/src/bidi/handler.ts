@@ -10,7 +10,7 @@
  * ```
  *
  * from the project root. You can find the scripts that generates this file in
- * ./scripts/bidi/**
+ * ./infra/bidiCodegen/**
  */
 
 import type * as local from './localTypes.js'
@@ -379,6 +379,36 @@ export class BidiHandler extends BidiCore {
     }
 
     /**
+     * WebDriver Bidi command to send command method "browsingContext.startScreencast" with parameters.
+     * @url https://w3c.github.io/webdriver-bidi/#command-browsingContext-startScreencast
+     * @param params `remote.BrowsingContextStartScreencastParameters` {@link https://w3c.github.io/webdriver-bidi/#command-browsingContext-startScreencast | command parameter}
+     * @returns `Promise<local.BrowsingContextStartScreencastResult>`
+     **/
+    async browsingContextStartScreencast(params: remote.BrowsingContextStartScreencastParameters): Promise<local.BrowsingContextStartScreencastResult> {
+        const result = await this.send({
+            method: 'browsingContext.startScreencast',
+            params
+        })
+
+        return result.result as local.BrowsingContextStartScreencastResult
+    }
+
+    /**
+     * WebDriver Bidi command to send command method "browsingContext.stopScreencast" with parameters.
+     * @url https://w3c.github.io/webdriver-bidi/#command-browsingContext-stopScreencast
+     * @param params `remote.BrowsingContextStopScreencastParameters` {@link https://w3c.github.io/webdriver-bidi/#command-browsingContext-stopScreencast | command parameter}
+     * @returns `Promise<local.BrowsingContextStopScreencastResult>`
+     **/
+    async browsingContextStopScreencast(params: remote.BrowsingContextStopScreencastParameters): Promise<local.BrowsingContextStopScreencastResult> {
+        const result = await this.send({
+            method: 'browsingContext.stopScreencast',
+            params
+        })
+
+        return result.result as local.BrowsingContextStopScreencastResult
+    }
+
+    /**
      * WebDriver Bidi command to send command method "browsingContext.traverseHistory" with parameters.
      * @url https://w3c.github.io/webdriver-bidi/#command-browsingContext-traverseHistory
      * @param params `remote.BrowsingContextTraverseHistoryParameters` {@link https://w3c.github.io/webdriver-bidi/#command-browsingContext-traverseHistory | command parameter}
@@ -436,6 +466,21 @@ export class BidiHandler extends BidiCore {
         })
 
         return result.result as local.EmulationSetLocaleOverrideResult
+    }
+
+    /**
+     * WebDriver Bidi command to send command method "emulation.setMediaFeaturesOverride" with parameters.
+     * @url https://w3c.github.io/webdriver-bidi/#command-emulation-setMediaFeaturesOverride
+     * @param params `remote.EmulationSetMediaFeaturesOverrideParameters` {@link https://w3c.github.io/webdriver-bidi/#command-emulation-setMediaFeaturesOverride | command parameter}
+     * @returns `Promise<local.EmulationSetMediaFeaturesOverrideResult>`
+     **/
+    async emulationSetMediaFeaturesOverride(params: remote.EmulationSetMediaFeaturesOverrideParameters): Promise<local.EmulationSetMediaFeaturesOverrideResult> {
+        const result = await this.send({
+            method: 'emulation.setMediaFeaturesOverride',
+            params
+        })
+
+        return result.result as local.EmulationSetMediaFeaturesOverrideResult
     }
 
     /**
@@ -499,6 +544,21 @@ export class BidiHandler extends BidiCore {
     }
 
     /**
+     * WebDriver Bidi command to send command method "emulation.setViewportMetaOverride" with parameters.
+     * @url https://w3c.github.io/webdriver-bidi/#command-emulation-setViewportMetaOverride
+     * @param params `remote.EmulationSetViewportMetaOverrideParameters` {@link https://w3c.github.io/webdriver-bidi/#command-emulation-setViewportMetaOverride | command parameter}
+     * @returns `Promise<local.EmulationSetViewportMetaOverrideResult>`
+     **/
+    async emulationSetViewportMetaOverride(params: remote.EmulationSetViewportMetaOverrideParameters): Promise<local.EmulationSetViewportMetaOverrideResult> {
+        const result = await this.send({
+            method: 'emulation.setViewportMetaOverride',
+            params
+        })
+
+        return result.result as local.EmulationSetViewportMetaOverrideResult
+    }
+
+    /**
      * WebDriver Bidi command to send command method "emulation.setScriptingEnabled" with parameters.
      * @url https://w3c.github.io/webdriver-bidi/#command-emulation-setScriptingEnabled
      * @param params `remote.EmulationSetScriptingEnabledParameters` {@link https://w3c.github.io/webdriver-bidi/#command-emulation-setScriptingEnabled | command parameter}
@@ -526,6 +586,21 @@ export class BidiHandler extends BidiCore {
         })
 
         return result.result as local.EmulationSetScrollbarTypeOverrideResult
+    }
+
+    /**
+     * WebDriver Bidi command to send command method "emulation.setTextLayoutModeOverride" with parameters.
+     * @url https://w3c.github.io/webdriver-bidi/#command-emulation-setTextLayoutModeOverride
+     * @param params `remote.EmulationSetTextLayoutModeOverrideParameters` {@link https://w3c.github.io/webdriver-bidi/#command-emulation-setTextLayoutModeOverride | command parameter}
+     * @returns `Promise<local.EmulationSetTextLayoutModeOverrideResult>`
+     **/
+    async emulationSetTextLayoutModeOverride(params: remote.EmulationSetTextLayoutModeOverrideParameters): Promise<local.EmulationSetTextLayoutModeOverrideResult> {
+        const result = await this.send({
+            method: 'emulation.setTextLayoutModeOverride',
+            params
+        })
+
+        return result.result as local.EmulationSetTextLayoutModeOverrideResult
     }
 
     /**

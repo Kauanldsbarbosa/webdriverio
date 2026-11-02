@@ -1,6 +1,4 @@
-import { ELEMENT_KEY } from 'webdriver'
-import type { ElementReference } from '@wdio/protocols'
-import { getBrowserObject } from '@wdio/utils'
+import { getBrowserObject, isLoadedElement } from '@wdio/utils'
 import type { ChainablePromiseElement, DragAndDropCoordinate, DragAndDropOptions } from '../../types.js'
 
 /**
@@ -41,6 +39,11 @@ export async function dragAndDrop (
 ) {
     const moveToCoordinates = target as DragAndDropCoordinate
     const moveToElement = await target as WebdriverIO.Element
+    /**
+     * allow to specify an element or an x/y vector. The target is awaited, so a
+     * chainable `$()` is a loaded element here (see `@wdio/utils` `kind.ts`)
+     */
+    const isMovingToElement = isLoadedElement(moveToElement)
 
     /**
      * fail if
@@ -54,7 +57,7 @@ export async function dragAndDrop (
             /**
              * target is not from type element
              */
-            moveToElement.constructor.name !== 'Element' &&
+            !isMovingToElement &&
             /**
              * and is also not an object with x and y number parameters
              */
@@ -73,15 +76,11 @@ export async function dragAndDrop (
     const { duration } = { ...defaultOptions, ...options }
 
     /**
-     * allow to specify an element or an x/y vector
+     * Pass the elements themselves, not bare references: the action sequence
+     * uses them to send the gesture to the context they were found in.
      */
-    const isMovingToElement = moveToElement.constructor.name === 'Element'
-
-    const sourceRef: ElementReference = { [ELEMENT_KEY]: this[ELEMENT_KEY] }
-    const targetRef: ElementReference = { [ELEMENT_KEY]: moveToElement[ELEMENT_KEY] }
-
-    const origin = sourceRef
-    const targetOrigin = isMovingToElement ? targetRef : 'pointer'
+    const origin = this
+    const targetOrigin = isMovingToElement ? moveToElement : 'pointer'
 
     const targetX = isMovingToElement ? 0 : moveToCoordinates.x
     const targetY = isMovingToElement ? 0 : moveToCoordinates.y

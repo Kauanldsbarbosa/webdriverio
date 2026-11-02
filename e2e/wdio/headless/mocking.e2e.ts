@@ -1,8 +1,20 @@
 import { browser } from '@wdio/globals'
 
 describe('network mocking', () => {
+    before(function () {
+        /**
+         * Network mocking is a WebDriver BiDi feature. This suite also runs in
+         * the browser matrix, where Safari still uses WebDriver Classic.
+         */
+        if (!browser.isBidi) {
+            this.skip()
+        }
+    })
+
     afterEach(async () => {
-        await browser.mockRestoreAll()
+        if (browser.isBidi) {
+            await browser.mockRestoreAll()
+        }
     })
 
     it('marks a request as mocked even without overwrites', async () => {
@@ -104,18 +116,47 @@ describe('network mocking', () => {
         })
     })
 
-    it('should be able to see the response body', async () => {
-        // Navigate away or clear cache to force a fresh request
-        await browser.url('about:blank')
-        const mock = await browser.mock('https://guinea-pig.webdriver.io/')
+    it('should mock with a dynamic function payload', async () => {
+        const mock = await browser.mock('https://guinea-pig.webdriver.io/dynamic-mock.json')
+        mock.respond((request) => ({
+            mocked: true,
+            url: request.request.url
+        }), {
+            headers: { 'content-type': 'application/json' }
+        })
 
         await browser.url('https://guinea-pig.webdriver.io/')
-
-        await browser.waitUntil(() => mock.calls[0]?.body !== undefined, {
-            timeoutMsg: 'Expected response body to be populated',
-            timeout: 5000
+        const result = await browser.execute(async () => {
+            const res = await fetch('/dynamic-mock.json')
+            return res.json()
         })
-        expect(mock.calls[0].body).toContain('<title>WebdriverJS Testpage</title>')
+
+        expect(result).toEqual({
+            mocked: true,
+            url: 'https://guinea-pig.webdriver.io/dynamic-mock.json'
+        })
+        expect(mock.calls.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('should be able to see the response body', async () => {
+        /**
+         * Bypass the HTTP cache: earlier tests load this page, so the browser
+         * can revalidate it and get 304 Not Modified. Firefox can then leave
+         * `network.getData` for the body unanswered
+         * (https://bugzilla.mozilla.org/show_bug.cgi?id=2077785).
+         */
+        await browser.networkSetCacheBehavior({ cacheBehavior: 'bypass' })
+        try {
+            await browser.url('about:blank')
+            const mock = await browser.mock('https://guinea-pig.webdriver.io/')
+
+            await browser.url('https://guinea-pig.webdriver.io/')
+
+            await mock.waitForResponse()
+            expect(mock.calls[0].body).toContain('<title>WebdriverJS Testpage</title>')
+        } finally {
+            await browser.networkSetCacheBehavior({ cacheBehavior: 'default' })
+        }
     })
 
     it('should mock with complex mixed wildcards', async () => {

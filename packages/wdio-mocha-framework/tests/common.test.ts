@@ -1,14 +1,8 @@
-import path from 'node:path'
-import { describe, test, expect, vi, afterAll } from 'vitest'
+import { describe, test, expect, vi } from 'vitest'
 import { wrapGlobalTestMethod } from '@wdio/utils'
 
-import { loadModule, formatMessage, setupEnv, requireExternalModules } from '../src/common.js'
-declare global {
+import { applyMochaDefaults, dottedFullTitle, formatMessage, setupEnv } from '../src/common.js'
 
-    var foo: string | undefined
-}
-
-vi.mock('randomModule', () => import(path.join(process.cwd(), '__mocks__', 'randomModule')))
 vi.mock('@wdio/utils')
 
 describe('formatMessage', () => {
@@ -154,25 +148,6 @@ describe('formatMessage', () => {
     })
 })
 
-describe('loadModule', () => {
-    test('loadModule with existing package', async () => {
-        await loadModule('randomModule')
-        expect(global.foo).toBe('bar')
-    })
-
-    test('loadModule with non existing package', async () => {
-        await expect(() => loadModule('nonExistingModule'))
-            .rejects.toThrow('Module nonExistingModule can\'t get loaded')
-    })
-})
-
-test('requireExternalModules', () => {
-    const loader = vi.fn()
-    // @ts-ignore test invalid params!
-    requireExternalModules(['/foo/bar.js', null, './bar/foo.js'], loader)
-    expect(loader).toBeCalledTimes(2)
-})
-
 describe('setupEnv', () => {
     test('setupEnv - TDD', () => {
         const hooks = {
@@ -227,6 +202,29 @@ describe('setupEnv', () => {
     })
 })
 
-afterAll(() => {
-    delete global.foo
+describe('applyMochaDefaults', () => {
+    test('fails tests skipped by a hook failure', () => {
+        const opts = applyMochaDefaults({})
+        expect(opts.failHookAffectedTests).toBe(true)
+    })
+
+    test('keeps an explicit opt-out', () => {
+        const opts = applyMochaDefaults({ failHookAffectedTests: false })
+        expect(opts.failHookAffectedTests).toBe(false)
+    })
+})
+
+describe('dottedFullTitle', () => {
+    test('joins ancestor titles with dots', () => {
+        expect(dottedFullTitle('t', { title: 'inner', parent: { title: 'outer', parent: { title: '' } } })).toBe('outer.inner.t')
+    })
+
+    test('returns the title without a parent', () => {
+        expect(dottedFullTitle('t')).toBe('t')
+        expect(dottedFullTitle('t', null)).toBe('t')
+    })
+
+    test('stops at the first ancestor with an empty title', () => {
+        expect(dottedFullTitle('t', { title: 'a', parent: { title: '', parent: { title: 'skipped' } } })).toBe('a.t')
+    })
 })

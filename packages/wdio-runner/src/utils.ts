@@ -1,6 +1,6 @@
 import { deepmerge } from 'deepmerge-ts'
 import logger from '@wdio/logger'
-import { remote, multiremote, attach, type AttachOptions } from 'webdriverio'
+import { remote, multiRemote, attach, type AttachOptions } from 'webdriverio'
 import { DEFAULTS } from 'webdriver'
 import { DEFAULT_CONFIGS } from '@wdio/config'
 import type { AsymmetricMatchers, InverseAsymmetricMatchers } from 'expect-webdriverio'
@@ -46,18 +46,21 @@ export function sanitizeCaps (
 }
 
 /**
- * initialize browser instance depending whether remote or multiremote is requested
+ * initialize browser instance depending whether remote or multi-remote is requested
  * @param  {Object}  config        configuration of sessions
  * @param  {Object}  capabilities  desired session capabilities
- * @param  {boolean} isMultiremote isMultiremote
+ * @param  {boolean} isMultiRemote isMultiRemote
  * @return {Promise}               resolves with browser object
  */
 export async function initializeInstance (
     config: ConfigWithSessionId | WebdriverIO.Config,
-    capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities,
-    isMultiremote?: boolean
+    capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities,
+    isMultiRemote?: boolean
 ): Promise<WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser> {
-    await enableFileLogging(config.outputDir)
+    /**
+     * keep the log file that @wdio/local-runner gave this worker
+     */
+    await enableFileLogging(config.outputDir, { keepLogPath: true })
 
     /**
      * check if config has sessionId and attach it to a running session if so
@@ -83,7 +86,7 @@ export async function initializeInstance (
     /**
      * start a normal standalone session
      */
-    if (!isMultiremote) {
+    if (!isMultiRemote) {
         log.debug('init remote session')
         const sessionConfig: Capabilities.WebdriverIOConfig = {
             ...config,
@@ -97,59 +100,35 @@ export async function initializeInstance (
     }
 
     /**
-     * initiate multiremote sessions
+     * initiate multi-remote sessions
      */
-    const options: Capabilities.RequestedMultiremoteCapabilities = {}
-    log.debug('init multiremote session')
+    const options: Capabilities.RequestedMultiRemoteCapabilities = {}
+    log.debug('init multi-remote session')
     // @ts-expect-error ToDo(Christian): can be removed?
     delete config.capabilities
     for (const browserName of Object.keys(capabilities)) {
         options[browserName] = deepmerge(
             config,
-            (capabilities as Capabilities.RequestedMultiremoteCapabilities)[browserName]
+            (capabilities as Capabilities.RequestedMultiRemoteCapabilities)[browserName]
         )
     }
 
-    const browser = await multiremote(options, config)
+    const browser = await multiRemote(options, config)
 
     /**
      * only attach to global environment if `injectGlobals` is set to true
      */
     const browserNames = config.injectGlobals ? Object.keys(capabilities) : []
     for (const browserName of browserNames) {
-        // @ts-ignore allow random global browser names
-        global[browserName] = browser[browserName]
+        // Instance names are chosen by the user and become globals when injectGlobals is set.
+        (globalThis as Record<string, unknown>)[browserName] = browser.getInstance(browserName)
     }
 
     return browser
 }
 
-/**
- * Filter logTypes based on filter
- * @param  {string[]} excludeDriverLogs logTypes filter
- * @param  {string[]} driverLogTypes    available driver log types
- * @return {string[]}                   logTypes
- */
-export function filterLogTypes(
-    excludeDriverLogs: string[],
-    driverLogTypes: string[]
-) {
-    let logTypes = [...driverLogTypes]
-
-    if (Array.isArray(excludeDriverLogs)) {
-        log.debug('filtering logTypes', logTypes)
-        logTypes = excludeDriverLogs.length === 1 && excludeDriverLogs[0] === '*'
-            ? []
-            : logTypes.filter(x => !excludeDriverLogs.includes(x)) // exclude specific logTypes
-        log.debug('filtered logTypes', logTypes)
-    }
-
-    return logTypes
-}
-
 type BrowserData = {
     sessionId: string
-    isW3C: boolean
     protocol: string
     hostname: string
     port: number
@@ -158,16 +137,16 @@ type BrowserData = {
 }
 
 /**
- * Gets { sessionId, isW3C, protocol, hostname, port, path, queryParams } of every Multiremote instance
+ * Gets { sessionId, protocol, hostname, port, path, queryParams } of every MultiRemote instance
  * @param {object} browser browser
- * @param {boolean} isMultiremote isMultiremote
+ * @param {boolean} isMultiRemote isMultiRemote
  * @return {object}
  */
 export function getInstancesData (
     browser: WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser,
-    isMultiremote: boolean
+    isMultiRemote: boolean
 ) {
-    if (!isMultiremote) {
+    if (!isMultiRemote) {
         return
     }
 
@@ -175,9 +154,9 @@ export function getInstancesData (
     const instances: Record<string, Partial<BrowserData>> = {}
     multiRemoteBrowser.instances.forEach((browserName: string) => {
         const { protocol, hostname, port, path, queryParams } = multiRemoteBrowser.getInstance(browserName).options
-        const { isW3C, sessionId } = multiRemoteBrowser.getInstance(browserName)
+        const { sessionId } = multiRemoteBrowser.getInstance(browserName)
 
-        instances[browserName] = { sessionId, isW3C, protocol, hostname, port, path, queryParams }
+        instances[browserName] = { sessionId, protocol, hostname, port, path, queryParams }
     })
 
     return instances
@@ -190,26 +169,59 @@ const SUPPORTED_ASYMMETRIC_MATCHER = {
     ObjectContaining: 'objectContaining',
     StringContaining: 'stringContaining',
     StringMatching: 'stringMatching',
-    CloseTo: 'closeTo'
+    CloseTo: 'closeTo',
+    OneOf: 'oneOf'
 } as const
+
+type AsymmetricMatcherKey = keyof typeof SUPPORTED_ASYMMETRIC_MATCHER
+
+interface SerializedAsymmetricMatcher {
+    $$typeof: AsymmetricMatcherKey
+    sample: unknown
+    inverse?: boolean
+}
+
+function isSerializedAsymmetricMatcher(arg: unknown): arg is SerializedAsymmetricMatcher {
+    return (
+        typeof arg === 'object' &&
+        arg !== null &&
+        '$$typeof' in arg &&
+        typeof (arg as Record<string, unknown>).$$typeof === 'string' &&
+        Object.keys(SUPPORTED_ASYMMETRIC_MATCHER).includes((arg as Record<string, unknown>).$$typeof as string)
+    )
+}
+
+function isOneOfMatcher(matcherKey: string): matcherKey is 'oneOf' {
+    return matcherKey === 'oneOf'
+}
 
 /**
  * utility function to transform assertion parameters into asymmetric matchers if necessary
  * @param arg raw value or a stringified asymmetric matcher
  * @returns   raw value or an actual asymmetric matcher
  */
-export function transformExpectArgs (arg: unknown) {
-    if (typeof arg === 'object' && arg && '$$typeof' in arg && typeof arg.$$typeof === 'string' && Object.keys(SUPPORTED_ASYMMETRIC_MATCHER).includes(arg.$$typeof)) {
-        const matcherKey = SUPPORTED_ASYMMETRIC_MATCHER[arg.$$typeof as keyof typeof SUPPORTED_ASYMMETRIC_MATCHER] as keyof AsymmetricMatchers
-        const inverseMatcherKey = SUPPORTED_ASYMMETRIC_MATCHER[arg.$$typeof as keyof typeof SUPPORTED_ASYMMETRIC_MATCHER] as keyof InverseAsymmetricMatchers
-        const matcher = ('inverse' in arg && arg.inverse ? expect.not[inverseMatcherKey] : expect[matcherKey]) as unknown as (sample: string) => unknown
-
-        if (!matcher) {
-            throw new Error(`Matcher "${matcherKey}" is not supported by expect-webdriverio`)
-        }
-
-        return matcher((arg as unknown as { sample: string }).sample)
+export function transformExpectArgs(arg: unknown): unknown {
+    if (Array.isArray(arg)) {
+        return arg.map((item) => transformExpectArgs(item))
     }
 
-    return arg
+    if (!isSerializedAsymmetricMatcher(arg)) {
+        return arg
+    }
+
+    const matcherKey = SUPPORTED_ASYMMETRIC_MATCHER[arg.$$typeof] as keyof AsymmetricMatchers
+    const inverseMatcherKey = SUPPORTED_ASYMMETRIC_MATCHER[arg.$$typeof] as keyof InverseAsymmetricMatchers
+    const matcher = (arg.inverse ? expect.not[inverseMatcherKey] : expect[matcherKey]) as ((...args: unknown[]) => unknown) | undefined
+
+    if (!matcher) {
+        throw new Error(`Matcher "${matcherKey}" is not supported by expect-webdriverio`)
+    }
+
+    const transformedSample = transformExpectArgs(arg.sample)
+
+    if (isOneOfMatcher(matcherKey)) {
+        return matcher(...(transformedSample as unknown[]))
+    }
+
+    return matcher(transformedSample)
 }

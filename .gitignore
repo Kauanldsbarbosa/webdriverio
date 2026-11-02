@@ -45,8 +45,9 @@ tests/typings/**/dist
 # Optional npm cache directory
 .npm
 
-# Optional eslint cache
+# Optional lint cache
 .eslintcache
+.oxlintcache
 
 # Optional REPL history
 .node_repl_history
@@ -60,6 +61,9 @@ tests/typings/**/dist
 # dotenv environment variables file
 .env
 
+# local MCP config
+.mcp.json
+
 # lerna changelog cachedir
 .changelog
 
@@ -70,9 +74,11 @@ packages/**/cjs/
 /*.js
 /*.mjs
 /*.ts
-!.eslintrc.js
 !vitest.config.ts
-!eslint.config.mjs
+!vitest.browser.config.ts
+# Vitest browser mode attachments, e.g. failure screenshots
+.vitest/
+!.oxlintrc.json
 packages/**/package-lock.json
 .DS_Store
 e2e/screenshot.pdf
@@ -88,6 +94,7 @@ website/docs/api/**/*.md
 !website/docs/api/Globals.md
 !website/docs/api/Modules.md
 !website/docs/api/Browser.md
+!website/docs/api/BrowsingContext.md
 !website/docs/api/Element.md
 !website/docs/api/Mock.md
 !website/docs/api/Mobile.md
@@ -104,17 +111,25 @@ website/docs/_*.md
 wallaby.conf.js
 tags
 tests/.retry_succeeded
+tests/benchmark/results/
+.agents/verify-artifacts/
+tests/benchmark/.tmp/
 *.tsbuildinfo
 website/docs/Contribute.md
 website/community/Resources.md
 website/docs/desktop-testing/electron/
 website/docs/desktop-testing/tauri/
-scripts/bidi/cddl
+website/docs/desktop-testing/dioxus/
+infra/bidiCodegen/cddl
 temp_extract/
 browserstack.err
 e2e/tailwind.config.js
 packages/webdriverio/.chrome
 packages/wdio-json-reporter/tests/__fixtures__/merged.json
+packages/wdio-html-reporter/tests/.reports
+tests/html-reporter/out
+tests/html-reporter/out-cucumber
+tests/html-reporter/out-cjs
 examples/wdio/mocha/*.json
 e2e/screenshot.png
 website/community/events
@@ -127,3 +142,5 @@ website/i18n/*
 .pnpm-store
 
 e2e/wdio/wdio-chrome-*
+e2e/wdio/reporters/*/results/
+tests/cucumber/cucumberjs-json/json/

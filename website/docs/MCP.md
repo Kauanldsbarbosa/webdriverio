@@ -1,11 +1,12 @@
 ---
 id: mcp
 title: MCP (Model Context Protocol)
+description: "Let AI assistants automate browsers and mobile apps through the WebdriverIO MCP server, including installation, usage with Claude and available tools."
 ---
 
 ## What can it do?
 
-WebdriverIO MCP is a **Model Context Protocol (MCP) server** that enables AI assistants like Claude Desktop and Claude Code to automate and interact with web browsers and mobile applications.
+WebdriverIO MCP is a **Model Context Protocol (MCP) server** that enables AI assistants to automate and interact with web browsers and mobile applications.
 
 ### Why WebdriverIO MCP?
 
@@ -15,9 +16,11 @@ WebdriverIO MCP is a **Model Context Protocol (MCP) server** that enables AI ass
 
 It provides a unified interface for:
 
--   🖥️ **Desktop Browsers** (Chrome - headed or headless mode)
+-   🖥️ **Desktop Browsers** (Chrome, Firefox, Edge, Safari, headed or headless)
+-   **Electron Apps** (renderer automation, main-process scripts and deeplinks)
 -   📱 **Native Mobile Apps** (iOS Simulators / Android Emulators / Real Devices via Appium)
 -   📳 **Hybrid Mobile Apps** (Native + WebView context switching via Appium)
+-   ☁️ **Cloud Devices** (BrowserStack, Sauce Labs, TestMu, TestingBot and Digital.ai real device and browser clouds)
 
 through the [`@wdio/mcp`](https://www.npmjs.com/package/@wdio/mcp) package.
 
@@ -70,7 +73,7 @@ To use WebdriverIO MCP with Claude, modify the configuration file:
 }
 ```
 
-After adding the configuration, restart Claude. The WebdriverIO MCP tools will be available for browser and mobile automation tasks.
+After adding the configuration, restart your harness. The WebdriverIO MCP tools will be available for browser and mobile automation tasks.
 
 ### Usage with Claude Code
 
@@ -108,39 +111,59 @@ Ask Claude to automate mobile apps:
 
 ## Capabilities
 
-### Browser Automation (Chrome)
+### Browser Automation
 
 | Feature | Description |
 |---------|-------------|
-| **Session Management** | Launch Chrome in headed/headless mode with custom dimensions and optional navigation URL |
-| **Navigation** | Navigate to URLs |
+| **Session Management** | Launch Chrome, Firefox, Edge, or Safari in headed/headless mode with custom dimensions; attach to an existing Chrome instance via CDP |
+| **Navigation** | Navigate to URLs; manage multiple tabs |
 | **Element Interaction** | Click elements, type text, find elements by various selectors |
-| **Page Analysis** | Get visible elements (with pagination), accessibility tree (with filtering) |
+| **Page Analysis** | Get interactable elements (with pagination), accessibility tree (with role filtering) |
 | **Screenshots** | Capture screenshots (auto-optimized to max 1MB) |
 | **Scrolling** | Scroll up/down by configurable pixel amounts |
 | **Cookie Management** | Get, set, and delete cookies |
+| **Device Emulation** | Emulate mobile/tablet viewports in browser (BiDi required) |
 | **Script Execution** | Execute custom JavaScript in browser context |
+
+### Electron Automation
+
+| Feature | Description |
+|---------|-------------|
+| **Session Management** | Start an Electron app with `platform: "electron"`; deeplink scheme and project root are set at start |
+| **Renderer Automation** | Automate the renderer UI of the app |
+| **Main-Process Scripts** | Run JavaScript with access to the Electron APIs in the main process |
+| **Deeplinks** | Trigger deeplinks through the running app |
+| **Mocking** | Mock Electron API functions (requires `enable_tools` for the `mocks` group) |
 
 ### Mobile App Automation (iOS/Android)
 
 | Feature | Description |
 |---------|-------------|
 | **Session Management** | Launch apps on simulators, emulators, or real devices |
-| **Touch Gestures** | Tap, swipe, drag and drop |
+| **Touch Gestures** | Tap (element or coordinates), swipe, drag and drop |
 | **Element Detection** | Smart element detection with multiple locator strategies and pagination |
-| **App Lifecycle** | Get app state (via `execute_script` for activate/terminate) |
+| **App Lifecycle** | Get app state (foreground, background, not running, not installed) |
 | **Context Switching** | Switch between native and webview contexts in hybrid apps |
-| **Device Control** | Rotate device, keyboard control |
-| **Geolocation** | Get and set device GPS coordinates |
+| **Device Control** | Rotate device, keyboard control, GPS override |
 | **Permissions** | Automatic permission and alert handling |
 | **Script Execution** | Execute Appium mobile commands (pressKey, deepLink, shell, etc.) |
+
+### Cloud Providers
+
+| Feature | Description |
+|---------|-------------|
+| **Browser Sessions** | Run browser sessions on BrowserStack, Sauce Labs, TestMu, TestingBot, or Digital.ai (Windows, macOS, Linux) |
+| **Mobile Sessions** | Run app sessions on real devices via BrowserStack, Sauce Labs, TestMu, TestingBot, or Digital.ai |
+| **App Management** | Upload `.apk`/`.ipa` files; list previously uploaded apps across all five providers |
+| **Local Tunnel** | Auto-manage provider-specific tunnel binaries for accessing localhost |
+| **Reporting** | Tag sessions with project/build/session labels (works identically across all providers) |
 
 ## Prerequisites
 
 ### Browser Automation
 
--   **Chrome** must be installed on your system
--   WebdriverIO handles automated ChromeDriver management
+-   **Chrome, Firefox, Edge, or Safari** must be installed
+-   WebdriverIO handles automated driver management
 
 ### Mobile Automation
 
@@ -199,7 +222,7 @@ WebdriverIO MCP acts as a bridge between AI assistants and browser/mobile automa
 ```
 ┌─────────────────┐     MCP Protocol      ┌─────────────────┐
 │  Claude Desktop │ ◄──────────────────►  │    @wdio/mcp    │
-│  or Claude Code │      (stdio)          │     Server      │
+│  or Claude Code │   (stdio or HTTP)     │     Server      │
 └─────────────────┘                       └────────┬────────┘
                                                    │
                                              WebDriverIO API
@@ -207,14 +230,15 @@ WebdriverIO MCP acts as a bridge between AI assistants and browser/mobile automa
                     ┌──────────────────────────────┼──────────────────────────────┐
                     │                              │                              │
             ┌───────▼───────┐             ┌───────▼───────┐             ┌───────▼───────┐
-            │    Chrome     │             │    Appium     │             │    Appium     │
-            │   (Browser)   │             │     (iOS)     │             │   (Android)   │
+            │    Browser    │             │    Appium     │             │   Cloud        │
+            │ (local/CDP)   │             │  (iOS/Android)│             │   Providers    │
             └───────────────┘             └───────────────┘             └───────────────┘
 ```
 
 ### Session Management
 
--   **Single-session model**: Only one browser OR app session can be active at a time
+-   **Named multi-session**: give a session a `name` in `start_session` or `attach_session`, and it runs alongside the others when started with `onExisting: "keep"`. Without `keep`, a new session replaces the active one
+-   **Targeting**: every tool except the sessionless ones (`start_session`, `attach_session`, `launch_chrome`, `list_apps`, `upload_app`, `query_docs`, `enable_tools`) takes a `session` argument with a session name or ID. Without it, the tool uses the default session. Results are prefixed `[session: name (id8)]` when a target is passed or more than one session is live
 -   **Session state** is maintained globally across tool calls
 -   **Auto-detach**: Sessions with preserved state (`noReset: true`) automatically detach on close
 
@@ -224,7 +248,7 @@ WebdriverIO MCP acts as a bridge between AI assistants and browser/mobile automa
 
 -   Uses an optimized browser script to find all visible, interactable elements
 -   Returns elements with CSS selectors, IDs, classes, and ARIA information
--   Filters to viewport-visible elements by default
+-   Supports viewport filtering and pagination
 
 #### Mobile (Native Apps)
 
@@ -280,38 +304,87 @@ android=new UiSelector().text("Login")
 
 ## Available Tools
 
-The MCP server provides 25 tools for browser and mobile automation. See [Tools](./mcp/tools) for the complete reference.
+The MCP server provides 42 tools for browser, Electron and mobile automation. See [Tools](./mcp/tools) for the complete reference, including which tools are hidden until a group is enabled with `enable_tools` (see [Tool visibility](./mcp/tools#tool-visibility)).
 
-### Browser Tools
+### Recommended Workflow
 
-| Tool | Description |
-|------|-------------|
-| `start_browser` | Launch Chrome browser (with optional initial URL) |
-| `close_session` | Close or detach from session |
-| `navigate` | Navigate to a URL |
-| `click_element` | Click an element |
-| `set_value` | Type text into input |
-| `get_visible_elements` | Get visible/interactable elements (with pagination) |
-| `get_accessibility` | Get accessibility tree (with filtering) |
-| `take_screenshot` | Capture screenshot (auto-optimized) |
-| `scroll` | Scroll the page up or down |
-| `get_cookies` / `set_cookie` / `delete_cookies` | Cookie management |
-| `execute_script` | Execute JavaScript in browser |
+1. Take a `snapshot` to read the page. Its refs, such as `e12`, are what the other tools accept as selectors.
+2. Act on those refs with `click_element`, `set_value` or `select_option`.
+3. For several steps in a row, such as filling a form and then submitting it, send one `perform_actions` call rather than one call per step.
 
-### Mobile Tools
+Refs from the latest result stay valid until the page changes. After that, take a new snapshot.
 
-| Tool | Description |
-|------|-------------|
-| `start_app_session` | Launch iOS/Android app |
-| `tap_element` | Tap element or coordinates |
-| `swipe` | Swipe in a direction |
-| `drag_and_drop` | Drag between locations |
-| `get_app_state` | Check if app is running |
-| `get_contexts` / `switch_context` | Hybrid app context switching |
-| `rotate_device` | Rotate to portrait/landscape |
-| `get_geolocation` / `set_geolocation` | Get or set GPS coordinates |
-| `hide_keyboard` | Dismiss on-screen keyboard |
-| `execute_script` | Execute Appium mobile commands |
+| Tool | Platform | Description |
+|------|----------|-------------|
+| `start_session` | all | Start a browser, Electron or mobile session (local or cloud provider) |
+| `attach_session` | all | Attach to an existing WebDriver or Appium session by ID or name (`attach` group) |
+| `close_session` | all | Close or detach from a session |
+| `launch_chrome` | browser | Open Chrome with remote debugging for CDP attach (`attach` group) |
+| `navigate` | browser | Load a URL in the current tab |
+| `get_tabs` | browser | List all open tabs |
+| `switch_tab` | browser | Focus a tab by handle or index |
+| `switch_frame` | browser | Switch into an iframe by selector, or back to top-level |
+| `scroll` | browser | Scroll the page up or down |
+| `click_element` | all | Click an element (ref or selector) |
+| `set_value` | all | Replace the text of an input (ref or selector) |
+| `select_option` | browser | Select a `<select>` option by its text |
+| `press_key` | browser | Press a key or combination in the focused element |
+| `perform_actions` | all | Run several click, fill, select, check, uncheck or press steps in one call |
+| `snapshot` | all | Accessibility tree with refs for the page or app screen |
+| `get_elements` | ios, android, electron | Get interactable elements (with filtering + pagination) (`elements` group) |
+| `get_accessibility_tree` | electron | Get accessibility tree (with role filtering) |
+| `get_screenshot` | all | Capture screenshot (auto-optimized) |
+| `get_cookies` | browser | Get all cookies or a specific cookie (`cookies` group) |
+| `set_cookie` | browser | Set a browser cookie (`cookies` group) |
+| `delete_cookies` | browser | Delete all or one cookie (`cookies` group) |
+| `emulate_device` | browser | Emulate a mobile/tablet device viewport (`device` group) |
+| `set_geolocation` | all | Override device GPS coordinates (`device` group) |
+| `execute_script` | all | Run JavaScript (browser) or Appium commands (mobile) |
+| `execute_electron_script` | electron | Run JavaScript in the Electron main process |
+| `trigger_electron_deeplink` | electron | Trigger a deeplink through the running Electron app |
+| `mock` | all | Mock browser requests or Electron APIs (`mocks` group) |
+| `get_mock_calls` | all | Read the recorded calls of a mock (`mocks` group) |
+| `manage_mock` | all | Clear, reset or restore a mock (`mocks` group) |
+| `open_web_extension` | browser | Install a web extension and open one of its pages (`extensions` group) |
+| `query_docs` | all | Search the WebdriverIO documentation by keyword |
+| `tap_element` | mobile | Tap an element or screen coordinates |
+| `swipe` | mobile | Swipe gesture in a direction |
+| `drag_and_drop` | mobile | Drag between elements or coordinates |
+| `get_contexts` | mobile | List available native/webview contexts |
+| `switch_context` | mobile | Switch between native and webview contexts |
+| `rotate_device` | mobile | Rotate to portrait or landscape |
+| `hide_keyboard` | mobile | Dismiss the software keyboard |
+| `get_app_state` | mobile | Get app lifecycle state |
+| `list_apps` | cloud | List uploaded apps (BrowserStack, Sauce Labs, TestMu, TestingBot, Digital.ai) (`cloud-apps` group) |
+| `upload_app` | cloud | Upload an `.apk`/`.ipa` to a cloud provider (`cloud-apps` group) |
+| `enable_tools` | all | Show the hidden tools of one or more groups |
+
+## MCP Resources
+
+In addition to tools, the server exposes live session state as MCP resources. See [Resources](./mcp/resources) for the complete reference.
+
+| Resource URI | Description |
+|-------------|-------------|
+| `wdio://sessions` | Index of all sessions |
+| `wdio://session/current/elements` | Interactable elements (prefer over screenshot) |
+| `wdio://session/current/screenshot` | Screenshot as base64 |
+| `wdio://session/current/accessibility` | Accessibility tree |
+| `wdio://session/current/cookies` | Browser cookies |
+| `wdio://session/current/tabs` | Open browser tabs |
+| `wdio://session/current/contexts` | Available mobile contexts |
+| `wdio://session/current/context` | Active mobile context |
+| `wdio://session/current/app-state/{bundleId}` | Mobile app lifecycle state |
+| `wdio://session/current/geolocation` | Current GPS override |
+| `wdio://session/current/logs` | Session logs (browser console, logcat, crashlog) |
+| `wdio://session/current/capabilities` | Raw WebDriver capabilities |
+| `wdio://session/current/code` | Generated WebdriverIO JS |
+| `wdio://session/current/steps` | Session step log |
+| `wdio://session/{sessionId}/code` | Generated JS for past session |
+| `wdio://session/{sessionId}/steps` | Steps for past session |
+| `wdio://browserstack/local-binary` | BrowserStack Local setup instructions |
+| `wdio://saucelabs/local-binary` | Sauce Connect Proxy setup instructions |
+| `wdio://testmu/local-binary` | TestMu Tunnel setup instructions |
+| `wdio://testingbot/local-binary` | TestingBot Tunnel setup instructions |
 
 ## Automatic Handling
 
@@ -323,34 +396,15 @@ By default, the MCP server automatically grants app permissions (`autoGrantPermi
 
 System alerts (like "Allow notifications?") are automatically accepted by default (`autoAcceptAlerts: true`). This can be configured to dismiss instead with `autoDismissAlerts: true`.
 
-## Configuration
+## Transport
 
-### Environment Variables
+By default, the server runs over **stdio** (launched as a subprocess by the AI client). For clients that don't support subprocess-based MCP (llama.cpp, Codex secure mode), use **HTTP transport**:
 
-Configure the Appium server connection:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APPIUM_URL` | `127.0.0.1` | Appium server hostname |
-| `APPIUM_URL_PORT` | `4723` | Appium server port |
-| `APPIUM_PATH` | `/` | Appium server path |
-
-### Example with Custom Appium Server
-
-```json
-{
-    "mcpServers": {
-        "wdio-mcp": {
-            "command": "npx",
-            "args": ["-y", "@wdio/mcp"],
-            "env": {
-                "APPIUM_URL": "192.168.1.100",
-                "APPIUM_URL_PORT": "4724"
-            }
-        }
-    }
-}
+```bash
+npx @wdio/mcp --http --port 3000
 ```
+
+See [Transport](./mcp/transport) for full options including `--allowedHosts` and `--allowedOrigins`.
 
 ## Performance Optimization
 
@@ -358,13 +412,9 @@ The MCP server is optimized for efficient AI assistant communication:
 
 -   **TOON Format**: Uses Token-Oriented Object Notation for minimal token usage
 -   **XML Parsing**: Mobile element detection uses 2 HTTP calls (vs 600+ traditionally)
--   **Screenshot Compression**: Images auto-compressed to max 1MB using Sharp
+-   **Screenshot Compression**: Images auto-compressed to max 1MB
 -   **Viewport Filtering**: Only visible elements returned by default
 -   **Pagination**: Large element lists can be paginated to reduce response size
-
-## TypeScript Support
-
-The MCP server is written in TypeScript and includes full type definitions. If you're extending or integrating with the server programmatically, you'll benefit from auto-completion and type safety.
 
 ## Error Handling
 
@@ -404,14 +454,14 @@ All tools are designed with robust error handling:
 
 ### Browser won't start
 
--   Ensure Chrome is installed
+-   Ensure the target browser is installed
 -   Check that no other process is using the default debugging port (9222)
 -   Try headless mode if display issues occur
 
 ### Appium connection failed
 
 -   Verify Appium server is running (`appium`)
--   Check the Appium URL and port configuration
+-   Check the Appium host and port in `appiumConfig`
 -   Ensure the appropriate driver is installed (`appium driver list`)
 
 ### iOS Simulator issues
@@ -429,8 +479,11 @@ All tools are designed with robust error handling:
 ## Resources
 
 -   [Tools Reference](./mcp/tools) - Complete list of available tools
+-   [Resources Reference](./mcp/resources) - MCP resources for live session state
 -   [Selectors Guide](./mcp/selectors) - Selector syntax documentation
 -   [Configuration](./mcp/configuration) - Configuration options
+-   [Transport](./mcp/transport) - HTTP transport setup
+-   [Cloud Providers](./mcp/cloud-providers) - BrowserStack, Sauce Labs, TestMu, and TestingBot cloud integration
 -   [FAQ](./mcp/faq) - Frequently asked questions
 -   [GitHub Repository](https://github.com/webdriverio/mcp) - Source code and issues
 -   [NPM Package](https://www.npmjs.com/package/@wdio/mcp) - Package on npm

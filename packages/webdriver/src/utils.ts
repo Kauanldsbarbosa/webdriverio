@@ -4,17 +4,18 @@ import { deepmergeCustom } from 'deepmerge-ts'
 import logger, { SENSITIVE_DATA_REPLACER } from '@wdio/logger'
 import type { CommandEndpoint, Protocol } from '@wdio/protocols'
 import {
-    WebDriverProtocol, MJsonWProtocol, AppiumProtocol, ChromiumProtocol,
+    WebDriverProtocol, AppiumProtocol, ChromiumProtocol,
     SauceLabsProtocol, SeleniumProtocol, GeckoProtocol, WebDriverBidiProtocol
 } from '@wdio/protocols'
 import { CAPABILITY_KEYS } from '@wdio/protocols'
-import type { Options } from '@wdio/types'
+import type { Capabilities, Options } from '@wdio/types'
+import type { ClientOptions } from 'ws'
 
 import command from './command.js'
 import { environment } from './environment.js'
 import { BidiHandler } from './bidi/handler.js'
 import type { Event } from './bidi/localTypes.js'
-import type { Client, JSONWPCommandError, SessionFlags, RemoteConfig, CommandRuntimeOptions } from './types.js'
+import type { Client, SessionRequestError, SessionFlags, RemoteConfig, CommandRuntimeOptions } from './types.js'
 
 const log = logger('webdriver')
 const deepmerge = deepmergeCustom({ mergeArrays: false })
@@ -47,11 +48,10 @@ const BROWSER_DRIVER_ERRORS = [
 ]
 
 interface SessionInitializationResponse {
-    value: {
-        sessionId?: string,
+    value?: {
+        sessionId?: string
         capabilities?: WebdriverIO.Capabilities
-    },
-    sessionId: string
+    }
 }
 
 /**
@@ -59,19 +59,11 @@ interface SessionInitializationResponse {
  */
 export async function startWebDriverSession (params: RemoteConfig): Promise<{ sessionId: string, capabilities: WebdriverIO.Capabilities }> {
     /**
-     * the user could have passed in either w3c style or jsonwp style caps
-     * and we want to pass both styles to the server, which means we need
-     * to check what style the user sent in so we know how to construct the
-     * object for the other style
+     * Accept a W3C capabilities object (`alwaysMatch` / `firstMatch`) or a
+     * flat capability map, which is wrapped into `alwaysMatch`.
      */
     const capabilities = params.capabilities && 'alwaysMatch' in params.capabilities
-        /**
-         * in case W3C compliant capabilities are provided
-         */
         ? params.capabilities
-        /**
-         * otherwise assume they passed in jsonwp-style caps (flat object)
-         */
         : { alwaysMatch: params.capabilities, firstMatch: [{}] }
 
     /**
@@ -96,6 +88,12 @@ export async function startWebDriverSession (params: RemoteConfig): Promise<{ se
          * allow WebdriverIO to handle alerts
          */
         capabilities.alwaysMatch.unhandledPromptBehavior = 'ignore'
+        /**
+         * without it, Appium answers WebDriver Bidi itself and has no `browsingContext` module
+         */
+        if (isAppiumAndroidChrome(capabilities.alwaysMatch) && !hasAppiumCapability(capabilities.alwaysMatch, 'chromedriverForwardBiDi')) {
+            capabilities.alwaysMatch['appium:chromedriverForwardBiDi'] = true
+        }
     }
 
     validateCapabilities(capabilities.alwaysMatch)
@@ -163,14 +161,72 @@ export async function startWebDriverSession (params: RemoteConfig): Promise<{ se
         const message = getSessionError(err as Error, params)
         throw new Error(message)
     }
-    const sessionId = response.value.sessionId || response.sessionId
+    const sessionId = response.value?.sessionId
+    const sessionCapabilities = response.value?.capabilities
+    if (!sessionId || !sessionCapabilities) {
+        throw new Error(
+            'WebDriver new session response is missing a session id or capabilities. ' +
+            'WebdriverIO requires a W3C WebDriver server.'
+        )
+    }
 
     /**
      * save actual received session details
      */
-    params.capabilities = (response.value.capabilities || response.value) as WebdriverIO.Capabilities
+    params.capabilities = sessionCapabilities
 
-    return { sessionId, capabilities: params.capabilities }
+    return { sessionId, capabilities: sessionCapabilities }
+}
+
+/**
+ * `true` when the user set the Appium capability, as `appium:<name>` or in `appium:options`
+ */
+function hasAppiumCapability (capabilities: WebdriverIO.Capabilities, name: string) {
+    return getAppiumCapability(capabilities, name) !== undefined
+}
+
+/**
+ * the value of an Appium capability, set in `appium:options` or as `appium:<name>`: as in Appium, `appium:options` wins
+ */
+function getAppiumCapability (capabilities: WebdriverIO.Capabilities, name: string) {
+    const appiumOptions = capabilities['appium:options'] as Record<string, unknown> | undefined
+    return appiumOptions?.[name] ?? (capabilities as Record<string, unknown>)[`appium:${name}`]
+}
+
+/**
+ * what the user can do when the WebDriver Bidi server of an Appium browser session can not run
+ * browser commands: only Chrome on Android can get WebDriver Bidi through the browser driver
+ *
+ * @param  capabilities           capabilities of the session
+ * @param  requestedCapabilities  capabilities that the user requested
+ */
+export function getAppiumBidiAdvice (capabilities: WebdriverIO.Capabilities, requestedCapabilities: Capabilities.RequestedStandaloneCapabilities) {
+    const requested = (
+        'alwaysMatch' in requestedCapabilities ? requestedCapabilities.alwaysMatch : requestedCapabilities
+    ) as WebdriverIO.Capabilities
+    if (getAppiumCapability(requested, 'chromedriverForwardBiDi') === false) {
+        return 'Appium answers WebDriver Bidi itself, because "appium:chromedriverForwardBiDi" is false. '
+    }
+    if (/^android$/i.test(capabilities.platformName || '')) {
+        return 'For WebDriver Bidi with Chrome on Android, use Appium 3.9.0 or later with the UiAutomator2 driver 8.7.3 or later. '
+    }
+    return ''
+}
+
+/**
+ * a Chrome browser session on Android through the UiAutomator2 driver of Appium
+ */
+function isAppiumAndroidChrome (capabilities: WebdriverIO.Capabilities) {
+    /**
+     * not the unprefixed `automationName`: with an `appium:` capability next to it,
+     * `validateCapabilities` rejects the session
+     */
+    const automationName = getAppiumCapability(capabilities, 'automationName')
+    return (
+        /^android$/i.test(capabilities.platformName || '') &&
+        /^(chrome|chromium)$/i.test(capabilities.browserName || '') &&
+        typeof automationName === 'string' && /^uiautomator2$/i.test(automationName)
+    )
 }
 
 /**
@@ -189,8 +245,8 @@ export function validateCapabilities (capabilities: WebdriverIO.Capabilities) {
     }
 
     /**
-     * validate capabilities to check if there are no obvious mix between
-     * JSONWireProtocol and WebDriver protocol, e.g.
+     * Reject a mix of vendor-prefixed capabilities and keys that are not
+     * part of the W3C WebDriver capability set.
      */
     if (capabilities) {
         const extensionCaps = Object.keys(capabilities).filter((cap) => cap.includes(':'))
@@ -226,32 +282,6 @@ export function isSuccessfulResponse (statusCode?: number, body?: unknown) {
      */
     if (!body || typeof body !== 'object' || !('value' in body) || typeof body.value === 'undefined') {
         log.debug('request failed due to missing body')
-        return false
-    }
-
-    /**
-     * ignore failing element request to enable lazy loading capability
-     */
-    if (
-        'status' in body && body.status === 7 && body.value && typeof body.value === 'object' &&
-        'message' in body.value && body.value.message && typeof body.value.message === 'string' &&
-        (
-            body.value.message.toLowerCase().startsWith('no such element') ||
-            // Appium
-            body.value.message === 'An element could not be located on the page using the given search parameters.' ||
-            // Internet Explorer
-            body.value.message.toLowerCase().startsWith('unable to find element')
-        )
-    ) {
-        return true
-    }
-
-    /**
-     * if it has a status property, it should be 0
-     * (just here to stay backwards compatible to the jsonwire protocol)
-     */
-    if ('status' in body && body.status && body.status !== 0) {
-        log.debug(`request failed due to status ${body.status}`)
         return false
     }
 
@@ -291,28 +321,23 @@ export function isSuccessfulResponse (statusCode?: number, body?: unknown) {
 /**
  * creates the base prototype for the webdriver monad
  */
-export function getPrototype ({ isW3C, isChromium, isFirefox, isMobile, isSauce, isSeleniumStandalone }: Partial<SessionFlags>) {
+export function getPrototype ({ isChromium, isFirefox, isMobile, isSauce, isSeleniumStandalone }: Partial<SessionFlags>) {
     const prototype: Record<string, PropertyDescriptor> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ProtocolCommands = deepmerge<any>(
         /**
-         * if mobile apply JSONWire and WebDriver protocol because
-         * some legacy JSONWire commands are still used in Appium
-         * (e.g. set/get geolocation)
+         * if mobile also apply Appium protocol (geolocation, orientation,
+         * context, settings, and other endpoints current Appium 3 drivers still expose)
          */
         isMobile
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ? deepmerge<any>(AppiumProtocol as Protocol, WebDriverProtocol as Protocol) as Protocol
             : WebDriverProtocol,
         /**
-         * enable Bidi protocol for W3C sessions
+         * v10 sessions are W3C, so the BiDi command set is always present.
+         * A live BiDi connection still depends on `webSocketUrl`.
          */
-        isW3C ? WebDriverBidiProtocol : {},
-        /**
-         * only apply mobile protocol if session is actually for mobile
-         */
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        isMobile ? deepmerge<any>(MJsonWProtocol, AppiumProtocol) : {},
+        WebDriverBidiProtocol,
         /**
          * only apply special Chromium commands if session is using Chrome or Edge
          */
@@ -348,9 +373,8 @@ export function getPrototype ({ isW3C, isChromium, isFirefox, isMobile, isSauce,
  * @param  {Object} options   driver instance or option object containing these flags
  * @return {Object}           prototype object
  */
-export function getEnvironmentVars({ isW3C, isMobile, isIOS, isAndroid, isFirefox, isSauce, isSeleniumStandalone, isChromium, isWindowsApp, isMacApp }: Partial<SessionFlags>): PropertyDescriptorMap {
+export function getEnvironmentVars({ isMobile, isIOS, isAndroid, isFirefox, isSauce, isSeleniumStandalone, isChromium, isWindowsApp, isMacApp }: Partial<SessionFlags>): PropertyDescriptorMap {
     return {
-        isW3C: { value: isW3C },
         isMobile: { value: isMobile },
         isIOS: { value: isIOS },
         isAndroid: { value: isAndroid },
@@ -402,7 +426,7 @@ export function setupDirectConnect(client: Client) {
  * @param {Error} err response error
  * @param params
  */
-export const getSessionError = (err: JSONWPCommandError, params: Partial<Options.WebDriver> = {}) => {
+export const getSessionError = (err: SessionRequestError, params: Partial<Options.WebDriver> = {}) => {
     // browser driver / service is not started
     if (err.code === 'ECONNREFUSED') {
         return `Unable to connect to "${params.protocol}://${params.hostname}:${params.port}${params.path}", make sure browser driver is running on that address.` +
@@ -456,16 +480,43 @@ export const getSessionError = (err: JSONWPCommandError, params: Partial<Options
 }
 
 /**
+ * Build WebSocket client options for a BiDi connection.
+ *
+ * Always enables redirect following so Grid proxies that 301/302 from
+ * `ws://` to `wss://` (or another node) can be used. Custom headers are
+ * forwarded as-is, including to redirect targets. Grid redirects are
+ * expected to stay within trusted infrastructure; a misconfigured
+ * cross-host redirect would also forward credentials.
+ */
+export function getBidiRequestOptions (
+    strictSSL: boolean = true,
+    headers?: Record<string, string>
+): ClientOptions {
+    const bidiReqOpts: ClientOptions = { followRedirects: true, maxRedirects: 10 }
+    if (!strictSSL) {
+        bidiReqOpts.rejectUnauthorized = false
+    }
+    if (headers) {
+        bidiReqOpts.headers = headers
+    }
+    return bidiReqOpts
+}
+
+/**
  * Enhance the monad with WebDriver Bidi primitives if a connection can be established successfully
  * @param socketUrl url to bidi interface
  * @param strictSSL
  * @param userHeaders
+ * @param responseTimeout timeout for a Bidi command to receive a response from the browser
+ * @param connectTimeout timeout for the browser to accept the Bidi connection
  * @returns prototype with interface for bidi primitives
  */
 export function initiateBidi (
     socketUrl: string,
     strictSSL: boolean = true,
-    userHeaders?: Record<string, string>
+    userHeaders?: Record<string, string>,
+    responseTimeout?: number,
+    connectTimeout?: number
 ): PropertyDescriptorMap {
     /**
      * don't connect and stale unit tests when the websocket url is set to a dummy value
@@ -485,12 +536,12 @@ export function initiateBidi (
     }
 
     socketUrl = socketUrl.replace('localhost', '127.0.0.1')
-    const bidiReqOpts: { rejectUnauthorized?: boolean, headers?: Record<string, string> } = strictSSL ? {} : { rejectUnauthorized: false }
-    if (userHeaders) {
-        bidiReqOpts.headers = userHeaders
-    }
-    const handler = new BidiHandler(socketUrl, bidiReqOpts)
-    handler.connect().then((isConnected) => isConnected && log.info(`Connected to WebDriver Bidi interface at ${socketUrl}`))
+    const bidiReqOpts = getBidiRequestOptions(strictSSL, userHeaders)
+    const handler = new BidiHandler(socketUrl, bidiReqOpts, responseTimeout, connectTimeout)
+    handler.connect().then(
+        (isConnected) => isConnected && log.info(`Connected to WebDriver Bidi interface at ${socketUrl}`),
+        (err: Error) => log.error(`Could not connect to WebDriver Bidi interface at ${socketUrl}: ${err.message}`)
+    )
 
     return {
         _bidiHandler: { value: handler },
@@ -510,6 +561,41 @@ export function initiateBidi (
             }
             return acc
         }, {} as PropertyDescriptorMap)
+    }
+}
+
+/**
+ * Appium (since 2.15) gives its own WebDriver Bidi url to each session that asks for it,
+ * unless it forwards the socket to the browser driver. That server has no
+ * `browsingContext` or `script` module, so a browser session must use WebDriver Classic.
+ *
+ * @param  handler  the connected handler of an Appium browser session
+ * @param  timeout  how long to wait for the answer (`bidiConnectTimeout`): a server that never
+ *                  answers must not hold the session start for `bidiResponseTimeout`; a shorter
+ *                  `bidiResponseTimeout` ends the check first
+ * @param  advice   what the user can do, see `getAppiumBidiAdvice`
+ * @return `false` when the connection was discarded
+ */
+export async function discardBidiWithoutBrowsingContext (handler: BidiHandler, timeout: number, advice = '') {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+        await Promise.race([
+            handler.browsingContextGetTree({ maxDepth: 0 }),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`no answer within ${timeout}ms`)), timeout)
+            })
+        ])
+        return true
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        log.warn(
+            `The WebDriver Bidi server of this mobile session can not run browser commands (${reason}), ` +
+            `continue with WebDriver Classic. ${advice}To skip this check, set "wdio:enforceWebDriverClassic": true.`
+        )
+        handler.discard()
+        return false
+    } finally {
+        clearTimeout(timer)
     }
 }
 

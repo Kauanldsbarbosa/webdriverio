@@ -3,10 +3,21 @@ import path from 'node:path'
 
 import logger from '@wdio/logger'
 import { browser } from '@wdio/globals'
-import { executeHooksWithArgs } from '@wdio/utils'
-import { matchers } from 'expect-webdriverio'
+import { executeHooksWithArgs, getWdioKind } from '@wdio/utils'
+import { wdioCustomMatchers } from 'expect-webdriverio'
+import { some } from 'expect-webdriverio/api'
 import { ELEMENT_KEY } from 'webdriver'
-import { type Workers, type Services, MESSAGE_TYPES } from '@wdio/types'
+import {
+    MESSAGE_TYPES,
+    browserChannelMessage,
+    parseBrowserToRunnerMessage,
+    workerProcessEvent,
+    type AnyRunnerToBrowserMessage,
+    type BrowserTestEvent,
+    type CoverageMapPayload,
+    type Services,
+    type Workers,
+} from '@wdio/types'
 
 import { transformExpectArgs } from './utils.js'
 import type BaseReporter from './reporter.js'
@@ -19,15 +30,9 @@ const DEFAULT_TIMEOUT = 60 * 1000
 
 type WDIOErrorEvent = Partial<Pick<ErrorEvent, 'filename' | 'message' | 'error'>> & { hasViteError?: boolean }
 
-interface Event {
-    type: string
-    title: string
-    fullTitle: string
-    specs: string[]
-}
 interface TestState {
     failures: number
-    events: Event[]
+    events: BrowserTestEvent[]
     errors?: WDIOErrorEvent[]
     hasViteError?: boolean
 }
@@ -42,8 +47,9 @@ interface LogMessage {
 declare global {
     interface Window {
         __wdioErrors__: WDIOErrorEvent[]
-        __wdioEvents__: Event[]
+        __wdioEvents__: BrowserTestEvent[]
         __wdioFailures__: number
+        __wdioTestsStartedAt__?: number
         __coverage__?: unknown
     }
 }
@@ -153,11 +159,21 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
         /**
          * run checks for errors here to avoid breakage in communication with the browser
          */
+        let settled = false
         const errorInterval = setInterval(
-            this.#checkForTestError.bind(this),
+            /**
+             * `clearInterval` does not stop a check that is still waiting for the browser:
+             * its command can fail when the session ends, and its result no longer matters
+             */
+            () => this.#checkForTestError().catch((err) => {
+                if (!settled) {
+                    throw err
+                }
+            }),
             ERROR_CHECK_INTERVAL)
 
         const state: TestState = await testStatePromise
+        settled = true
         clearTimeout(testTimeout)
         clearInterval(errorInterval)
 
@@ -167,13 +183,15 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
         if (this.#runnerOptions.coverage?.enabled && process.send) {
             const coverageMap = await browser.execute(
                 () => (window.__coverage__ || {}))
+            const coverage = (
+                coverageMap && typeof coverageMap === 'object' && !Array.isArray(coverageMap)
+                    ? coverageMap
+                    : {}
+            ) as CoverageMapPayload
             const workerEvent: Workers.WorkerEvent = {
                 origin: 'worker',
                 name: 'workerEvent',
-                args: {
-                    type: MESSAGE_TYPES.coverageMap,
-                    value: coverageMap
-                }
+                args: workerProcessEvent(MESSAGE_TYPES.coverageMap, coverage)
             }
             process.send(workerEvent)
         }
@@ -219,47 +237,50 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             if ((ev.type === 'suite:start' || ev.type === 'suite:end') && ev.title === '') {
                 continue
             }
+            /**
+             * Mocha events include an error object. Reporter.emit types `error`
+             * as a string, so the formatted event is passed through as-is.
+             */
             this._reporter.emit(ev.type, {
                 ...ev,
                 file: spec,
-                uid: `${this._cid}-${Buffer.from(ev.fullTitle).toString('base64')}`,
+                uid: `${this._cid}-${Buffer.from(ev.fullTitle || ev.title || '').toString('base64')}`,
                 cid: this._cid
-            })
+            } as Parameters<BaseReporter['emit']>[1])
         }
         return state.failures || 0
     }
 
-    async #processMessage (cmd: Workers.WorkerRequest) {
+    async #processMessage (cmd: Workers.WorkerCommand) {
         if (cmd.command !== 'workerRequest' || !process.send) {
             return
         }
 
-        const { message, id } = cmd.args
-        if (message.type === MESSAGE_TYPES.hookTriggerMessage) {
+        const id = cmd.args?.id
+        const message = parseBrowserToRunnerMessage(cmd.args?.message)
+        if (typeof id !== 'number' || !message) {
+            return log.error(`Ignoring invalid browser channel message for cid ${this._cid}`)
+        }
+
+        switch (message.type) {
+        case MESSAGE_TYPES.hookTriggerMessage:
             return this.#handleHook(id, message.value)
-        }
-
-        if (message.type === MESSAGE_TYPES.consoleMessage) {
+        case MESSAGE_TYPES.consoleMessage:
             return this.#handleConsole(message.value)
-        }
-
-        if (message.type === MESSAGE_TYPES.commandRequestMessage) {
+        case MESSAGE_TYPES.commandRequestMessage:
             return this.#handleCommand(id, message.value)
-        }
-
-        if (message.type === MESSAGE_TYPES.expectRequestMessage) {
+        case MESSAGE_TYPES.expectRequestMessage:
             return this.#handleExpectation(id, message.value)
-        }
-
-        if (message.type === MESSAGE_TYPES.browserTestResult) {
+        case MESSAGE_TYPES.browserTestResult:
             return this.#handleTestFinish(message.value)
-        }
-
-        if (message.type === MESSAGE_TYPES.expectMatchersRequest) {
-            return this.#sendWorkerResponse(
-                id,
-                this.#expectMatcherResponse({ matchers: Array.from(matchers.keys()) })
-            )
+        case MESSAGE_TYPES.expectMatchersRequest:
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.expectMatchersResponse, {
+                matchers: Object.keys(wdioCustomMatchers)
+            }))
+        case MESSAGE_TYPES.initiateBrowserStateRequest:
+            return
+        default:
+            return assertBrowserChannelHandled(message)
         }
     }
 
@@ -274,24 +295,13 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             log.warn(`Failed running "${payload.name}" hook for cid ${payload.cid}: ${error.message}`)
         }
 
-        return this.#sendWorkerResponse(id, this.#hookResponse({ id: payload.id, error }))
+        return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.hookResultMessage, {
+            id: payload.id,
+            error
+        }))
     }
 
-    #expectMatcherResponse (value: Workers.ExpectMatchersResponse): Workers.SocketMessage {
-        return {
-            type: MESSAGE_TYPES.expectMatchersResponse,
-            value
-        }
-    }
-
-    #hookResponse (value: Workers.HookResultEvent): Workers.SocketMessage {
-        return {
-            type: MESSAGE_TYPES.hookResultMessage,
-            value
-        }
-    }
-
-    #sendWorkerResponse (id: number, message: Workers.SocketMessage) {
+    #sendWorkerResponse (id: number, message: AnyRunnerToBrowserMessage) {
         if (!process.send) {
             return
         }
@@ -321,9 +331,11 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
         log.debug(`Received browser message: ${JSON.stringify(payload)}`)
         const cid = payload.cid
         if (typeof cid !== 'string') {
-            const { message, stack } = new Error(`No "cid" property passed into command message with id "${payload.id}"`)
-            const error = { message, stack, name: 'Error' }
-            return this.#sendWorkerResponse(id, this.#commandResponse({ id: payload.id, error }))
+            const { message, stack, name } = new Error(`No "cid" property passed into command message with id "${payload.id}"`)
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.commandResponseMessage, {
+                id: payload.id,
+                error: { message, stack, name }
+            }))
         }
 
         try {
@@ -345,9 +357,15 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             let result = await (scope[payload.commandName as keyof typeof scope] as Function)(...payload.args)
 
             /**
+             * the result is awaited, so its `wdio.kind` brand (see `@wdio/utils` `kind.ts`)
+             * is the kind of a loaded object
+             */
+            const kind = getWdioKind(result)
+
+            /**
              * if result is an element, transform it into an element reference
              */
-            if (result?.constructor?.name === 'Element') {
+            if (kind === 'element') {
                 result = result.elementId
                     ? { [ELEMENT_KEY]: result.elementId }
                     : result.error
@@ -356,7 +374,7 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             /**
              * if result is an array of elements, transform it into an array of element references
              */
-            } else if (result?.foundWith) {
+            } else if (kind === 'element-array') {
                 /**
                  * need await here since ElementArray functions return a promise
                  */
@@ -365,19 +383,22 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
                 }))).filter(Boolean)
             }
 
-            const resultMsg = this.#commandResponse({ id: payload.id, result })
+            /**
+             * a mock or a browsing context is sent as JSON, which drops its brand, so send its kind
+             */
+            const response: Workers.CommandResponseEvent = { id: payload.id, result }
+            if (kind === 'mock' || kind === 'browsing-context') {
+                response.kind = kind
+            }
+            const resultMsg = browserChannelMessage(MESSAGE_TYPES.commandResponseMessage, response)
             log.debug(`Return command result: ${resultMsg}`)
             return this.#sendWorkerResponse(id, resultMsg)
         } catch (error: unknown) {
             const { message, stack, name } = error as Error
-            return this.#sendWorkerResponse(id, this.#commandResponse({ id: payload.id, error: { message, stack, name } }))
-        }
-    }
-
-    #commandResponse (value: Workers.CommandResponseEvent): Workers.SocketMessage {
-        return {
-            type: MESSAGE_TYPES.commandResponseMessage,
-            value
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.commandResponseMessage, {
+                id: payload.id,
+                error: { message, stack, name }
+            }))
         }
     }
 
@@ -395,33 +416,55 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
          */
         if (typeof cid !== 'string') {
             const message = `No "cid" property passed into expect request message with id "${payload.id}"`
-            return this.#sendWorkerResponse(id, this.#expectResponse({ id: payload.id, pass: false, message }))
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.expectResponseMessage, { id: payload.id, pass: false, message }))
         }
 
         /**
          * find matcher, e.g. `toBeDisplayed` or `toHaveTitle`
          */
-        const matcher = matchers.get(payload.matcherName)
+        const matcher = wdioCustomMatchers[payload.matcherName]
         if (!matcher) {
             const message = `Couldn't find matcher with name "${payload.matcherName}"`
-            return this.#sendWorkerResponse(id, this.#expectResponse({ id: payload.id, pass: false, message }))
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.expectResponseMessage, { id: payload.id, pass: false, message }))
         }
 
         try {
-            const context = payload.element
-                ? Array.isArray(payload.element)
-                    ? await browser.$$(payload.element)
-                    /**
-                     * check if element contains an `elementId` property, if so the element was already
-                     * found, so we can transform it into an `WebdriverIO.Element` object, if not we
-                     * need to find it first, so we pass in the selector.
-                     */
-                    : payload.element.elementId
-                        ? await browser.$(payload.element)
-                        : await browser.$(payload.element.selector)
-                : payload.context || browser
-            const result = await matcher.apply(payload.scope, [context, ...payload.args.map(transformExpectArgs)])
-            return this.#sendWorkerResponse(id, this.#expectResponse({
+            const isSome = payload.scope.isSome
+            let received = payload.element
+
+            const refetchElement = async (element: WebdriverIO.Element) => {
+                /**
+                 * When having `elementId`, element was already found and it is transformed into an `WebdriverIO.Element`,
+                 * If not we need to find it first with the selector.
+                 */
+                return element.elementId
+                    ? await browser.$(element)
+                    : await browser.$(element.selector)
+            }
+
+            /**
+             * refetch the elements to get fresh references. The page sends the kind of
+             * the element, because JSON drops the properties of an element list.
+             */
+            if (!received) {
+                received = payload.context || browser
+            } else if (payload.elementKind === 'element-array') {
+                received = await browser.$$(received)
+            } else if (payload.elementKind === 'element') {
+                received = await refetchElement(received)
+            } else if (Array.isArray(received)) {
+                // a copy of an element list (WebdriverIO.Element[])
+                received = await Promise.all(received.map(refetchElement))
+            } else {
+                throw new Error(`Received value is not an element or array of elements: ${JSON.stringify(received)}`)
+            }
+
+            if (isSome) {
+                received = some(received as WebdriverIO.Element[] | WebdriverIO.ElementArray | ChainablePromiseArray)
+            }
+
+            const result = await matcher.apply(payload.scope, [received, ...payload.args.map(transformExpectArgs)])
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.expectResponseMessage, {
                 id: payload.id,
                 pass: result.pass,
                 message: result.message()
@@ -429,14 +472,7 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
         } catch (err) {
             const errorMessage = err instanceof Error ? (err as Error).stack : err
             const message = `Failed to execute expect command "${payload.matcherName}": ${errorMessage}`
-            return this.#sendWorkerResponse(id, this.#expectResponse({ id: payload.id, pass: false, message }))
-        }
-    }
-
-    #expectResponse (value: Workers.ExpectResponseEvent): Workers.SocketMessage {
-        return {
-            type: MESSAGE_TYPES.expectResponseMessage,
-            value
+            return this.#sendWorkerResponse(id, browserChannelMessage(MESSAGE_TYPES.expectResponseMessage, { id: payload.id, pass: false, message }))
         }
     }
 
@@ -470,7 +506,7 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
                 ?  [{ message: `Failed to load test page (title = "${document.title}", source: ${document.documentElement.innerHTML})` }]
                 : null
             const errors = viteError || window.__wdioErrors__ || loadError
-            return { errors, hasViteError: Boolean(viteError) }
+            return { errors, hasViteError: Boolean(viteError), testsStartedAt: window.__wdioTestsStartedAt__ }
         }).catch((err) => {
             /**
              * ignore error, see https://github.com/GoogleChromeLabs/chromium-bidi/issues/1102
@@ -486,11 +522,12 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             return
         }
 
-        if ((testError.errors && testError.errors.length > 0) || testError.hasViteError) {
+        const { testsStartedAt: startedAtBeforeLogs, ...executionState } = testError
+        if ((executionState.errors && executionState.errors.length > 0) || executionState.hasViteError) {
             this.#resolveTestStatePromise?.({
                 events: [],
                 failures: 1,
-                ...testError
+                ...executionState
             })
         }
 
@@ -501,13 +538,28 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
             ? (await browser.getLogs('browser').catch(() => []))
             : []
         const severeLogs = logs.filter((log: LogMessage) => log.level === 'SEVERE' && log.source !== 'deprecation') as LogMessage[]
-        if (severeLogs.length) {
-            if (!this.#retryOutdatedOptimizeDep && severeLogs.some((log) => log.message?.includes('(Outdated Optimize Dep)'))) {
-                log.info('Retry test run due to outdated optimize dep')
-                this.#retryOutdatedOptimizeDep = true
-                return browser.refresh()
-            }
+        if (!this.#retryOutdatedOptimizeDep && severeLogs.some((log) => log.message?.includes('(Outdated Optimize Dep)'))) {
+            log.info('Retry test run due to outdated optimize dep')
+            this.#retryOutdatedOptimizeDep = true
+            return browser.refresh()
+        }
 
+        /**
+         * Once Mocha runs the tests, an error in the browser log belongs to a test
+         * (a caught failed request, a `console.error`, an invalid attribute): Mocha
+         * reports the test result, so it must not end the spec. Only errors logged
+         * before the tests started (setup) end it.
+         *
+         * Mocha can start between the execution state read above and `getLogs`,
+         * so without a start time, read it again after the logs.
+         */
+        const testsStartedAt = typeof startedAtBeforeLogs !== 'number' && severeLogs.length
+            ? await browser.execute(() => window.__wdioTestsStartedAt__).catch(() => undefined)
+            : startedAtBeforeLogs
+        const setupLogs = typeof testsStartedAt === 'number'
+            ? severeLogs.filter((log) => log.timestamp < testsStartedAt)
+            : severeLogs
+        if (setupLogs.length) {
             this.#resolveTestStatePromise?.({
                 events: [],
                 failures: 1,
@@ -516,7 +568,7 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
                  * error messages often look like:
                  * "http://localhost:40167/node_modules/.vite/deps/expect.js?v=bca8e2f3 - Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep)"
                  */
-                errors: severeLogs.map((log) => {
+                errors: setupLogs.map((log) => {
                     const [filename, message] = log.message!.split(' - ')
                     return {
                         filename: filename.startsWith('http') ? filename : undefined,
@@ -531,4 +583,11 @@ export default class BrowserFramework implements Omit<TestFramework, 'init'> {
         const framework = new BrowserFramework(cid, config, specs, reporter)
         return framework
     }
+}
+
+function assertBrowserChannelHandled (message: never): never {
+    const type = message && typeof message === 'object'
+        ? String((message as { type?: unknown }).type)
+        : 'unknown'
+    throw new Error(`Unhandled browser channel message (${type})`)
 }

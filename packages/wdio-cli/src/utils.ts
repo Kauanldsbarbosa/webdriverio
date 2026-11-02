@@ -9,6 +9,7 @@ import type { Capabilities, Services } from '@wdio/types'
 import {
     ANDROID_CONFIG,
     IOS_CONFIG,
+    TS_FILE_EXTENSIONS,
 } from './constants.js'
 import type {
     OnCompleteResult,
@@ -16,6 +17,125 @@ import type {
 } from './types.js'
 
 const log = logger('@wdio/cli:utils')
+
+const TS_PATH_HINT = /\.(m|c)?tsx?(?:$|[?*])/
+
+/**
+ * True when a path, glob, or require entry looks like TypeScript source.
+ */
+export function looksLikeTypeScriptPath (value: string): boolean {
+    return TS_PATH_HINT.test(value.replace(/\\/g, '/'))
+}
+
+/**
+ * Collect string paths from specs / suites / framework require options.
+ */
+function collectConfigPaths (config: Partial<WebdriverIO.Config>): string[] {
+    const paths: string[] = []
+    const push = (value: unknown) => {
+        if (typeof value === 'string') {
+            paths.push(value)
+        } else if (Array.isArray(value)) {
+            for (const item of value) {
+                push(item)
+            }
+        } else if (value && typeof value === 'object') {
+            for (const item of Object.values(value as Record<string, unknown>)) {
+                push(item)
+            }
+        }
+    }
+
+    push(config.specs)
+    push(config.exclude)
+    push((config as { spec?: string | string[] }).spec)
+    push((config as { suite?: string | string[] }).suite)
+    if (config.suites) {
+        push(Object.values(config.suites))
+    }
+    push(config.mochaOpts?.require)
+    push((config.jasmineOpts as { require?: unknown, requires?: unknown } | undefined)?.requires)
+    push((config.jasmineOpts as { require?: unknown, requires?: unknown } | undefined)?.require)
+    push(config.cucumberOpts?.require)
+    push(config.cucumberOpts?.requireModule)
+
+    return paths
+}
+
+/**
+ * Specs declared on capabilities via `wdio:specs` / `wdio:exclude` are not
+ * always mirrored on the top-level config object.
+ */
+function collectCapabilityPaths (
+    capabilities?: Capabilities.TestrunnerCapabilities
+): string[] {
+    if (!capabilities) {
+        return []
+    }
+
+    const paths: string[] = []
+    const push = (value: unknown) => {
+        if (typeof value === 'string') {
+            paths.push(value)
+        } else if (Array.isArray(value)) {
+            for (const item of value) {
+                push(item)
+            }
+        }
+    }
+
+    const entries = Array.isArray(capabilities)
+        ? capabilities
+        : Object.values(capabilities)
+
+    for (const entry of entries) {
+        const caps = (
+            entry && typeof entry === 'object' && 'capabilities' in entry
+                ? (entry as { capabilities: WebdriverIO.Capabilities }).capabilities
+                : entry
+        ) as WebdriverIO.Capabilities
+        if (!caps || typeof caps !== 'object') {
+            continue
+        }
+        push(caps['wdio:specs'])
+        push(caps['wdio:exclude'])
+    }
+
+    return paths
+}
+
+/**
+ * Decide whether the launcher / worker processes need the tsx loader.
+ */
+export function shouldEnableTsx (
+    configFilePath: string,
+    args: Partial<{ tsConfigPath?: string }> = {},
+    config?: Partial<WebdriverIO.Config>,
+    capabilities?: Capabilities.TestrunnerCapabilities
+): boolean {
+    if (TS_FILE_EXTENSIONS.some((ext) => configFilePath.endsWith(ext))) {
+        return true
+    }
+    if (typeof args.tsConfigPath === 'string' && args.tsConfigPath.length > 0) {
+        return true
+    }
+    if (config && collectConfigPaths(config).some(looksLikeTypeScriptPath)) {
+        return true
+    }
+    return collectCapabilityPaths(capabilities).some(looksLikeTypeScriptPath)
+}
+
+/**
+ * Ensure tsx is registered for the current process and inherited by workers.
+ */
+export async function enableTsx (importMetaUrl = import.meta.url): Promise<string> {
+    const { resolve } = await import('import-meta-resolve')
+    const tsxPath = resolve('tsx', importMetaUrl)
+    if (!process.env.NODE_OPTIONS || !process.env.NODE_OPTIONS.includes(tsxPath)) {
+        process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS || ''} --import ${tsxPath}`
+    }
+    return tsxPath
+}
 
 export class HookError extends SevereServiceError {
     public origin: string
@@ -140,31 +260,20 @@ export function getRunnerName(caps: WebdriverIO.Capabilities = {}) {
     return runner
 }
 
-export function findInConfig(config: string, type: string) {
-    let regexStr = `[\\/\\/]*[\\s]*${type}s: [\\s]*\\[([\\s]*['|"]\\w*['|"],*)*[\\s]*\\]`
-
-    if (type === 'framework') {
-        regexStr = `[\\/\\/]*[\\s]*${type}: ([\\s]*['|"]\\w*['|"])`
-    }
-
-    const regex = new RegExp(regexStr, 'gmi')
-    return config.match(regex)
-}
-
 export async function getCapabilities(arg: ReplCommandArguments) {
     const optionalCapabilites = {
-        platformVersion: arg.platformVersion,
-        udid: arg.udid,
-        ...(arg.deviceName && { deviceName: arg.deviceName })
+        'appium:platformVersion': arg.platformVersion,
+        'appium:udid': arg.udid,
+        ...(arg.deviceName && { 'appium:deviceName': arg.deviceName })
     }
     /**
-     * Parsing of option property and constructing desiredCapabilities
-     * for Appium session. Could be application(1) or browser(2-3) session.
+     * Build capabilities for an Appium session from the repl argument.
+     * The target is an application, or a mobile browser.
      */
     if (/.*\.(apk|app|ipa)$/.test(arg.option)) {
         return {
             capabilities: {
-                app: arg.option,
+                'appium:app': arg.option,
                 ...(arg.option.endsWith('apk') ? ANDROID_CONFIG : IOS_CONFIG),
                 ...optionalCapabilites,
             }
@@ -173,7 +282,17 @@ export async function getCapabilities(arg: ReplCommandArguments) {
         return { capabilities: { browserName: 'Chrome', ...ANDROID_CONFIG, ...optionalCapabilites } }
     } else if (/ios/.test(arg.option)) {
         return { capabilities: { browserName: 'Safari', ...IOS_CONFIG, ...optionalCapabilites } }
-    } else if (/(js|ts)$/.test(arg.option)) {
+    } else if (/\.(m|c)?(js|tsx?)$/.test(arg.option)) {
+        /**
+         * Load tsx before attempting to read the config file if it's TypeScript.
+         * This prevents "Unknown file extension" errors when parsing the config.
+         */
+        if (TS_FILE_EXTENSIONS.some((ext) => arg.option.endsWith(ext))) {
+            const { resolve } = await import('import-meta-resolve')
+            const tsxPath = resolve('tsx', import.meta.url)
+            await import(tsxPath)
+        }
+
         const config = new ConfigParser(arg.option)
         try {
             await config.initialize()
@@ -188,8 +307,8 @@ export async function getCapabilities(arg: ReplCommandArguments) {
         requiredCaps = (
             // multi capabilities
             (requiredCaps as (Capabilities.RequestedStandaloneCapabilities)[])[parseInt(arg.capabilities, 10)] ||
-            // multiremote
-            (requiredCaps as Capabilities.RequestedMultiremoteCapabilities)[arg.capabilities]?.capabilities
+            // Multi-remote
+            (requiredCaps as Capabilities.RequestedMultiRemoteCapabilities)[arg.capabilities]?.capabilities
         )
         const requiredW3CCaps = pickBy(requiredCaps, (_: never, key: string) => CAPABILITY_KEYS.includes(key) || key.includes(':'))
         if (!Object.keys(requiredW3CCaps).length) {
@@ -224,19 +343,18 @@ const cucumberTypes: Record<string, string> = {
     tagsInTitle: 'boolean',
     ignoreUndefinedDefinitions: 'boolean',
     failAmbiguousDefinitions: 'boolean',
-    tagExpression: 'string',
     profiles: 'array',
     file: 'string'
 }
 
 const mochaTypes: Record<string, string> = {
     require: 'array',
-    compilers: 'array',
     allowUncaught: 'boolean',
     asyncOnly: 'boolean',
     bail: 'boolean',
     checkLeaks: 'boolean',
     delay: 'boolean',
+    failHookAffectedTests: 'boolean',
     fgrep: 'string',
     forbidOnly: 'boolean',
     forbidPending: 'boolean',
@@ -255,14 +373,12 @@ const jasmineTypes: Record<string, string> = {
     requires: 'array',
     random: 'boolean',
     seed: 'string',
-    failFast: 'boolean',
     failSpecWithNoExpectations: 'boolean',
     oneFailurePerSpec: 'boolean',
     grep: 'string',
     invertGrep: 'boolean',
     cleanStack: 'boolean',
     stopOnSpecFailure: 'boolean',
-    stopSpecOnExpectationFailure: 'boolean',
     requireModule: 'array',
 }
 
@@ -296,14 +412,4 @@ export function coerceOptsFor(framework: 'cucumber' | 'mocha' | 'jasmine') {
     }
 
     throw new Error(`Unsupported framework "${framework}"`)
-}
-
-enum NodeVersion {
-    'major' = 0,
-    'minor' = 1,
-    'patch' = 2
-}
-
-export function nodeVersion(type: keyof typeof NodeVersion): number {
-    return process.versions.node.split('.').map(Number)[NodeVersion[type]]
 }

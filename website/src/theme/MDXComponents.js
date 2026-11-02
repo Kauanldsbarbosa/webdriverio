@@ -8,10 +8,12 @@ import TabItem from '@theme/TabItem'
 // custom components
 import { CreateProjectAnimation, CreateMacOSProjectAnimation } from '../components/CreateProjectAnimation.tsx'
 import { ImageSwitcher } from '../components/ImageSwitcher.tsx'
-import { CreateFlowcharts } from '../components/CreateFlowcharts.tsx'
 import { EventList, EventSignup, EventDetails } from '../components/Events.tsx'
 import { PhoneMock } from '../components/phoneMock.tsx'
 import Card from './card.tsx'
+import TierIcon from '../components/TierIcon.tsx'
+import Option from '../components/Option.tsx'
+import SessionTarget from '../components/session/SessionTarget.tsx'
 
 export default {
     // Re-use the default mapping
@@ -22,10 +24,12 @@ export default {
     LiteYouTubeEmbed,
     CreateProjectAnimation,
     CreateMacOSProjectAnimation,
-    CreateFlowcharts,
     EventList,
     EventSignup,
     EventDetails,
     Card,
-    PhoneMock
+    PhoneMock,
+    TierIcon,
+    Option,
+    SessionTarget,
 }

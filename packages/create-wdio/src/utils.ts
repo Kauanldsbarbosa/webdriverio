@@ -3,10 +3,9 @@ import path from 'node:path'
 import util, { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import { execSync } from 'node:child_process'
-import readDir from 'recursive-readdir'
 
 import { $ } from 'execa'
-import { readPackageUp } from 'read-pkg-up'
+import { readPackageUp } from 'read-package-up'
 
 import { EjsHelpers } from './templates/EjsHelpers.js'
 
@@ -21,6 +20,7 @@ import { COMMUNITY_PACKAGES_WITH_TS_SUPPORT, DEPENDENCIES_INSTALLATION_MESSAGE, 
 import type { ParsedAnswers, ProjectProps, Questionnair, SupportedPackage } from './types.js'
 import chalk from 'chalk'
 import { getInstallCommand, installPackages } from './install.js'
+import { assertAnswerFlagsApply } from './answerFlags.js'
 
 const NPM_COMMAND = /^win/.test(process.platform) ? 'npm.cmd' : 'npm'
 
@@ -36,12 +36,21 @@ const TEMPLATE_ROOT_DIR = process.env.WDIO_UNIT_TESTS
     ? path.join(__dirname, 'templates', 'exampleFiles')
     : path.join(__dirname, '..', 'templates', 'exampleFiles')
 
-export function runProgram(command: string, args: string[], options: SpawnOptions) {
+/**
+ * @param passUsageError  exit with the child's code 2 (a usage error the child
+ *                        already explained, e.g. `wdio config` rejecting a flag)
+ *                        instead of reporting a generic failure
+ */
+export function runProgram(command: string, args: string[], options: SpawnOptions, passUsageError = false) {
     const child = spawn(command, args, { stdio: 'inherit', ...options })
     return new Promise<void>((resolve, rejects) => {
         let error: Error
         child.on('error', (e) => (error = e))
         child.on('close', (code, signal) => {
+            if (passUsageError && code === 2) {
+                process.exit(2)
+                return rejects(`Usage error calling: ${command} ${args.join(' ')}`)
+            }
             if (code !== 0) {
                 const errorMessage = (error && error.message) || `Error calling: ${command} ${args.join(' ')}`
                 printAndExit(errorMessage, signal)
@@ -78,52 +87,79 @@ export function convertPackageHashToObject(pkg: string, hash = '$--$'): Supporte
     return { package: p, short, purpose }
 }
 
-export async function getAnswers(yes: boolean): Promise<Questionnair> {
-    if (yes) {
-        const ignoredQuestions = ['e2eEnvironment']
-        const filteredQuestionaire = QUESTIONNAIRE.filter((question) => !ignoredQuestions.includes(question.name))
-        const answers = {} as Questionnair
-        for (const question of filteredQuestionaire) {
-            /**
-             * set nothing if question doesn't apply
-             */
-            if (question.when && !question.when(answers)) {
-                continue
-            }
+/**
+ * @param yes            fill in defaults instead of prompting
+ * @param flagAnswers    answers given as command line flags, these questions are not asked
+ */
+export async function getAnswers(yes: boolean, flagAnswers: Partial<Questionnair> = {}): Promise<Questionnair> {
+    const answers = yes
+        ? await getDefaultAnswers(flagAnswers)
+        : await promptAnswers(flagAnswers)
+    assertAnswerFlagsApply(flagAnswers, answers)
+    return answers
+}
 
-            Object.assign(answers, {
-                [question.name]: typeof question.default !== 'undefined'
-                    /**
-                     * set default value if existing
-                     */
-                    ? typeof question.default === 'function'
-                        ? await question.default(answers)
-                        : question.default
-                    : question.choices && question.choices.length
-                        /**
-                         * pick first choice, select value if it exists
-                         */
-                        ? typeof question.choices === 'function'
-                            ? (question.choices(answers)[0] as unknown as { value: unknown }).value
-                                ? (question.choices(answers)[0] as unknown as { value: unknown }).value
-                                : question.choices(answers)[0]
-                            : (question.choices[0] as { value: unknown }).value
-                                ? question.type === 'checkbox'
-                                    ? [(question.choices[0] as { value: unknown }).value]
-                                    : (question.choices[0] as { value: unknown }).value
-                                : question.choices[0]
-                        : {}
-            })
-        }
+async function getDefaultAnswers(flagAnswers: Partial<Questionnair>): Promise<Questionnair> {
+    const ignoredQuestions = ['e2eEnvironment']
+    const filteredQuestionaire = QUESTIONNAIRE.filter((question) => !ignoredQuestions.includes(question.name))
+    const answers = { ...flagAnswers } as Questionnair
+    for (const question of filteredQuestionaire) {
         /**
-         * some questions have async defaults
+         * keep answers given as flags
          */
-        answers.isUsingTypeScript = await answers.isUsingTypeScript
-        answers.specs = await answers.specs
-        answers.pages = await answers.pages
-        return answers
-    }
+        if (Object.prototype.hasOwnProperty.call(flagAnswers, question.name)) {
+            continue
+        }
 
+        /**
+         * set nothing if question doesn't apply
+         */
+        if (question.when && !question.when(answers)) {
+            continue
+        }
+
+        /**
+         * leave a free text question without a default unanswered, so the
+         * templates use their own fallback (e.g. the default Tauri binary)
+         */
+        if (typeof question.default === 'undefined' && !question.choices) {
+            continue
+        }
+
+        Object.assign(answers, {
+            [question.name]: typeof question.default !== 'undefined'
+                /**
+                 * set default value if existing
+                 */
+                ? typeof question.default === 'function'
+                    ? await question.default(answers)
+                    : question.default
+                : question.choices && question.choices.length
+                    /**
+                     * pick first choice, select value if it exists
+                     */
+                    ? typeof question.choices === 'function'
+                        ? (question.choices(answers)[0] as unknown as { value: unknown }).value
+                            ? (question.choices(answers)[0] as unknown as { value: unknown }).value
+                            : question.choices(answers)[0]
+                        : (question.choices[0] as { value: unknown }).value
+                            ? question.type === 'checkbox'
+                                ? [(question.choices[0] as { value: unknown }).value]
+                                : (question.choices[0] as { value: unknown }).value
+                            : question.choices[0]
+                    : {}
+        })
+    }
+    /**
+     * some questions have async defaults
+     */
+    answers.isUsingTypeScript = await answers.isUsingTypeScript
+    answers.specs = await answers.specs
+    answers.pages = await answers.pages
+    return answers
+}
+
+async function promptAnswers(flagAnswers: Partial<Questionnair>): Promise<Questionnair> {
     const projectProps = await getProjectProps(process.cwd())
     const isProjectExisting = Boolean(projectProps)
     const nameInPackageJsonIsNotCreateWdioDefault = projectProps?.packageJson?.name !== 'my-new-project'
@@ -160,7 +196,7 @@ export async function getAnswers(yes: boolean): Promise<Questionnair> {
     }
 
     // @ts-ignore
-    return inquirer.prompt(QUESTIONNAIRE, answers)
+    return inquirer.prompt(QUESTIONNAIRE, { ...answers, ...flagAnswers })
 }
 
 /**
@@ -261,12 +297,8 @@ export async function createPackageJSON(parsedAnswers: ParsedAnswers) {
 
     // If a user said no to creating a package.json, but it doesn't exist, abort.
     if (parsedAnswers.createPackageJSON === false) {
-        /* istanbul ignore if */
-        if (!packageJsonExists) {
-            console.log(`No WebdriverIO configuration found in "${parsedAnswers.wdioConfigPath}"`)
-            return !process.env.WDIO_UNIT_TESTS && process.exit(0)
-        }
-        return
+        console.log(`No WebdriverIO configuration found in "${parsedAnswers.wdioConfigPath}"`)
+        process.exit(0)
     }
 
     // Only create if the user gave explicit permission to
@@ -297,12 +329,11 @@ export async function setupTypeScript(parsedAnswers: ParsedAnswers) {
     }
 
     /**
-     * don't set up TypeScript if a `tsconfig.json` already exists but ensure we install `tsx`
-     * as it is a requirement for running tests with TypeScript
+     * Always generate a dedicated WDIO TypeScript config. If a root
+     * `tsconfig.json` already exists, the generated file (typically
+     * `tsconfig.e2e.json`) extends it so WDIO types are available without
+     * overwriting project compiler options.
      */
-    if (parsedAnswers.hasRootTSConfig) {
-        return
-    }
 
     console.log('Setting up TypeScript...')
     const frameworkPackage = convertPackageHashToObject(parsedAnswers.rawAnswers.framework)
@@ -332,13 +363,16 @@ export async function setupTypeScript(parsedAnswers: ParsedAnswers) {
     ]
 
     const preset = getPreset(parsedAnswers)
-    const config = {
+    const config: Record<string, unknown> & { include?: string[] } = {
         compilerOptions: {
             // compiler
-            moduleResolution: 'node',
-            module: !parsedAnswers.esmSupport ? 'commonjs' : 'ESNext',
-            target: 'es2022',
-            lib: ['es2022', 'dom'],
+            // TypeScript 6 deprecates `moduleResolution: 'node'` (node10). ESM uses
+            // `bundler`, which resolves imports as `tsx` does; CommonJS uses `NodeNext`,
+            // which follows the `type` of the project's package.json.
+            moduleResolution: parsedAnswers.esmSupport ? 'bundler' : 'NodeNext',
+            module: parsedAnswers.esmSupport ? 'ESNext' : 'NodeNext',
+            target: 'es2024',
+            lib: ['es2024', 'dom'],
             types,
             skipLibCheck: true,
             // bundler
@@ -384,16 +418,70 @@ export async function setupTypeScript(parsedAnswers: ParsedAnswers) {
                     }
                     : {}
             )
-        },
-        include: preset === 'svelte'
-            ? ['src/**/*.d.ts', 'src/**/*.ts', 'src/**/*.js', 'src/**/*.svelte']
-            : preset === 'vue'
-                ? ['src/**/*.ts', 'src/**/*.d.ts', 'src/**/*.tsx', 'src/**/*.vue']
-                : ['test', 'wdio.conf.ts']
+        }
     }
 
+    const tsConfigDir = path.dirname(parsedAnswers.tsConfigFilePath)
+    const toPosix = (value: string) => value.replace(/\\/g, '/')
+    const getRelativePath = (target: string) => {
+        const relativePath = toPosix(
+            path.relative(tsConfigDir, path.resolve(parsedAnswers.projectRootDir, target))
+        )
+        return relativePath || '.'
+    }
+    /**
+     * TypeScript treats a non-relative `extends` value as a package name, so
+     * same-directory references must be explicit, e.g. `./tsconfig.json`.
+     */
+    const toExtendsPath = (target: string) => {
+        const relativePath = getRelativePath(target)
+        if (
+            relativePath === '.' ||
+            relativePath.startsWith('./') ||
+            relativePath.startsWith('../') ||
+            path.isAbsolute(relativePath)
+        ) {
+            return relativePath
+        }
+        return `./${relativePath}`
+    }
+
+    if (parsedAnswers.hasRootTSConfig) {
+        config.extends = toExtendsPath('tsconfig.json')
+    }
+
+    const defaultSpecInclude = (
+        (parsedAnswers.destSpecRootPath && path.relative(parsedAnswers.projectRootDir, parsedAnswers.destSpecRootPath)) ||
+        (
+            parsedAnswers.specs &&
+            path.dirname(
+                parsedAnswers.specs
+                    .split(/[\\/]/)
+                    .filter((segment) => !segment.includes('*'))
+                    .join(path.sep)
+            )
+        ) ||
+        'test'
+    ).replace(/\\/g, '/')
+
+    const defaultWdioConfigInclude = (
+        (parsedAnswers.wdioConfigPath && path.relative(parsedAnswers.projectRootDir, parsedAnswers.wdioConfigPath)) ||
+        'wdio.conf.ts'
+    ).replace(/\\/g, '/')
+
+    const baseIncludes = preset === 'svelte'
+        ? ['src/**/*.d.ts', 'src/**/*.ts', 'src/**/*.js', 'src/**/*.svelte']
+        : preset === 'vue'
+            ? ['src/**/*.ts', 'src/**/*.d.ts', 'src/**/*.tsx', 'src/**/*.vue']
+            : [
+                defaultSpecInclude && defaultSpecInclude !== '.' ? defaultSpecInclude : 'test',
+                defaultWdioConfigInclude && defaultWdioConfigInclude !== '.' ? defaultWdioConfigInclude : 'wdio.conf.ts'
+            ]
+
+    Object.assign(config, { include: baseIncludes.map(getRelativePath) })
+
     if (parsedAnswers.framework === 'cucumber') {
-        config.include.push('features')
+        config.include!.push(getRelativePath('features'))
     }
 
     await fs.mkdir(path.dirname(parsedAnswers.tsConfigFilePath), { recursive: true })
@@ -523,15 +611,17 @@ function getPreset(parsedAnswers: ParsedAnswers) {
 }
 export function addServiceDeps(names: SupportedPackage[], packages: string[], update = false) {
     /**
-     * install Appium if it is not installed globally if `@wdio/appium-service`
-     * was selected for install
+     * Install Appium 3+ when `@wdio/appium-service` is selected. Reuse a global
+     * Appium binary only when it is already major 3 or newer.
      */
     if (names.some(({ short }) => short === 'appium')) {
         const result = execSync('appium --version || echo APPIUM_MISSING', { stdio: 'pipe' }).toString().trim()
-        if (result === 'APPIUM_MISSING') {
-            packages.push('appium')
-        } else if (update) {
+        const major = Number.parseInt(result.replace(/^v/i, '').split('.')[0] || '', 10)
+        const hasAppium3 = result !== 'APPIUM_MISSING' && !Number.isNaN(major) && major >= 3
 
+        if (!hasAppium3) {
+            packages.push('appium@^3')
+        } else if (update) {
             console.log(
                 '\n=======',
                 '\nUsing globally installed appium', result,
@@ -570,18 +660,13 @@ export async function createWDIOScript(parsedAnswers: ParsedAnswers) {
     const rootDir = await getProjectRoot(parsedAnswers)
     const pathToWdioConfig = `./${path.join('.', parsedAnswers.wdioConfigPath.replace(rootDir, ''))}`
 
-    const wdioScripts = {
+    const scripts: Record<string, string> = {
         'wdio': `wdio run ${pathToWdioConfig}`,
     }
 
-    const serenityScripts = {
-        'serenity': 'failsafe serenity:clean wdio serenity:report',
-        'serenity:clean': 'rimraf target',
-        'wdio': `wdio run ${pathToWdioConfig}`,
-        'serenity:report': 'serenity-bdd run',
+    if (parsedAnswers.serenityAdapter) {
+        scripts['serenity:report'] = 'serenity-js serve --dir ./reports/serenity-js --open'
     }
-
-    const scripts = parsedAnswers.serenityAdapter ? serenityScripts : wdioScripts
 
     for (const [script, command] of Object.entries(scripts)) {
 
@@ -604,9 +689,23 @@ export async function createWDIOScript(parsedAnswers: ParsedAnswers) {
 }
 /* c8 ignore stop */
 
-export async function runAppiumInstaller(parsedAnswers: ParsedAnswers) {
+/**
+ * @param yes  `--yes` was passed, so don't prompt
+ */
+export async function runAppiumInstaller(parsedAnswers: ParsedAnswers, yes = false) {
     if (parsedAnswers.e2eEnvironment !== 'mobile') {
         return
+    }
+
+    /**
+     * appium-installer is interactive, so skip it with `--yes` and when a
+     * coding agent or a CI job runs the wizard without a terminal
+     */
+    if (yes || !process.stdin.isTTY) {
+        return console.log(
+            'Skipping the interactive Appium installer. ' +
+            'Run `npx appium-installer` later, or see https://appium.io/docs/en/latest/quickstart/'
+        )
     }
 
     const answer = await inquirer.prompt({
@@ -649,11 +748,9 @@ export function getSerenityPackages(answers: Questionnair): string[] {
             '@serenity-js/assertions',
             '@serenity-js/console-reporter',
             '@serenity-js/core',
+            '@serenity-js/html-reporter',
             '@serenity-js/rest',
-            '@serenity-js/serenity-bdd',
             '@serenity-js/web',
-            'npm-failsafe',
-            'rimraf',
         ]
     }
 
@@ -715,6 +812,12 @@ export async function detectCompiler(answers: Questionnair) {
 
 const VERSION_REGEXP = /(\d+)\.(\d+)\.(\d+)-(alpha|beta|)\.(\d+)\+(.+)/g
 /**
+ * `@wdio`-scoped packages released on their own cadence rather than with the
+ * monorepo. Pinning one to the CLI's version asks npm for a release it never
+ * published, which fails the install for anyone running the wizard off a prerelease.
+ */
+const INDEPENDENTLY_VERSIONED_PACKAGES = ['@wdio/visual-service', '@wdio/devtools-service']
+/**
  * Ensure core WebdriverIO packages have the same version as cli so that if someone
  * installs `@wdio/cli@next` and runs the wizard, all related packages have the same version.
  * running `matchAll` to a version like "8.0.0-alpha.249+4bc237701", results in:
@@ -725,7 +828,7 @@ export function specifyVersionIfNeeded(packagesToInstall: string[], version: str
     const [major, minor, patch, tagName, build] = (value || []).slice(1, -1) // drop commit bit
     return packagesToInstall.map((p) => {
         if (
-            (p.startsWith('@wdio') && p !== '@wdio/visual-service') ||
+            (p.startsWith('@wdio') && !INDEPENDENTLY_VERSIONED_PACKAGES.includes(p)) ||
             ['webdriver', 'webdriverio'].includes(p)
         ) {
             const tag = major && npmTag === 'latest'
@@ -752,10 +855,17 @@ export async function generateTestFiles(answers: ParsedAnswers) {
     return generateBrowserRunnerTestFiles(answers)
 }
 
+/**
+ * list all files below a directory, recursively
+ */
+async function readDir (dir: string) {
+    const entries = await fs.readdir(dir, { recursive: true, withFileTypes: true })
+    return entries.filter((entry) => entry.isFile()).map((entry) => path.join(entry.parentPath, entry.name))
+}
+
 /* c8 ignore start */
 async function generateSerenityExamples(answers: ParsedAnswers): Promise<void> {
     const templateDirectories = Object.entries({
-        [answers.projectRootDir]: path.join(TEMPLATE_ROOT_DIR, 'serenity-js', 'common', 'config'),
         [answers.destSpecRootPath]: path.join(TEMPLATE_ROOT_DIR, 'serenity-js', answers.serenityAdapter as string),
         [answers.destSerenityLibRootPath]: path.join(TEMPLATE_ROOT_DIR, 'serenity-js', 'common', 'serenity'),
     })
@@ -790,10 +900,9 @@ async function generateLocalRunnerTestFiles(answers: ParsedAnswers) {
         testFiles.push(path.join(TEMPLATE_ROOT_DIR, 'pageobjects'))
     }
 
-    const files = (await Promise.all(testFiles.map((dirPath) => readDir(
-        dirPath,
-        [(file, stats) => !stats.isDirectory() && !(file.endsWith('.ejs') || file.endsWith('.feature'))]
-    )))).reduce((cur, acc) => [...acc, ...(cur)], [])
+    const files = (await Promise.all(testFiles.map(readDir)))
+        .flat()
+        .filter((file) => file.endsWith('.ejs') || file.endsWith('.feature'))
 
     await Promise.all(files.map(async (file) => {
         const renderedTpl = await renderFile(file, { answers })

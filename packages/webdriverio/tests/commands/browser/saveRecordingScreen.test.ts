@@ -28,7 +28,7 @@ describe('saveRecordingScreen', () => {
                 browserName: 'foobar',
                 // @ts-ignore mock feature
                 mobileMode: true,
-                'appium-version': '1.11.1'
+                platformName: 'Android',
             } as any
         })
 

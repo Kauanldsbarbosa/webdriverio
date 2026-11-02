@@ -1,6 +1,7 @@
 ---
 id: seleniumgrid
 title: Selenium Grid
+description: "Connect WebdriverIO tests to an existing Selenium Grid by setting the protocol, hostname, port and path in your configuration."
 ---
 
 You can use WebdriverIO with your existing Selenium Grid instance. To connect your tests to Selenium Grid, you just need to update the options in your test runner configurations.
@@ -76,7 +77,13 @@ export const config: WebdriverIO.Config = {
 
 ### File upload with remote Selenium Grid
 
-To upload a file to a web app in the remote browser, you first need to upload the file to the remote grid. You can refer to the [uploadFile](https://webdriver.io/docs/api/browser/uploadFile) documentation for details.
+[`element.setFiles()`](/docs/api/element/setFiles) sets a file input through WebDriver BiDi. The paths you pass are opened by the browser, so they have to exist on the machine that runs the browser. WebdriverIO does not stage a local file onto a Selenium node.
+
+```ts
+await $('#file-upload').setFiles('/path/on/the/node/file.png')
+```
+
+A suite that used `browser.uploadFile()` to push bytes to the node has to put the file where the browser can read it, then call `setFiles`. The Selenium [`file`](/docs/api/selenium#file) endpoint is still available as `browser.file()` for Chromedriver, Edgedriver, and Selenium Grid. It is not a WebDriver or WebDriver BiDi command.
 
 ### Other file/grid operations
 

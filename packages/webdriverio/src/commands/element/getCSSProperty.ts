@@ -2,6 +2,8 @@ import cssShorthandProps from 'css-shorthand-properties'
 import { getBrowserObject } from '@wdio/utils'
 
 import { parseCSS } from '../../utils/index.js'
+import { foreignContextId } from '../../session/browsingContext.js'
+import { isBidiCommandsEnabled, bidiGetCSSProperty } from '../../utils/bidi/elementCommands.js'
 
 type PseudoElement = '::before' | '::after'
 
@@ -79,11 +81,11 @@ export async function getCSSProperty(
     cssProperty: string,
     pseudoElement?: PseudoElement,
 ) {
-    const getCSSProperty = cssShorthandProps.isShorthand(cssProperty)
+    const getCSSProp = cssShorthandProps.isShorthand(cssProperty)
         ? getShorthandPropertyCSSValue
         : getPropertyCSSValue
 
-    const cssValue = await getCSSProperty.call(
+    const cssValue = await getCSSProp.call(
         this,
         {
             cssProperty,
@@ -120,7 +122,7 @@ async function getShorthandPropertyCSSValue(
     }
 
     const cssValues = await Promise.all(
-        properties.map((prop) => this.getElementCSSValue(this.elementId, prop))
+        properties.map((prop) => getElementCSSValue(this, prop))
     )
 
     return mergeEqualSymmetricalValue(cssValues)
@@ -142,7 +144,23 @@ async function getPropertyCSSValue(
         )
     }
 
-    return await this.getElementCSSValue(this.elementId, cssProperty)
+    return await getElementCSSValue(this, cssProperty)
+}
+
+/**
+ * Thin wrapper: routes to Bidi getComputedStyle when experimental
+ * Bidi commands are enabled, otherwise falls through to the classic
+ * protocol endpoint.  Only this one call site needs to change.
+ */
+async function getElementCSSValue(
+    elem: WebdriverIO.Element,
+    cssProperty: string,
+): Promise<string> {
+    const browser = getBrowserObject(elem) as WebdriverIO.Browser
+    if (isBidiCommandsEnabled(browser)) {
+        return bidiGetCSSProperty(elem, cssProperty)
+    }
+    return elem.getElementCSSValue(elem.elementId, cssProperty)
 }
 
 function getShorthandProperties(cssProperty: string) {
@@ -183,21 +201,24 @@ async function getPseudoElementCSSValue(
     elem: WebdriverIO.Element,
     options: Required<Options>
 ): Promise<string> {
-    const browser = getBrowserObject(elem)
     const { cssProperty, pseudoElement } = options
-    const cssValue = await browser.execute(
-        (elem: Element, pseudoElement: string, cssProperty: string) => {
-            // Check if element is still connected to the DOM
-            // This helps detect stale elements in BiDi mode
-            if (typeof elem.isConnected === 'boolean' && !elem.isConnected) {
-                throw new Error('stale element reference: element is not attached to the page document')
-            }
-            return (window.getComputedStyle(elem, pseudoElement))[cssProperty as unknown as number]
-        },
-        elem as unknown as Element,
-        pseudoElement,
-        cssProperty
-    )
+    const read = (elem: Element, pseudoElement: string, cssProperty: string) => {
+        // Check if element is still connected to the DOM
+        // This helps detect stale elements in BiDi mode
+        if (typeof elem.isConnected === 'boolean' && !elem.isConnected) {
+            throw new Error('stale element reference: element is not attached to the page document')
+        }
+        return (window.getComputedStyle(elem, pseudoElement))[cssProperty as unknown as number]
+    }
+
+    /**
+     * `browser.execute` runs in the session's current context, which can't
+     * resolve an element from a frame or another tab. `elem.execute` runs in
+     * the element's own context and passes the element as first argument.
+     */
+    const cssValue = await foreignContextId(elem)
+        ? await elem.execute(read as unknown as (el: HTMLElement, pseudoElement: string, cssProperty: string) => string, pseudoElement, cssProperty)
+        : await getBrowserObject(elem).execute(read, elem as unknown as Element, pseudoElement, cssProperty)
 
     return cssValue
 }

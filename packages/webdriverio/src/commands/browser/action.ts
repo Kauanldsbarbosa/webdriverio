@@ -4,6 +4,10 @@ import { KeyAction, PointerAction, WheelAction } from '../../utils/actions/index
 /**
  * The action command is a low-level interface for providing virtualized device input actions to the web browser.
  *
+ * For simple key presses, use [`browser.keys()`](https://webdriver.io/docs/api/browser/keys) instead. To perform
+ * multiple action chains at once, such as holding `Control` while clicking, use
+ * [`browser.actions()`](https://webdriver.io/docs/api/browser/actions).
+ *
  * In addition to high level commands such like `scrollIntoView`, `doubleClick`, the Actions API provides granular
  * control over exactly what designated input devices can do. WebdriverIO provides an interface for 3 kinds of input
  * sources:
@@ -21,7 +25,7 @@ import { KeyAction, PointerAction, WheelAction } from '../../utils/actions/index
  * Support for this command and specific actions can differ based on the environment. Progress on the development
  * can be followed on [wpt.fyi](https://wpt.fyi/results/webdriver/tests/perform_actions?label=experimental&label=master&aligned).
  * For mobile you might want to use Appium specific gesture commands on [iOS](https://appium.github.io/appium-xcuitest-driver/latest/guides/gestures/)
- * and [Android](https://github.com/appium/appium-uiautomator2-driver#mobile-gesture-commands).
+ * and [Android](https://appium.github.io/appium-uiautomator2-driver/latest/reference/execute-methods/#gestures).
  *
  * :::
  *
@@ -148,25 +152,26 @@ import { KeyAction, PointerAction, WheelAction } from '../../utils/actions/index
  *
  * @alias browser.action
  * @type utility
+ * @skipAwait returns a chainable action builder, the `perform()` call at the end of the chain is what gets awaited
  *
  */
 export function action (
-    this: WebdriverIO.Browser,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
     type: 'key',
     opts?: Pick<BaseActionParams, 'id'>
 ): KeyAction
 export function action (
-    this: WebdriverIO.Browser,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
     type: 'pointer',
     opts?: BaseActionParams
 ): PointerAction
 export function action (
-    this: WebdriverIO.Browser,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
     type: 'wheel',
     opts?: Pick<BaseActionParams, 'id'>
 ): WheelAction
 export function action (
-    this: WebdriverIO.Browser,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
     type: ActionType,
     opts?: BaseActionParams
 ): KeyAction | PointerAction | WheelAction {

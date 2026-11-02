@@ -3,14 +3,15 @@ import Link from '@docusaurus/Link'
 import Translate from '@docusaurus/Translate'
 
 import ImageSwitcher from './ImageSwitcher.tsx'
+import TierIcon from './TierIcon.tsx'
 
 export default function Sponsors () {
     return <section className="sponsors">
-        <h1>
-            <Translate id="sponsors.title">
-                Open Source and Open Governed
+        <h2>
+            <Translate id="sponsors.heading">
+                Sponsored by companies that care
             </Translate>
-        </h1>
+        </h2>
         <p>
             <Translate id="sponsors.description.openSource" values={{
                 openJsFoundationLink: (
@@ -29,8 +30,9 @@ export default function Sponsors () {
         <div className="sponsors-grid">
             <div className="premium">
                 <h3>
+                    <TierIcon tier="premium" />
                     <Translate id="sponsors.premiumSponsors">
-                        💎 Premium Sponsors
+                        Premium Sponsors
                     </Translate>
                 </h3>
                 <div className="logos">
@@ -42,24 +44,25 @@ export default function Sponsors () {
                         target="_blank"
                         style={{ width: '200px' }}
                     />
+
+                    <ImageSwitcher
+                        lightImageSrc="/img/sponsors/momentic_black.svg"
+                        darkImageSrc="/img/sponsors/momentic_white.svg"
+                        alt="Momentic"
+                        link="https://momentic.ai/"
+                        target="_blank"
+                        style={{ width: '260px' }}
+                    />
                 </div>
             </div>
             <div className="gold">
                 <h3>
+                    <TierIcon tier="gold" />
                     <Translate id="sponsors.goldSponsors">
-                        🥇 Gold Sponsors
+                        Gold Sponsors
                     </Translate>
                 </h3>
                 <div className="logos">
-                    <ImageSwitcher
-                        lightImageSrc="/img/sponsors/jetify_black.png"
-                        darkImageSrc="/img/sponsors/jetify_white.png"
-                        alt="Jetify"
-                        link="https://www.jetify.com/"
-                        width="150"
-                        target="_blank"
-                    />
-
                     <ImageSwitcher
                         lightImageSrc="/img/sponsors/testmu_ai_black.svg"
                         darkImageSrc="/img/sponsors/testmu_ai_white.svg"

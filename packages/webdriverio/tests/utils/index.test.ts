@@ -1,19 +1,63 @@
 import { describe, it, expect, vi } from 'vitest'
 import { ELEMENT_KEY, type local } from 'webdriver'
+import isPlainObject from 'is-plain-obj'
 
 import {
     findElement,
-    findDeepElement,
+    findElements,
     isStaleElementError,
     elementPromiseHandler,
     transformClassicToBidiSelector,
     createFunctionDeclarationFromString
 } from '../../src/utils/index.js'
-import { findStrategy } from '../../src/utils/findStrategy.js'
 
 vi.mock('is-plain-obj', () => ({
     default: vi.fn().mockReturnValue(false)
 }))
+
+/**
+ * A custom strategy runs in the browser or the held browsing context that queries, not in
+ * the current context of the session. On an element, the element is a strategy argument,
+ * which routes the script, so it runs on the browser object as before.
+ */
+describe('the object that runs a custom strategy', () => {
+    const strategy = function items () { return [] }
+    const strategyRef = { strategy, strategyName: 'items', strategyArguments: ['a'] }
+    const ref = { [ELEMENT_KEY]: 'elem-1' }
+    const setup = () => {
+        const browser: any = { on: vi.fn(), execute: vi.fn().mockResolvedValue([ref]) }
+        const context: any = { on: vi.fn(), parent: browser, execute: vi.fn().mockResolvedValue([ref]) }
+        const element: any = { on: vi.fn(), parent: browser, elementId: 'parent-elem', execute: vi.fn() }
+        return { browser, context, element }
+    }
+
+    it('findElements runs it in the held browsing context that queries', async () => {
+        const { browser, context } = setup()
+        vi.mocked(isPlainObject).mockReturnValueOnce(true)
+
+        expect(await findElements.call(context, strategyRef as never)).toEqual([ref])
+        expect(context.execute).toHaveBeenCalledWith(strategy, 'a')
+        expect(browser.execute).not.toHaveBeenCalled()
+    })
+
+    it('findElement runs it in the held browsing context that queries', async () => {
+        const { browser, context } = setup()
+
+        expect(await findElement.call(context, strategyRef as never)).toEqual(ref)
+        expect(context.execute).toHaveBeenCalledWith(strategy, 'a')
+        expect(browser.execute).not.toHaveBeenCalled()
+    })
+
+    it('runs it on the browser object for an element', async () => {
+        const { browser, element } = setup()
+        vi.mocked(isPlainObject).mockReturnValueOnce(true)
+
+        await findElements.call(element, strategyRef as never)
+        await findElement.call(element, strategyRef as never)
+        expect(browser.execute).toHaveBeenCalledTimes(2)
+        expect(element.execute).not.toHaveBeenCalled()
+    })
+})
 
 describe('findElement', () => {
     it('should find element using JS function', async () => {
@@ -66,20 +110,6 @@ describe('findElement', () => {
                 expect.any(String)
             ]
         )
-    })
-})
-
-describe('findStrategy for relative XPath', () => {
-    it('should identify relative XPath starting with ./ as xpath strategy', () => {
-        const result = findStrategy('./following-sibling::div')
-        expect(result.using).toBe('xpath')
-        expect(result.value).toBe('./following-sibling::div')
-    })
-
-    it('should identify relative XPath starting with .. as xpath strategy', () => {
-        const result = findStrategy('../parent-element')
-        expect(result.using).toBe('xpath')
-        expect(result.value).toBe('../parent-element')
     })
 })
 
@@ -146,6 +176,11 @@ it('isStaleElementError', () => {
     expect(isStaleElementError(staleElementJSError)).toBe(true)
     const staleElementBidiError = new Error('belongs to different document. Current document is')
     expect(isStaleElementError(staleElementBidiError)).toBe(true)
+    // Chrome 155: a removed node, and an id that is not valid
+    const goneNodeChromeError = new Error('no such node - SharedId "f.60860673155B1A4024ABC7C44C41BEA2.d.CD649CEDA25EACD4665D146439AC33ED.e.3" was not found.')
+    expect(isStaleElementError(goneNodeChromeError)).toBe(true)
+    const invalidIdChromeError = new Error('no such node - SharedId "not-an-id" was not found.')
+    expect(isStaleElementError(invalidIdChromeError)).toBe(true)
     const otherError = new Error('something else')
     expect(isStaleElementError(otherError)).toBe(false)
 })
@@ -169,17 +204,88 @@ describe('transformClassicToBidiSelector', () => {
         expect(bidiSelector.value).toBe('//html/body/section/div[6]/div/span')
     })
 
-    it('transforms classic link text selector to BiDi', () => {
-        const bidiSelector = transformClassicToBidiSelector('link text', 'GitHub Repo')
-        expect(bidiSelector.type).toBe('innerText')
-        expect(bidiSelector.value).toBe('GitHub Repo')
+    it('transforms classic link text selectors into a locator for all links', () => {
+        // the text of the links is compared after they were located
+        expect(transformClassicToBidiSelector('link text', 'GitHub Repo')).toEqual({ type: 'css', value: 'a' })
+        expect(transformClassicToBidiSelector('partial link text', 'new')).toEqual({ type: 'css', value: 'a' })
     })
 
-    it('transforms classic partial link text selector to BiDi', () => {
-        const bidiSelector = transformClassicToBidiSelector('partial link text', 'new')
-        expect(bidiSelector.type).toBe('innerText')
-        expect(bidiSelector.value).toBe('new')
-        expect((bidiSelector as local.BrowsingContextInnerTextLocator).matchType).toBe('partial')
+    it('transforms aria selector to BiDi accessibility locator', () => {
+        const bidiSelector = transformClassicToBidiSelector('aria', 'Submit')
+        expect(bidiSelector.type).toBe('accessibility')
+        expect(bidiSelector.value).toEqual({ name: 'Submit' })
+    })
+
+    it('transforms a role selector to a BiDi accessibility locator with role and name', () => {
+        expect(transformClassicToBidiSelector('role', '{"role":"button","name":"Add to cart"}'))
+            .toEqual({ type: 'accessibility', value: { role: 'button', name: 'Add to cart' } })
+        expect(transformClassicToBidiSelector('role', '{"role":"row"}'))
+            .toEqual({ type: 'accessibility', value: { role: 'row' } })
+        expect(transformClassicToBidiSelector('role', '{"role":"img","name":""}'))
+            .toEqual({ type: 'accessibility', value: { role: 'img', name: '' } })
+    })
+})
+
+describe('role selector on a Classic session', () => {
+    function classicBrowser (result: unknown) {
+        const browser: any = {
+            on: vi.fn(),
+            isBidi: false,
+            isMobile: false,
+            execute: vi.fn().mockResolvedValue(result),
+            findElement: vi.fn(),
+            findElements: vi.fn()
+        }
+        return browser
+    }
+
+    it('finds the first element by role and name in the page', async () => {
+        const browser = classicBrowser([{ [ELEMENT_KEY]: 'el-1' }, { [ELEMENT_KEY]: 'el-2' }])
+        expect(await findElement.call(browser, 'role/button[name="Add to cart"]')).toEqual({ [ELEMENT_KEY]: 'el-1' })
+        expect(browser.execute).toHaveBeenCalledWith(expect.any(Function), 'button', 'Add to cart', -1, null)
+        expect(browser.findElement).not.toHaveBeenCalled()
+    })
+
+    it('returns every match and passes a null name for a role-only selector', async () => {
+        const browser = classicBrowser([{ [ELEMENT_KEY]: 'el-1' }, { [ELEMENT_KEY]: 'el-2' }])
+        expect(await findElements.call(browser, 'role/row')).toEqual([{ [ELEMENT_KEY]: 'el-1' }, { [ELEMENT_KEY]: 'el-2' }])
+        expect(browser.execute).toHaveBeenCalledWith(expect.any(Function), 'row', null, -1, null)
+        expect(browser.findElements).not.toHaveBeenCalled()
+    })
+
+    it('searches within the element a selector is chained from', async () => {
+        const browser = classicBrowser([{ [ELEMENT_KEY]: 'pay' }])
+        const dialog = { elementId: 'dialog-1', [ELEMENT_KEY]: 'dialog-1', parent: browser, ...browser }
+        dialog.execute = browser.execute
+        await findElements.call(dialog, 'role/button[name="Pay now"]')
+        expect(browser.execute).toHaveBeenCalledWith(expect.any(Function), 'button', 'Pay now', -1, dialog)
+    })
+
+    it('puts the accessibility script on the page when it is missing and searches again', async () => {
+        const browser = classicBrowser([])
+        browser.execute
+            .mockResolvedValueOnce('__wdio_a11y_missing__')
+            .mockResolvedValueOnce(undefined)
+            .mockResolvedValueOnce([{ [ELEMENT_KEY]: 'el-1' }])
+        expect(await findElement.call(browser, 'role/button[name="Pay"]')).toEqual({ [ELEMENT_KEY]: 'el-1' })
+        expect(browser.execute).toHaveBeenCalledTimes(3)
+        expect(typeof browser.execute.mock.calls[1][0]).toBe('string')
+        expect(browser.execute.mock.calls[2]).toEqual(browser.execute.mock.calls[0])
+    })
+
+    it('returns a not-found error when nothing matches', async () => {
+        const browser = classicBrowser([])
+        const result = await findElement.call(browser, 'role/button[name="Missing"]')
+        expect(result).toBeInstanceOf(Error)
+        expect((result as Error).message).toBe('Couldn\'t find element with selector "role/button[name="Missing"]"')
+    })
+
+    it('rejects the selector in a native app context', async () => {
+        const browser = classicBrowser([])
+        browser.isMobile = true
+        browser.isNativeContext = Promise.resolve(true)
+        await expect(findElements.call(browser, 'role/button')).rejects.toThrow('is not supported in a native app context')
+        expect(browser.execute).not.toHaveBeenCalled()
     })
 })
 

@@ -1,67 +1,42 @@
 import { sleep } from '@wdio/utils'
 
 import newWindowHelper from '../../scripts/newWindow.js'
-import { getContextManager } from '../../session/context.js'
+import { getBrowsingContext } from '../../browsingContext.js'
+import { getParallelContextStore } from '../../session/context.js'
+import { historyReadiness } from '../../utils/traverseHistory.js'
 import type { NewWindowOptions } from '../../types.js'
-import logger from '@wdio/logger'
-const log = logger('webdriverio:newWindow')
 
 const WAIT_FOR_NEW_HANDLE_TIMEOUT = 3000
 
 /**
  *
- * Open new window or tab in browser (defaults to a new window if not specified).
- * This command is the equivalent function to `window.open()`. This command does not work in mobile environments.
+ * Open a new window or tab and wait until its page has loaded, the equivalent of `window.open()`.
+ * This command does not work in mobile environments.
  *
- * __Note:__ When calling this command you automatically switch to the new window or tab.
+ * In a WebDriver BiDi session (the default since v10) it returns the new
+ * [browsing context](/docs/api/browsingContext) and does not switch to it: run
+ * commands on the returned context, while `browser.url()` keeps navigating the
+ * first one. In a WebDriver Classic session the command switches to the new window
+ * and returns `{ handle, type }`.
  *
  * <example>
-    :newWindowSync.js
-    it('should open a new window', async () => {
-        await browser.url('https://google.com')
-        console.log(await browser.getTitle()) // outputs: "Google"
+    :newWindow.js
+    it('should open a new tab', async () => {
+        const page = await browser.url('https://webdriver.io')
+        const tab = await browser.newWindow('https://webdriver.io/docs/api', { type: 'tab' })
 
-        const result = await browser.newWindow('https://webdriver.io', {
-            windowName: 'WebdriverIO window',
-            windowFeature: 'width=420,height=230,resizable,scrollbars=yes,status=1',
-        })
-        console.log(await browser.getTitle()) // outputs: "WebdriverIO · Next-gen browser and mobile automation test framework for Node.js"
-        console.log(result.type) // outputs: "window"
-        const handles = await browser.getWindowHandles()
-        await browser.switchToWindow(handles[1])
-        await browser.closeWindow()
-        await browser.switchToWindow(handles[0])
-        console.log(await browser.getTitle()) // outputs: "Google"
+        console.log(await tab.getTitle()) // the title of the API page
+        console.log(await page.getTitle()) // the first tab still answers commands
+        await tab.closeWindow()
     });
- * </example>
- * <example>
-      :newTabSync.js
-      it('should open a new tab', async () => {
-          await browser.url('https://google.com')
-          console.log(await browser.getTitle()) // outputs: "Google"
-
-          await browser.newWindow('https://webdriver.io', {
-              type:'tab',
-              windowName: 'WebdriverIO window',
-              windowFeature: 'width=420,height=230,resizable,scrollbars=yes,status=1',
-          })
-          console.log(await browser.getTitle()) // outputs: "WebdriverIO · Next-gen browser and mobile automation test framework for Node.js"
-          console.log(result.type) // outputs: "tab"
-          const handles = await browser.getWindowHandles()
-          await browser.switchToWindow(handles[1])
-          await browser.closeWindow()
-          await browser.switchToWindow(handles[0])
-          console.log(await browser.getTitle()) // outputs: "Google"
-     });
  * </example>
  *
  * @param {string}  url      website URL to open
  * @param {NewWindowOptions=} options                newWindow command options
  * @param {string=}           options.type           type of new window: 'tab' or 'window'
- * @param {String=}           options.windowName     name of the new window
- * @param {String=}           options.windowFeatures features of opened window (e.g. size, position, scrollbars, etc.)
+ * @param {string|BrowsingContext=} options.referenceContext  top-level browsing context to open the new tab or window from (BiDi only). In parallel mode, the default is the window of the test
  *
- * @return {Object}          An object containing the window handle and the type of new window `{handle: string, type: string}` handle - The ID of the window handle of the new tab or window, type - The type of the new window, either 'tab' or 'window'
+ * @return {BrowsingContext|Object}  In a BiDi session, the new browsing context. In a Classic session, `{handle, type}`.
  *
  * @throws {Error} If `url` is invalid, if the command is used on mobile, or `type` is not 'tab' or 'window'.
  *
@@ -72,8 +47,8 @@ const WAIT_FOR_NEW_HANDLE_TIMEOUT = 3000
 export async function newWindow (
     this: WebdriverIO.Browser,
     url: string,
-    { type = 'window', windowName = '', windowFeatures = '' }: NewWindowOptions = {}
-): Promise<{ handle: string, type: 'tab' | 'window' }> {
+    options: NewWindowOptions = {}
+): Promise<WebdriverIO.BrowsingContext | { handle: string, type: 'tab' | 'window' }> {
     /**
      * parameter check
      */
@@ -81,15 +56,25 @@ export async function newWindow (
         throw new Error('number or type of arguments don\'t agree with newWindow command')
     }
 
+    const legacyOptions = options as NewWindowOptions & {
+        windowName?: string
+        windowFeatures?: string
+        windowFeature?: string
+    }
+    if (legacyOptions.windowName || legacyOptions.windowFeatures || legacyOptions.windowFeature) {
+        throw new Error(
+            'The `windowName` and `windowFeatures` options were removed from `newWindow` in WebdriverIO v10. ' +
+            'Only `{ type: \'tab\' | \'window\' }` is supported.'
+        )
+    }
+
+    const { type = 'window' } = options
+
     /**
     * Validate the 'type' parameter to ensure it is either 'tab' or 'window'
     */
     if (!['tab', 'window'].includes(type)) {
         throw new Error(`Invalid type '${type}' provided to newWindow command. Use either 'tab' or 'window'`)
-    }
-
-    if (windowName || windowFeatures) {
-        log.warn('The "windowName" and "windowFeatures" options are deprecated and only supported in WebDriver Classic sessions.')
     }
 
     /**
@@ -102,13 +87,32 @@ export async function newWindow (
     const tabsBefore = await this.getWindowHandles()
 
     if (this.isBidi) {
-        const contextManager = getContextManager(this)
-        const { context } = await this.browsingContextCreate({ type })
-        contextManager.setCurrentContext(context)
-        await this.browsingContextNavigate({ context, url })
-    } else {
-        await this.execute(newWindowHelper, url, windowName, windowFeatures)
+        const reference = options.referenceContext
+        if (reference && typeof reference !== 'string' && reference.isFrame) {
+            throw new Error('`referenceContext` must be a top-level browsing context')
+        }
+        /**
+         * Parallel mode: a tab or window opens from the window of its test, so it has the
+         * cookies and storage of the test (its user context). Firefox opens a tab with no
+         * reference in the focused window, which can be the new window of another test,
+         * and then returns the id of that window (https://bugzilla.mozilla.org/show_bug.cgi?id=2084843)
+         */
+        const referenceContext = typeof reference === 'string'
+            ? reference
+            : reference?.contextId ?? getParallelContextStore().getStore()
+        const { context } = await this.browsingContextCreate({
+            type,
+            ...(referenceContext ? { referenceContext } : {})
+        })
+        /**
+         * Hand back a loaded page, like `browser.url()`. A context returned
+         * mid-load races the next navigation, which Firefox never completes.
+         */
+        await this.browsingContextNavigate({ context, url, wait: historyReadiness(this.capabilities.pageLoadStrategy) })
+        return getBrowsingContext(this, context, { isFrame: false, url })
     }
+
+    await this.execute(newWindowHelper, url)
 
     /**
      * if tests are run in DevTools there might be a delay until

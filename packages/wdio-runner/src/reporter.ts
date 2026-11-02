@@ -15,11 +15,15 @@ const mochaAllHooks = ['"before all" hook', '"after all" hook']
 export default class BaseReporter {
     private _reporters: Reporters.ReporterInstance[] = []
     private listeners: ((ev: unknown) => void)[] = []
+    /** time of the last event, to see that the worker still makes progress */
+    lastEventTime = 0
+    /** title of the last test or hook that ended, to name where a late error comes from */
+    lastEndedTitle?: string
 
     constructor(
         private _config: Options.Testrunner,
         private _cid: string,
-        public caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+        public caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
     ) {
 
         /**
@@ -49,15 +53,21 @@ export default class BaseReporter {
         uid?: string
         file?: string
         title?: string
+        fullTitle?: string
         error?: string
         sessionId?: string
         config?: unknown
-        isMultiremote?: boolean
+        isMultiRemote?: boolean
         instanceOptions?: Options.Testrunner
         capabilities?: unknown
         retry?: number,
+        contextId?: string
     }) {
         payload.cid = this._cid
+        this.lastEventTime = Date.now()
+        if (e === 'test:end' || e === 'hook:end') {
+            this.lastEndedTitle = payload.fullTitle || payload.title
+        }
 
         /**
          * Send failure message (only once) in case of test or hook failure
@@ -99,6 +109,14 @@ export default class BaseReporter {
         })
     }
 
+    setContextIdResolver (resolver: () => string | undefined) {
+        this._reporters.forEach((reporter) => {
+            if (typeof reporter.setContextIdResolver === 'function') {
+                reporter.setContextIdResolver(resolver)
+            }
+        })
+    }
+
     onMessage (listener: (ev: unknown) => void) {
         this.listeners.push(listener)
     }
@@ -107,7 +125,7 @@ export default class BaseReporter {
         // clone the config to avoid changing original properties
         const options = Object.assign({}, this._config) as Options.Testrunner & {
             cid: string
-            capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+            capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
         }
         let filename = `wdio-${this._cid}-${name}-reporter.log`
 

@@ -1,11 +1,10 @@
 import stripAnsi from 'strip-ansi'
-import type { CommandArgs, HookStats, Tag, TestStats } from '@wdio/reporter'
+import { knownFramework, type CommandArgs, type HookStats, type Tag, type TestStats } from '@wdio/reporter'
 import type { Options } from '@wdio/types'
-import type { FixtureResult, Label, StatusDetails, TestResult } from 'allure-js-commons'
-import { Status, Status as AllureStatus } from 'allure-js-commons'
+import type { Label, StatusDetails } from 'allure-js-commons'
+import { Status as AllureStatus } from 'allure-js-commons'
 import CompoundError from './compoundError.js'
-import { allHooks, DEFAULT_CID, eachHooks, linkPlaceholder } from './constants.js'
-import type { WDIORunnable } from './types.js'
+import { DEFAULT_CID } from './constants.js'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import process from 'node:process'
@@ -20,11 +19,15 @@ export const getTestStatus = (
     test: TestStats | HookStats,
     config?: Options.Testrunner
 ): AllureStatus => {
-    if (config && config.framework === 'jasmine') {
+    if (knownFramework(config?.framework) === 'jasmine') {
         return AllureStatus.FAILED
     }
 
     if (test.error) {
+        if (test.error.name && test.error.name.toLowerCase().includes('assert')) {
+            return AllureStatus.FAILED
+        }
+
         if (test.error.message) {
             const message = test.error.message.trim().toLowerCase()
 
@@ -48,51 +51,6 @@ export const getTestStatus = (
 
     return AllureStatus.BROKEN
 }
-
-/**
- * Check is object is empty
- * @param object {Object}
- * @private
- */
-export const isEmpty = (object: never) =>
-
-    !object || Object.keys(object).length === 0
-
-/**
- * Is mocha/jasmine beforeEach hook
- * @param title {String} - hook title
- * @returns {boolean}
- * @private
- */
-export const isBeforeEachTypeHook = (title: string) =>
-    title.includes(eachHooks[0])
-
-/**
- * Is mocha/jasmine beforeAll / beforeEach hook
- * @param title {String} - hook title
- * @returns {boolean}
- * @private
- */
-export const isBeforeTypeHook = (title: string) =>
-    title.includes(allHooks[0]) || title.includes(eachHooks[0])
-
-/**
- * Is mocha/jasmine beforeEach / afterEach hook
- * @param title {String} - hook title
- * @returns {boolean}
- * @private
- */
-export const isEachTypeHooks = (title: string) =>
-    eachHooks.some((hook) => title.includes(hook))
-
-/**
- * Is mocha/jasmine beforeAll / afterAll hook
- * @param title {String} - hook title
- * @returns {boolean}
- * @private
- */
-export const isAllTypeHooks = (title: string) =>
-    allHooks.some((hook) => title.includes(hook))
 
 /**
  * Properly format error from different test runners
@@ -142,48 +100,6 @@ export const getStatusDetailsFromFailedTest = (test: TestStats | HookStats): Sta
     }
 }
 
-export const cleanCucumberHooks = (hook: FixtureResult | TestResult) => {
-    const currentStep = hook.steps[hook.steps.length - 1]
-    if (
-        currentStep &&
-        currentStep.steps.length === 0 &&
-        currentStep.attachments.length === 0 &&
-        hook.attachments.length === 0 &&
-        currentStep.status === Status.PASSED
-    ) {
-        hook.steps.pop()
-    }
-}
-
-/**
- * Substitute task id to link template
- * @param {string} template - link template
- * @param {string} id - task id
- * @returns {string} - link after substitution
- * @private
- */
-export const getLinkByTemplate = (template: string | undefined, id: string) => {
-    if (typeof template !== 'string') {
-        return id
-    }
-
-    if (!template.includes(linkPlaceholder)) {
-        throw Error(
-            `The link template "${template}" must contain ${linkPlaceholder} substring.`
-        )
-    }
-
-    return template.replace(linkPlaceholder, id)
-}
-
-export const getRunnablePath = (runnable: WDIORunnable): string[] => {
-    if (runnable.parent) {
-        return [...getRunnablePath(runnable.parent), runnable.title]
-    }
-
-    return [runnable.title]
-}
-
 export const findLast = <T>(
     arr: Array<T>,
     predicate: (el: T) => boolean
@@ -216,8 +132,9 @@ export const isScreenshotCommand = (command: CommandArgs): boolean => {
     return (
         // WebDriver protocol
         (command.endpoint && isScrenshotEndpoint.test(command.endpoint)) ||
-        // DevTools protocol
-        command.command === 'takeScreenshot'
+        // DevTools protocol, and the WebDriver BiDi overrides, which send no endpoint
+        command.command === 'takeScreenshot' ||
+        command.command === 'takeElementScreenshot'
     )
 }
 
@@ -271,6 +188,23 @@ export const relNoSlash = (p?: string) => {
     return rel.replace(/^\.\/+/, '')
 }
 export const toFullName = (file: string, title: string) => `${relNoSlash(file)}#${title}`
+
+/**
+ * Normalize a browser/device family name for Allure historyId.
+ * Vendor aliases such as `Google Chrome` / `googlechrome` collapse to `chrome`
+ * so history stays stable across Appium and desktop capability spellings.
+ */
+export function normalizeCapabilityName(value: string): string {
+    const trimmed = value.trim().toLowerCase().replace(/\s+/g, ' ')
+    const compact = trimmed.replace(/[^a-z0-9]/g, '')
+    if (compact === 'googlechrome' || compact === 'chrome') {
+        return 'chrome'
+    }
+    if (compact === 'microsoftedge' || compact === 'msedge' || compact === 'edge') {
+        return 'edge'
+    }
+    return trimmed
+}
 export function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null
 }
@@ -282,7 +216,7 @@ export function isEmptyObject(value: unknown): boolean {
 export const toPackageLabel = (p?: string) => {
     if (!p) {return ''}
     const fsPath = fromUrlish(p)
-    const noPos = fsPath.split(':')[0]
+    const noPos = dropPosSuffix(fsPath)
     const rel = relNoSlash(noPos)
     return rel.replace(/\//g, '.')
 }

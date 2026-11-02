@@ -25,6 +25,8 @@ export default class SauceService implements Services.ServiceInstance {
     private _testCnt = 0
     private _maxErrorStackLength = 5
     private _failures = 0 // counts failures between reloads
+    private _failedScenarios = new Set<string>() // Cucumber scenarios counted in `_failures`
+    private _runningScenarios = 0 // Cucumber scenarios between beforeScenario and afterScenario, more than one in `parallelMode`
     private _isServiceEnabled = true
     private _isJobNameSet = false
     private _testStartTime: Date
@@ -75,7 +77,7 @@ export default class SauceService implements Services.ServiceInstance {
     before (_: unknown, __: string[], browser: WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser) {
         this._browser = browser
 
-        // Ensure capabilities are not null in case of multiremote
+        // Ensure capabilities are not null in case of multi-remote
         // Changed from `this._browser.capabilities` to this to get the correct
         // capabilities for EMUSIM (with the postfix) to determine ff the string
         // contains `simulator` or `emulator` it's an EMU/SIM session
@@ -196,7 +198,11 @@ export default class SauceService implements Services.ServiceInstance {
             this._reportErrorLog(results.error)
         }
 
-        if (!results.passed) {
+        /**
+         * a failed Cucumber `Before` or `After` hook fails its scenario, `afterScenario`
+         * counts it with the result of the scenario's last attempt
+         */
+        if (!results.passed && this._runningScenarios === 0) {
             ++this._failures
         }
     }
@@ -223,6 +229,7 @@ export default class SauceService implements Services.ServiceInstance {
      * @param world world object containing information on pickle and test step
      */
     beforeScenario (world: Frameworks.World) {
+        ++this._runningScenarios
         if (!this._isServiceEnabled || !this._browser) {
             return
         }
@@ -249,9 +256,23 @@ export default class SauceService implements Services.ServiceInstance {
      * @param result.duration duration of scenario in milliseconds
      */
     afterScenario(world: Frameworks.World, result: Frameworks.PickleResult) {
+        this._runningScenarios = Math.max(0, this._runningScenarios - 1)
+
+        /**
+         * a retried scenario runs this hook for every attempt, with the same pickle:
+         * only the result of its last attempt counts
+         */
+        const scenarioId = world.pickle?.id
+        if (scenarioId && this._failedScenarios.delete(scenarioId)) {
+            --this._failures
+        }
+
         // check if scenario has failed
         if (!result.passed) {
             ++this._failures
+            if (scenarioId) {
+                this._failedScenarios.add(scenarioId)
+            }
         }
     }
 
@@ -274,7 +295,7 @@ export default class SauceService implements Services.ServiceInstance {
         }
 
         const status = 'status: ' + (failures > 0 ? 'failing' : 'passing')
-        if (!this._browser.isMultiremote) {
+        if (!this._browser.isMultiRemote) {
             await this._uploadLogs(this._browser.sessionId)
             this._updateJobIdInTestRuns(this._browser.sessionId)
             try {
@@ -290,7 +311,7 @@ export default class SauceService implements Services.ServiceInstance {
         }
 
         return Promise.all(Object.keys(this._capabilities).map(async (browserName) => {
-            const multiRemoteBrowser = (this._browser as WebdriverIO.MultiRemoteBrowser).getInstance(browserName)
+            const multiRemoteBrowser = (this._browser as WebdriverIO.MultiRemoteBrowser).getInstance(browserName)!
             const isMultiRemoteRDC = isRDC(multiRemoteBrowser.capabilities as WebdriverIO.Capabilities)
             log.info(`Update multiRemote job for browser "${browserName}" and sessionId ${multiRemoteBrowser.sessionId}, ${status}`)
             await this._uploadLogs(multiRemoteBrowser.sessionId)
@@ -336,15 +357,15 @@ export default class SauceService implements Services.ServiceInstance {
 
         const status = 'status: ' + (this._failures > 0 ? 'failing' : 'passing')
 
-        if (!this._browser.isMultiremote) {
+        if (!this._browser.isMultiRemote) {
             log.info(`Update (reloaded) job with sessionId ${oldSessionId}, ${status}`)
             return this.updateJob(oldSessionId, this._failures, true)
         }
 
         const mulitremoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
         const browserName = mulitremoteBrowser.instances.filter(
-            (browserName: string) => mulitremoteBrowser.getInstance(browserName).sessionId === newSessionId)[0]
-        log.info(`Update (reloaded) multiremote job for browser "${browserName}" and sessionId ${oldSessionId}, ${status}`)
+            (browserName: string) => mulitremoteBrowser.getInstance(browserName)!.sessionId === newSessionId)[0]
+        log.info(`Update (reloaded) multi-remote job for browser "${browserName}" and sessionId ${oldSessionId}, ${status}`)
         return this.updateJob(oldSessionId, this._failures, true, browserName)
     }
 
@@ -352,6 +373,7 @@ export default class SauceService implements Services.ServiceInstance {
         const body = this.getBody(failures, calledOnReload, browserName)
         await this._api.updateJob(this._config.user as string, sessionId, body as Job)
         this._failures = 0
+        this._failedScenarios.clear()
     }
 
     /**
@@ -376,7 +398,7 @@ export default class SauceService implements Services.ServiceInstance {
             let testCnt = ++this._testCnt
 
             const mulitremoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
-            if (this._browser && this._browser.isMultiremote) {
+            if (this._browser && this._browser.isMultiRemote) {
                 testCnt = Math.ceil(testCnt / mulitremoteBrowser.instances.length)
             }
 
@@ -413,9 +435,9 @@ export default class SauceService implements Services.ServiceInstance {
             return
         }
 
-        if (this._browser.isMultiremote) {
+        if (this._browser.isMultiRemote) {
             return Promise.all(Object.keys(this._capabilities).map(async (browserName) => {
-                const multiRemoteBrowser = (this._browser as WebdriverIO.MultiRemoteBrowser).getInstance(browserName)
+                const multiRemoteBrowser = (this._browser as WebdriverIO.MultiRemoteBrowser).getInstance(browserName)!
                 return multiRemoteBrowser.executeScript(annotation, [])
             }))
         }

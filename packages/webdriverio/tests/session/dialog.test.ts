@@ -1,5 +1,17 @@
+import path from 'node:path'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { DialogManager } from '../../src/session/dialog.js'
+import { DialogManager, Dialog } from '../../src/session/dialog.js'
+import { remote } from '../../src/index.js'
+import * as contextModule from '../../src/session/context.js'
+
+vi.mock('fetch')
+vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
+vi.mock('../../src/session/context.js', () => ({
+    getContextManager: vi.fn().mockReturnValue({
+        getCurrentContext: vi.fn().mockResolvedValue('ctx-1'),
+        initialize: vi.fn().mockResolvedValue(true)
+    })
+}))
 
 describe('DialogManager', () => {
     let browser: any
@@ -8,17 +20,37 @@ describe('DialogManager', () => {
     beforeEach(() => {
         browser = {
             isBidi: true,
+            isMobile: false,
             sessionId: 'session-id',
             sessionSubscribe: vi.fn().mockResolvedValue({}),
             on: vi.fn(),
             off: vi.fn(),
             removeAllListeners: vi.fn(),
             emit: vi.fn(),
+            listenerCount: vi.fn().mockReturnValue(0),
             browsingContextHandleUserPrompt: vi.fn()
         }
         // Mock isEnabled to bypass environment check which disables it in unit tests
         vi.spyOn(DialogManager.prototype, 'isEnabled').mockReturnValue(true)
         dialogManager = new DialogManager(browser)
+    })
+
+    it('should not need the listeners of a browser it is disabled for', () => {
+        vi.mocked(DialogManager.prototype.isEnabled).mockReturnValueOnce(false)
+        const { listenerCount: _, ...browserWithoutListenerCount } = browser
+        expect(() => new DialogManager(browserWithoutListenerCount)).not.toThrow()
+    })
+
+    it('should keep a registered dialog listener when the manager is rebuilt for the same browser', async () => {
+        // as after `reloadSession()`: a new manager, the user listener stays on the browser
+        browser.listenerCount.mockImplementation((event: string) => event === 'dialog' ? 1 : 0)
+        browser.on.mockClear()
+        new DialogManager(browser)
+        const userPromptHandler = browser.on.mock.calls.find((call: unknown[]) => call[0] === 'browsingContext.userPromptOpened')?.[1]
+        await userPromptHandler({ context: 'some-context', message: 'hi', type: 'alert' })
+
+        expect(browser.browsingContextHandleUserPrompt).not.toHaveBeenCalled()
+        expect(browser.emit).toHaveBeenCalledWith('dialog', expect.any(Dialog))
     })
 
     it('should ignore "no such alert" error when auto-handling dialogs', async () => {
@@ -78,5 +110,110 @@ describe('DialogManager', () => {
             accept: false,
             context: 'some-context'
         })
+    })
+})
+
+describe('Dialog - Browser', () => {
+    let browser: any
+
+    beforeEach(() => {
+        browser = {
+            isMobile: false,
+            isBidi: true,
+            browsingContextHandleUserPrompt: vi.fn().mockResolvedValue(undefined),
+            sessionSubscribe: vi.fn().mockResolvedValue({}),
+            on: vi.fn(),
+            off: vi.fn(),
+            removeAllListeners: vi.fn(),
+            emit: vi.fn(),
+            listenerCount: vi.fn().mockReturnValue(0),
+        }
+    })
+
+    it('should accept a browser dialog', async () => {
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'alert' } as any,
+            browser
+        )
+
+        await dialog.accept()
+
+        expect(browser.browsingContextHandleUserPrompt).toHaveBeenCalledWith({
+            accept: true,
+            context: 'ctx-1',
+        })
+    })
+
+    it('should accept a browser dialog with prompt text', async () => {
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'prompt', defaultValue: '' } as any,
+            browser
+        )
+
+        await dialog.accept('my input')
+
+        expect(browser.browsingContextHandleUserPrompt).toHaveBeenCalledWith({
+            accept: true,
+            context: 'ctx-1',
+            userText: 'my input',
+        })
+    })
+
+    it('should dismiss a browser dialog', async () => {
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'confirm' } as any,
+            browser
+        )
+
+        await dialog.dismiss()
+
+        expect(browser.browsingContextHandleUserPrompt).toHaveBeenCalledWith({
+            accept: false,
+            context: 'ctx-1',
+        })
+    })
+
+    it('answers the dialog in its own context, also when that is not the current one', async () => {
+        vi.mocked(contextModule.getContextManager).mockReturnValue({
+            getCurrentContext: vi.fn().mockResolvedValue('different-context'),
+            initialize: vi.fn().mockResolvedValue(true)
+        })
+
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'confirm' } as any,
+            browser
+        )
+
+        await dialog.accept()
+        expect(browser.browsingContextHandleUserPrompt).toHaveBeenLastCalledWith({ context: 'ctx-1', accept: true, userText: undefined })
+        await dialog.dismiss()
+        expect(browser.browsingContextHandleUserPrompt).toHaveBeenLastCalledWith({ context: 'ctx-1', accept: false })
+
+        vi.mocked(contextModule.getContextManager).mockReturnValue({
+            getCurrentContext: vi.fn().mockResolvedValue('ctx-1'),
+            initialize: vi.fn().mockResolvedValue(true)
+        })
+    })
+
+    it('ignores a dialog that was already answered or whose context closed', async () => {
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'alert' } as any,
+            browser
+        )
+
+        vi.mocked(browser.browsingContextHandleUserPrompt).mockRejectedValueOnce(new Error('no such alert'))
+        await expect(dialog.accept()).resolves.toBeUndefined()
+        vi.mocked(browser.browsingContextHandleUserPrompt).mockRejectedValueOnce(new Error('no such frame'))
+        await expect(dialog.dismiss()).resolves.toBeUndefined()
+    })
+
+    it('rethrows other errors', async () => {
+        const dialog = new Dialog(
+            { context: 'ctx-1', message: 'Hello', type: 'alert' } as any,
+            browser
+        )
+
+        vi.mocked(browser.browsingContextHandleUserPrompt).mockRejectedValueOnce(new Error('boom'))
+        await expect(dialog.accept()).rejects.toThrow('boom')
     })
 })

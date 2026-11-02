@@ -1,6 +1,7 @@
 ---
 id: custommatchers
 title: Custom Matchers
+description: "Register custom browser and element matchers with expect.extend and add TypeScript types for them."
 ---
 
 WebdriverIO uses a Jest style [`expect`](https://webdriver.io/docs/api/expect-webdriverio) assertion library that comes with special features and custom matchers specific for running web and mobile tests. While the library of matchers is big, it certainly doesn't fit all possible situations. Therefore it is possible to extend the existing matchers with custom ones defined by you.
@@ -8,6 +9,12 @@ WebdriverIO uses a Jest style [`expect`](https://webdriver.io/docs/api/expect-we
 :::warning
 
 While there is currently no difference in how matchers are defined that are specific to the [`browser`](/docs/api/browser) object or an [element](/docs/api/element) instance, this certainly might change in the future. Keep an eye on [`webdriverio/expect-webdriverio#1408`](https://github.com/webdriverio/expect-webdriverio/issues/1408) for further information on this development.
+
+:::
+
+:::info Jasmine
+
+With the Jasmine framework, call `expect.extend` in a spec file or the `before` hook, before the tests run. The matchers become Jasmine async matchers, so `await` them. A matcher with the name of a Jasmine sync matcher runs for WebdriverIO values only, like the WebdriverIO matchers. Custom asymmetric matchers (`expect.myMatcher()`) are not available. You can also use `jasmine.addMatchers` for a sync matcher or `jasmine.addAsyncMatchers` for an async matcher, see the [Jasmine custom matchers tutorial](https://jasmine.github.io/tutorials/custom_matchers).
 
 :::
 
@@ -53,7 +60,7 @@ If you created a custom [asymmetric matcher](https://jestjs.io/docs/expect#expec
 declare global {
   namespace ExpectWebdriverIO {
     interface AsymmetricMatchers {
-      myCustomMatcher(value: string): ExpectWebdriverIO.PartialMatcher;
+      myCustomMatcher(value: string): ExpectWebdriverIO.PartialMatcher<string>;
     }
   }
 }

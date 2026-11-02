@@ -1,6 +1,7 @@
 ---
 id: capabilities
 title: Capabilities
+description: "Define capabilities to choose the browser or mobile environment your tests run in, including custom vendor capabilities and special use cases."
 ---
 
 A capability is a definition for a remote interface. It helps WebdriverIO to understand in which browser or mobile environment you like to run your tests on. Capabilities are less crucial when developing tests locally as you run it on one remote interface most of the time but becomes more important when running a large set of integration tests in CI/CD.
@@ -45,7 +46,7 @@ Specific options passed into Chromedriver when starting it.
 
 #### `wdio:geckodriverOptions`
 
-Specific options passed into Geckodriver when starting it.
+Specific options passed into Geckodriver when starting it. For example, `profileRoot` is the folder in which Geckodriver creates the temporary Firefox profile. On Windows in GitHub Actions, WebdriverIO sets it to `RUNNER_TEMP`; see [Firefox on Windows runners](githubactions#firefox-on-windows-runners).
 
 #### `wdio:edgedriverOptions`
 
@@ -57,50 +58,125 @@ Specific options passed into Safari when starting it.
 
 #### `wdio:maxInstances`
 
-Maximum number of total parallel running workers for the specific browser/capability. Takes precedence over [maxInstances](#configuration#maxInstances) and [maxInstancesPerCapability](configuration/#maxinstancespercapability).
+<Option type="number">
 
-Type: `number`
+Maximum number of total parallel running workers for the specific browser/capability. Takes precedence over [maxInstances](configuration/#maxinstances) and [maxInstancesPerCapability](configuration/#maxinstancespercapability).
+
+</Option>
 
 #### `wdio:specs`
 
+<Option type="(String | String[])[]">
+
 Define specs for test execution for that browser/capability. Same as the [regular `specs` configuration option](configuration#specs), but specific to the browser/capability. Takes precedence over `specs`.
 
-Type: `(String | String[])[]`
+</Option>
 
 #### `wdio:exclude`
 
+<Option type="String[]">
+
 Exclude specs from test execution for that browser/capability. Same as the [regular `exclude` configuration option](configuration#exclude), but specific to the browser/capability. Excludes after the global `exclude` configuration option is applied.
 
-Type: `String[]`
+</Option>
 
 #### `wdio:enforceWebDriverClassic`
 
+<Option type="boolean">
+
 By default, WebdriverIO attempts to establish a WebDriver Bidi session. If you don't prefer that, you can set this flag to disable this behavior.
 
-Type: `boolean`
+For Chrome on Android through Appium (UiAutomator2 driver), WebdriverIO also sets `appium:chromedriverForwardBiDi: true`, so that Appium sends WebDriver Bidi on to Chromedriver. This needs Appium 3.9.0 or later and UiAutomator2 8.7.3 or later. When the WebDriver Bidi server of an Appium browser session can not run browser commands (for example with older versions), WebdriverIO continues the session with WebDriver Classic and logs a warning.
+
+</Option>
+
+#### `wdio:experimentalBiDiCommands`
+
+<Option type="boolean" default="false">
+
+In a WebDriver BiDi session, runs element commands and browser commands like `getTitle`, `getUrl`, `refresh` and `takeScreenshot` over WebDriver BiDi instead of WebDriver Classic. Required for [parallel tests in a spec file](./ParallelTests.md). Experimental: it changes some command behavior in every test, e.g. `addValue` and `clearValue` dispatch synthetic DOM events and `click` is sent through the Actions API. See [Behavior changes of the BiDi element commands](./ParallelTests.md#behavior-changes-of-the-bidi-element-commands).
+
+```ts
+{
+    browserName: 'chrome',
+    'wdio:experimentalBiDiCommands': true
+}
+```
+
+In every WebDriver BiDi session with Chrome or Edge 137 and later (or when the browser version is not known), with or without this capability, WebdriverIO removes the on-page log of the ChromeDriver BiDi Mapper when the session starts: that log makes each command after a large BiDi message (for example a screenshot) slower ([crbug.com/577213792](https://issues.chromium.org/issues/577213792)). To keep the log, set the environment variable `WDIO_KEEP_BIDI_MAPPER_LOG=1`.
+
+</Option>
+
+#### `wdio:electronVersion`
+
+<Option type="string">
+
+Downloads the Chromedriver bundled with this Electron release instead of the one from Chrome for Testing, for testing an Electron app set as `goog:chromeOptions.binary`. If `browserVersion` is also set, WebdriverIO uses the Chromedriver for that version instead when the Electron release can't be downloaded or `CHROMEDRIVER_CDNURL` is set. Nightly versions come from [electron/nightlies](https://github.com/electron/nightlies/releases). The Electron service sets it for you from the app's Electron version.
+
+```ts
+{
+    browserName: 'chrome',
+    'wdio:electronVersion': '33.2.1',
+    // a BiDi session replaces the app's window with `data:,`
+    'wdio:enforceWebDriverClassic': true,
+    'goog:chromeOptions': {
+        binary: './out/my-app-darwin-arm64/my-app.app/Contents/MacOS/my-app'
+    }
+}
+```
+
+</Option>
 
 #### Common Driver Options
 
-While all driver offer different parameters for configuration, there are some common ones that WebdriverIO understand and uses for setting up your driver or browser:
+While all drivers offer different parameters for configuration, there are some common ones that WebdriverIO understands and uses for setting up your driver or browser:
 
 ##### `cacheDir`
 
+<Option type="string" default="process.env.WEBDRIVER_CACHE_DIR || os.tmpdir()">
+
 The path to the root of the cache directory. This directory is used to store all drivers that are downloaded when attempting to start a session.
 
-Type: `string`<br />
-Default: `process.env.WEBDRIVER_CACHE_DIR || os.tmpdir()`
+</Option>
 
 ##### `binary`
+
+<Option type="string">
 
 Path to a custom driver binary. If set WebdriverIO won't attempt to download a driver but will use the one provided by this path. Make sure the driver is compatible with the browser you are using.
 
 You can provide this path via `CHROMEDRIVER_PATH`, `GECKODRIVER_PATH` or `EDGEDRIVER_PATH` environment variables.
 
-Type: `string`
-
+</Option>
 :::caution
 
 If the driver `binary` is set, WebdriverIO won't attempt to download a driver but will use the one provided by this path. Make sure the driver is compatible with the browser you are using.
+
+:::
+
+#### Custom Driver Download Host
+
+If the public driver CDNs are not reachable from your environment, e.g. because you run your tests behind a corporate proxy or mirror the drivers in an internal artifact registry, you can point the download to a custom host using the following environment variables:
+
+- Chrome: `CHROMEDRIVER_CDNURL`, defaults to `https://storage.googleapis.com/chrome-for-testing-public`
+- Microsoft Edge: `EDGEDRIVER_CDNURL`, defaults to `https://msedgedriver.microsoft.com`
+
+The mirror is expected to serve the driver archives under the same paths as the original CDN, e.g. for Chrome:
+
+```sh
+CHROMEDRIVER_CDNURL=https://artifactory.company.com/chrome-for-testing npx wdio run wdio.conf.js
+```
+
+which resolves the driver to `https://artifactory.company.com/chrome-for-testing/<buildId>/<platform>/chromedriver-<platform>.zip`, where `<platform>` is one of `linux64`, `linux-arm64`, `mac-x64`, `mac-arm64`, `win32` or `win64`, e.g. `.../140.0.7339.207/mac-arm64/chromedriver-mac-arm64.zip`.
+
+:::info Fully offline environments
+
+These variables redirect the driver download only. To keep WebdriverIO from reaching the public internet at all, four more conditions have to be met:
+
+- **A browser has to be available locally.** If WebdriverIO can't find an installed Chrome or Firefox it downloads the browser too, and that download does not honor these variables. Either install the browser on the machine or point WebdriverIO at it via `goog:chromeOptions.binary` / `moz:firefoxOptions.binary`.
+- **Use a full version number.** If `browserVersion` is omitted, WebdriverIO reads the exact version from the local browser and no version lookup is needed. If you do set it, use the complete four part version, e.g. `140.0.7339.207`. A release channel (`stable`), a milestone (`140`) or a partial version (`140.0.7339`) requires a version lookup against a public Google endpoint that can't be redirected.
+- **Chromedriver has to come from Chrome for Testing.** For Chrome older than `153.0.8001.0` on Linux ARM64, and with `wdio:electronVersion` but no `browserVersion`, Chromedriver is downloaded from Electron's GitHub releases, which these variables don't redirect.
+- **Make sure the mirror actually has the version you need.** If the driver can't be fetched from your host — because the version isn't mirrored, but equally because the url is wrong or the credentials were rejected — WebdriverIO logs a warning and then looks up the closest known good version, which again queries the public endpoint. Check the warning for the host it tried if a run unexpectedly reaches the internet or picks a version you didn't ask for.
 
 :::
 
@@ -125,82 +201,120 @@ In order to propagate options to the driver you can use the following custom cap
 <TabItem value="chrome">
 
 ##### adbPort
+
+<Option type="number">
+
 The port on which the ADB driver should run.
 
 Example: `9515`
 
-Type: `number`
+</Option>
 
 ##### urlBase
+
+<Option type="string">
+
 Base URL path prefix for commands, e.g. `wd/url`.
 
 Example: `/`
 
-Type: `string`
+</Option>
 
 ##### logPath
+
+<Option type="string">
+
 Write server log to file instead of stderr, increases log level to `INFO`
 
-Type: `string`
+</Option>
 
 ##### logLevel
+
+<Option type="string">
+
 Set log level. Possible options `ALL`, `DEBUG`, `INFO`, `WARNING`, `SEVERE`, `OFF`.
 
-Type: `string`
+</Option>
 
 ##### verbose
+
+<Option type="boolean">
+
 Log verbosely (equivalent to `--log-level=ALL`)
 
-Type: `boolean`
+</Option>
 
 ##### silent
+
+<Option type="boolean">
+
 Log nothing (equivalent to `--log-level=OFF`)
 
-Type: `boolean`
+</Option>
 
 ##### appendLog
+
+<Option type="boolean">
+
 Append log file instead of rewriting.
 
-Type: `boolean`
+</Option>
 
 ##### replayable
+
+<Option type="boolean">
+
 Log verbosely and don't truncate long strings so that the log can be replayed (experimental).
 
-Type: `boolean`
+</Option>
 
 ##### readableTimestamp
+
+<Option type="boolean">
+
 Add readable timestamps to log.
 
-Type: `boolean`
+</Option>
 
 ##### enableChromeLogs
+
+<Option type="boolean">
+
 Show logs from the browser (overrides other logging options).
 
-Type: `boolean`
+</Option>
 
 ##### bidiMapperPath
+
+<Option type="string">
+
 Custom bidi mapper path.
 
-Type: `string`
+</Option>
 
 ##### allowedIps
+
+<Option type="string[]" default="['']">
+
 Comma-separated allowlist of remote IP addresses which are allowed to connect to EdgeDriver.
 
-Type: `string[]`<br />
-Default: `['']`
+</Option>
 
 ##### allowedOrigins
+
+<Option type="string[]" default="['*']">
+
 Comma-separated allowlist of request origins which are allowed to connect to EdgeDriver. Using `*` to allow any host origin is dangerous!
 
-Type: `string[]`<br />
-Default: `['*']`
+</Option>
 
 ##### spawnOpts
+
+<Option type="SpawnOptionsWithoutStdio | SpawnOptionsWithStdioTuple<StdioOption, StdioOption, StdioOption>" default="undefined">
+
 Options to be passed into the driver process.
 
-Type: `SpawnOptionsWithoutStdio | SpawnOptionsWithStdioTuple<StdioOption, StdioOption, StdioOption>`<br />
-Default: `undefined`
-
+</Option>
 </TabItem>
 <TabItem value="firefox">
 
@@ -438,3 +552,5 @@ declare global {
     }
 }
 ```
+
+

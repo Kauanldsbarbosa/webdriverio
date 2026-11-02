@@ -1,7 +1,7 @@
 {
   "name": "webdriverio",
   "description": "Next-gen browser and mobile automation test framework for Node.js",
-  "version": "9.27.2",
+  "version": "10.1.0",
   "homepage": "https://webdriver.io",
   "author": "Christian Bromann <mail@bromann.dev>",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "url": "https://github.com/webdriverio/webdriverio/issues"
   },
   "engines": {
-    "node": ">=18.20.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1"
   },
   "tags": [
     "webdriver",
@@ -64,26 +64,34 @@
     }
   },
   "types": "./build/index.d.ts",
-  "typeScriptVersion": "3.8.3",
+  "typeScriptVersion": "6.0.3",
   "devDependencies": {
-    "@sinonjs/fake-timers": "^14.0.0",
-    "@types/archiver": "^6.0.2",
+    "@sinonjs/fake-timers": "^15.4.0",
+    "@types/archiver": "^8.0.0",
     "@types/aria-query": "^5.0.4",
     "@types/lodash.clonedeep": "^4.5.9",
-    "@types/lodash.zip": "^4.2.9",
-    "puppeteer-core": "^24.12.1",
-    "safe-stable-stringify": "^2.4.3"
+    "dom-accessibility-api": "^0.7.1",
+    "puppeteer-core": "^25.11.0",
+    "react": "^18.3.1",
+    "react-16": "npm:react@16.14.0",
+    "react-17": "npm:react@17.0.2",
+    "react-19": "npm:react@19.3.0",
+    "react-dom": "^18.3.1",
+    "react-dom-16": "npm:react-dom@16.14.0",
+    "react-dom-17": "npm:react-dom@17.0.2",
+    "react-dom-19": "npm:react-dom@19.3.0",
+    "safe-stable-stringify": "^3.0.0"
   },
   "dependencies": {
-    "@types/node": "^20.11.30",
-    "@types/sinonjs__fake-timers": "^8.1.5",
+    "@types/node": "^22.20.4",
+    "@types/sinonjs__fake-timers": "^15.0.1",
     "@wdio/config": "workspace:*",
     "@wdio/logger": "workspace:*",
     "@wdio/protocols": "workspace:*",
     "@wdio/repl": "workspace:*",
     "@wdio/types": "workspace:*",
     "@wdio/utils": "workspace:*",
-    "archiver": "^7.0.1",
+    "archiver": "^8.0.0",
     "aria-query": "^5.3.0",
     "cheerio": "^1.0.0-rc.12",
     "css-shorthand-properties": "^1.1.1",
@@ -93,16 +101,14 @@
     "is-plain-obj": "^4.1.0",
     "jszip": "^3.10.1",
     "lodash.clonedeep": "^4.5.0",
-    "lodash.zip": "^4.2.0",
     "query-selector-shadow-dom": "^1.0.1",
-    "resq": "^1.11.0",
     "rgb2hex": "0.2.5",
-    "serialize-error": "^12.0.0",
+    "serialize-error": "^13.0.2",
     "urlpattern-polyfill": "^10.0.0",
     "webdriver": "workspace:*"
   },
   "peerDependencies": {
-    "puppeteer-core": ">=22.x || <=24.x"
+    "puppeteer-core": ">=24 <26"
   },
   "peerDependenciesMeta": {
     "puppeteer-core": {

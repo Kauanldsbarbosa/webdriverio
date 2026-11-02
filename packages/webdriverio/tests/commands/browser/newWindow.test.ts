@@ -2,9 +2,11 @@
  * @vitest-environment jsdom
  */
 import path from 'node:path'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { expect, describe, beforeEach, afterEach, it, vi, type MockInstance } from 'vitest'
 
 import { remote } from '../../../src/index.js'
+import { getParallelContextStore, setParallelContextStore } from '../../../src/session/context.js'
 
 vi.mock('fetch')
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
@@ -38,14 +40,11 @@ describe('newWindow', () => {
             null
         ])
 
-        const newHandle = await browser.newWindow('https://webdriver.io', {
-            windowName: 'some name',
-            windowFeatures: 'some params'
-        })
+        const newHandle = await browser.newWindow('https://webdriver.io')
         expect(newHandle.handle).toBe('new-window-handle')
         expect(vi.mocked(fetch).mock.calls).toHaveLength(8)
         expect(JSON.parse(vi.mocked(fetch).mock.calls[2][1]?.body as any).args)
-            .toEqual(['https://webdriver.io', 'some name', 'some params'])
+            .toEqual(['https://webdriver.io'])
         // @ts-expect-error mock implementation
         expect(vi.mocked(fetch).mock.calls[3][0].pathname)
             .toContain('/window/handles')
@@ -71,7 +70,22 @@ describe('newWindow', () => {
         await browser.newWindow('https://webdriver.io')
         expect(vi.mocked(fetch).mock.calls).toHaveLength(6)
         expect(JSON.parse(vi.mocked(fetch).mock.calls[2][1]?.body as any).args)
-            .toEqual(['https://webdriver.io', '', ''])
+            .toEqual(['https://webdriver.io'])
+    })
+
+    it('should reject removed window options', async () => {
+        const browser = await remote({
+            baseUrl: 'http://foobar.com',
+            capabilities: {
+                browserName: 'foobar'
+            }
+        })
+
+        await expect(browser.newWindow('https://webdriver.io', {
+            // @ts-expect-error removed in v10
+            windowName: 'some name',
+            windowFeatures: 'some params'
+        })).rejects.toThrow('The `windowName` and `windowFeatures` options were removed from `newWindow` in WebdriverIO v10.')
     })
 
     it('should fail if url is invalid', async () => {
@@ -102,10 +116,7 @@ describe('newWindow', () => {
             }
         })
 
-        const error = await browser.newWindow('https://webdriver.io', {
-            windowName: 'some name',
-            windowFeatures: 'some params'
-        }).catch((err: Error) => err) as Error
+        const error = await browser.newWindow('https://webdriver.io').catch((err: Error) => err) as Error
         expect(error.message).toContain('not supported on mobile')
     })
 
@@ -122,17 +133,18 @@ describe('newWindow', () => {
         const browsingContextNavigateSpy: MockInstance = vi.spyOn(browser, 'browsingContextNavigate')
         browsingContextNavigateSpy.mockImplementation(() => ({}))
 
-        const newHandle = await browser.newWindow('https://webdriver.io', {
-            windowName: 'some window'
-        })
+        const newWindow = await browser.newWindow('https://webdriver.io')
 
-        expect(newHandle.type).toBe('window')
+        expect(newWindow.contextId).toBe('new-window-handle')
+        expect(newWindow.isFrame).toBe(false)
+        expect(newWindow.url).toBe('https://webdriver.io')
         expect(browsingContextCreateSpy).toHaveBeenCalledTimes(1)
         expect(browsingContextCreateSpy).toHaveBeenCalledWith({ type: 'window' })
         expect(browsingContextNavigateSpy).toHaveBeenCalledTimes(1)
         expect(browsingContextNavigateSpy).toHaveBeenCalledWith({
             context: 'new-window-handle',
-            url: 'https://webdriver.io'
+            url: 'https://webdriver.io',
+            wait: 'complete'
         })
     })
 
@@ -149,18 +161,58 @@ describe('newWindow', () => {
         const browsingContextNavigateSpy: MockInstance = vi.spyOn(browser, 'browsingContextNavigate')
         browsingContextNavigateSpy.mockImplementation(() => ({}))
 
-        const newHandle = await browser.newWindow('https://webdriver.io', {
-            type: 'tab',
-            windowName: 'some tab'
+        const newTab = await browser.newWindow('https://webdriver.io', {
+            type: 'tab'
         })
 
-        expect(newHandle.type).toBe('tab')
+        expect(newTab.contextId).toBe('new-tab-handle')
+        expect(newTab.isFrame).toBe(false)
         expect(browsingContextCreateSpy).toHaveBeenCalledTimes(1)
         expect(browsingContextCreateSpy).toHaveBeenCalledWith({ type: 'tab' })
         expect(browsingContextNavigateSpy).toHaveBeenCalledTimes(1)
         expect(browsingContextNavigateSpy).toHaveBeenCalledWith({
             context: 'new-tab-handle',
-            url: 'https://webdriver.io'
+            url: 'https://webdriver.io',
+            wait: 'complete'
+        })
+    })
+
+    // Firefox opens a tab with no referenceContext in the focused window, which can be the new
+    // window of another parallel test (https://bugzilla.mozilla.org/show_bug.cgi?id=2084843);
+    // the reference also gives the new context the user context of the test
+    describe('in parallel mode', () => {
+        let previousStore: ReturnType<typeof getParallelContextStore>
+        const store = new AsyncLocalStorage<string>()
+        const create = async (options?: Parameters<WebdriverIO.Browser['newWindow']>[1]) => {
+            const browser = await remote({ baseUrl: 'http://foobar.com', capabilities: { browserName: 'bidi' } })
+            const spy: MockInstance = vi.spyOn(browser, 'browsingContextCreate')
+            spy.mockImplementation(() => ({ context: 'new-context', type: options?.type }))
+            vi.spyOn(browser, 'browsingContextNavigate').mockImplementation(() => ({}) as never)
+            await store.run('test-window', () => browser.newWindow('https://webdriver.io', options))
+            return spy
+        }
+
+        beforeEach(() => {
+            previousStore = getParallelContextStore()
+            setParallelContextStore(store)
+        })
+        afterEach(() => {
+            setParallelContextStore(previousStore)
+        })
+
+        it.each([
+            ['a tab', { type: 'tab' as const }],
+            ['a window', { type: 'window' as const }],
+            ['the default type', undefined]
+        ])('opens %s from the window of the test', async (_, options) => {
+            const spy = await create(options)
+            expect(spy).toHaveBeenCalledWith({ type: options?.type ?? 'window', referenceContext: 'test-window' })
+        })
+
+        it('keeps the referenceContext that the test passes, also a browsing context', async () => {
+            expect(await create({ type: 'tab', referenceContext: 'other-window' })).toHaveBeenCalledWith({ type: 'tab', referenceContext: 'other-window' })
+            const context = { contextId: 'held-window', isFrame: false } as unknown as WebdriverIO.BrowsingContext
+            expect(await create({ type: 'tab', referenceContext: context })).toHaveBeenCalledWith({ type: 'tab', referenceContext: 'held-window' })
         })
     })
 })

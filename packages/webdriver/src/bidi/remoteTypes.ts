@@ -10,7 +10,7 @@
  * ```
  *
  * from the project root. You can find the scripts that generates this file in
- * ./scripts/bidi/**
+ * ./infra/bidiCodegen/**
  */
 
 export type Command = CommandData & Extensible & {
@@ -36,6 +36,18 @@ export type SessionCapabilityRequest = Extensible & {
     platformName?: string;
     proxy?: SessionProxyConfiguration;
     unhandledPromptBehavior?: SessionUserPromptHandler;
+}
+
+export type SessionCapabilityResponse = Extensible & {
+    acceptInsecureCerts: boolean;
+    browserName: string;
+    browserVersion: string;
+    platformName: string;
+    setWindowRect: boolean;
+    userAgent: string;
+    proxy?: SessionProxyConfiguration;
+    unhandledPromptBehavior?: SessionUserPromptHandler;
+    webSocketUrl?: string;
 }
 
 export type SessionProxyConfiguration = SessionAutodetectProxyConfiguration | SessionDirectProxyConfiguration | SessionManualProxyConfiguration | SessionPacProxyConfiguration | SessionSystemProxyConfiguration
@@ -221,7 +233,7 @@ export interface BrowserDownloadBehaviorDenied {
     type: 'denied';
 }
 
-export type BrowsingContextCommand = BrowsingContextActivate | BrowsingContextCaptureScreenshot | BrowsingContextClose | BrowsingContextCreate | BrowsingContextGetTree | BrowsingContextHandleUserPrompt | BrowsingContextLocateNodes | BrowsingContextNavigate | BrowsingContextPrint | BrowsingContextReload | BrowsingContextSetBypassCsp | BrowsingContextSetViewport | BrowsingContextTraverseHistory
+export type BrowsingContextCommand = BrowsingContextActivate | BrowsingContextCaptureScreenshot | BrowsingContextClose | BrowsingContextCreate | BrowsingContextGetTree | BrowsingContextHandleUserPrompt | BrowsingContextLocateNodes | BrowsingContextNavigate | BrowsingContextPrint | BrowsingContextReload | BrowsingContextSetBypassCsp | BrowsingContextSetViewport | BrowsingContextStartScreencast | BrowsingContextStopScreencast | BrowsingContextTraverseHistory
 export type BrowsingContextBrowsingContext = string
 export type BrowsingContextLocator = BrowsingContextAccessibilityLocator | BrowsingContextCssLocator | BrowsingContextContextLocator | BrowsingContextInnerTextLocator | BrowsingContextXPathLocator
 
@@ -259,6 +271,7 @@ export interface BrowsingContextXPathLocator {
 }
 
 export type BrowsingContextNavigation = string
+export type BrowsingContextDownload = string
 export type BrowsingContextReadinessState = 'none' | 'interactive' | 'complete'
 export type BrowsingContextUserPromptType = 'alert' | 'beforeunload' | 'confirm' | 'prompt'
 
@@ -284,11 +297,17 @@ export interface BrowsingContextCaptureScreenshotParameters {
     origin?: 'viewport' | 'document';
     format?: BrowsingContextImageFormat;
     clip?: BrowsingContextClipRectangle;
+    imageSize?: BrowsingContextImageSize;
 }
 
 export interface BrowsingContextImageFormat {
     type: string;
     quality?: number;
+}
+
+export interface BrowsingContextImageSize {
+    maxWidth?: JsUint;
+    maxHeight?: JsUint;
 }
 
 export type BrowsingContextClipRectangle = BrowsingContextBoxClipRectangle | BrowsingContextElementClipRectangle
@@ -400,9 +419,9 @@ export interface BrowsingContextPrintParameters {
     shrinkToFit?: boolean;
 }
 
-export // Minimum size is 1pt x 1pt. Conversion follows from
+// Minimum size is 1pt x 1pt. Conversion follows from
 // https://www.w3.org/TR/css3-values/#absolute-lengths
-interface BrowsingContextPrintMarginParameters {
+export interface BrowsingContextPrintMarginParameters {
     /**
    * @default 1
    */
@@ -471,6 +490,36 @@ export interface BrowsingContextViewport {
     height: JsUint;
 }
 
+export interface BrowsingContextStartScreencast {
+    method: 'browsingContext.startScreencast';
+    params: BrowsingContextStartScreencastParameters;
+}
+
+export interface BrowsingContextStartScreencastParameters {
+    context: BrowsingContextBrowsingContext;
+    destinationFolder?: string;
+    mimeType?: string;
+    video?: BrowsingContextMediaTrackConstraints;
+    audio?: boolean;
+}
+
+export interface BrowsingContextMediaTrackConstraints {
+    width?: JsUint;
+    height?: JsUint;
+    frameRate?: JsUint;
+}
+
+export type BrowsingContextScreencast = string
+
+export interface BrowsingContextStopScreencast {
+    method: 'browsingContext.stopScreencast';
+    params: BrowsingContextStopScreencastParameters;
+}
+
+export interface BrowsingContextStopScreencastParameters {
+    screencast: BrowsingContextScreencast;
+}
+
 export interface BrowsingContextTraverseHistory {
     method: 'browsingContext.traverseHistory';
     params: BrowsingContextTraverseHistoryParameters;
@@ -481,7 +530,7 @@ export interface BrowsingContextTraverseHistoryParameters {
     delta: JsInt;
 }
 
-export type EmulationCommand = EmulationSetForcedColorsModeThemeOverride | EmulationSetGeolocationOverride | EmulationSetLocaleOverride | EmulationSetNetworkConditions | EmulationSetScreenOrientationOverride | EmulationSetScreenSettingsOverride | EmulationSetScriptingEnabled | EmulationSetScrollbarTypeOverride | EmulationSetTimezoneOverride | EmulationSetTouchOverride | EmulationSetUserAgentOverride
+export type EmulationCommand = EmulationSetForcedColorsModeThemeOverride | EmulationSetGeolocationOverride | EmulationSetLocaleOverride | EmulationSetMediaFeaturesOverride | EmulationSetNetworkConditions | EmulationSetScreenOrientationOverride | EmulationSetScreenSettingsOverride | EmulationSetScriptingEnabled | EmulationSetScrollbarTypeOverride | EmulationSetTextLayoutModeOverride | EmulationSetTimezoneOverride | EmulationSetTouchOverride | EmulationSetUserAgentOverride | EmulationSetViewportMetaOverride
 
 export interface EmulationSetForcedColorsModeThemeOverride {
     method: 'emulation.setForcedColorsModeThemeOverride';
@@ -550,6 +599,49 @@ export interface EmulationSetLocaleOverrideParameters {
     userContexts?: BrowserUserContext[];
 }
 
+export interface EmulationSetMediaFeaturesOverride {
+    method: 'emulation.setMediaFeaturesOverride';
+    params: EmulationSetMediaFeaturesOverrideParameters;
+}
+
+export interface EmulationSetMediaFeaturesOverrideParameters {
+    features: EmulationMediaFeatures | null;
+    contexts?: BrowsingContextBrowsingContext[];
+    userContexts?: BrowserUserContext[];
+}
+
+export interface EmulationMediaFeatures {
+    anyHover?: 'none' | 'hover' | null;
+    anyPointer?: 'none' | 'coarse' | 'fine' | null;
+    color?: JsUint | null;
+    colorGamut?: 'srgb' | 'p3' | 'rec2020' | null;
+    colorIndex?: JsUint | null;
+    displayMode?: 'fullscreen' | 'standalone' | 'minimal-ui' | 'browser' | 'picture-in-picture' | null;
+    dynamicRange?: 'standard' | 'high' | null;
+    environmentBlending?: 'opaque' | 'additive' | 'subtractive' | null;
+    forcedColors?: 'none' | 'active' | null;
+    grid?: 0 | 1 | null;
+    horizontalViewportSegments?: JsUint | null;
+    hover?: 'none' | 'hover' | null;
+    invertedColors?: 'none' | 'inverted' | null;
+    monochrome?: JsUint | null;
+    navControls?: 'none' | 'back' | null;
+    overflowBlock?: 'none' | 'scroll' | 'optional-paged' | 'paged' | null;
+    overflowInline?: 'none' | 'scroll' | null;
+    pointer?: 'none' | 'coarse' | 'fine' | null;
+    prefersColorScheme?: 'light' | 'dark' | null;
+    prefersContrast?: 'no-preference' | 'more' | 'less' | 'custom' | null;
+    prefersReducedData?: 'no-preference' | 'reduce' | null;
+    prefersReducedMotion?: 'no-preference' | 'reduce' | null;
+    prefersReducedTransparency?: 'no-preference' | 'reduce' | null;
+    scan?: 'interlace' | 'progressive' | null;
+    scripting?: 'none' | 'initial-only' | 'enabled' | null;
+    update?: 'none' | 'slow' | 'fast' | null;
+    verticalViewportSegments?: JsUint | null;
+    videoColorGamut?: 'srgb' | 'p3' | 'rec2020' | null;
+    videoDynamicRange?: 'standard' | 'high' | null;
+}
+
 export interface EmulationSetNetworkConditions {
     method: 'emulation.setNetworkConditions';
     params: EmulationSetNetworkConditionsParameters;
@@ -613,6 +705,17 @@ export interface EmulationSetUserAgentOverrideParameters {
     userContexts?: BrowserUserContext[];
 }
 
+export interface EmulationSetViewportMetaOverride {
+    method: 'emulation.setViewportMetaOverride';
+    params: EmulationSetViewportMetaOverrideParameters;
+}
+
+export interface EmulationSetViewportMetaOverrideParameters {
+    viewportMeta: true | null;
+    contexts?: BrowsingContextBrowsingContext[];
+    userContexts?: BrowserUserContext[];
+}
+
 export interface EmulationSetScriptingEnabled {
     method: 'emulation.setScriptingEnabled';
     params: EmulationSetScriptingEnabledParameters;
@@ -634,6 +737,19 @@ export interface EmulationSetScrollbarTypeOverrideParameters {
     contexts?: BrowsingContextBrowsingContext[];
     userContexts?: BrowserUserContext[];
 }
+
+export interface EmulationSetTextLayoutModeOverride {
+    method: 'emulation.setTextLayoutModeOverride';
+    params: EmulationSetTextLayoutModeOverrideParameters;
+}
+
+export interface EmulationSetTextLayoutModeOverrideParameters {
+    textLayoutMode: EmulationTextLayoutMode | null;
+    contexts?: BrowsingContextBrowsingContext[];
+    userContexts?: BrowserUserContext[];
+}
+
+export type EmulationTextLayoutMode = 'mobile'
 
 export interface EmulationSetTimezoneOverride {
     method: 'emulation.setTimezoneOverride';
@@ -910,15 +1026,15 @@ export interface ScriptChannelProperties {
     ownership?: ScriptResultOwnership;
 }
 
-export type ScriptEvaluateResult = ScriptEvaluateResultSuccess | ScriptEvaluateResultException
+export type ScriptEvaluationResult = ScriptEvaluationResultSuccess | ScriptEvaluationResultException
 
-export interface ScriptEvaluateResultSuccess {
+export interface ScriptEvaluationResultSuccess {
     type: 'success';
     result: ScriptRemoteValue;
     realm: ScriptRealm;
 }
 
-export interface ScriptEvaluateResultException {
+export interface ScriptEvaluationResultException {
     type: 'exception';
     exceptionDetails: ScriptExceptionDetails;
     realm: ScriptRealm;
@@ -983,7 +1099,7 @@ export interface ScriptUndefinedValue {
 }
 
 export interface ScriptNullValue {
-    type: null;
+    type: 'null';
 }
 
 export interface ScriptStringValue {

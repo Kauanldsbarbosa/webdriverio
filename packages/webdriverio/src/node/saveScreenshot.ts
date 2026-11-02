@@ -5,6 +5,9 @@ import { getBrowserObject } from '@wdio/utils'
 import type { remote } from 'webdriver'
 import { assertDirectoryExists } from './utils.js'
 import { getContextManager } from '../session/context.js'
+import { contextIdOf, isBrowsingContext } from '../session/browsingContext.js'
+import { frameOffset } from '../utils/frameOffset.js'
+import { withScreenshotEvents } from '../utils/screenshotEvents.js'
 import type { SaveScreenshotOptions } from '../types.js'
 /**
  *
@@ -76,11 +79,11 @@ export function takeScreenshotClassic (this: WebdriverIO.Browser, filepath: stri
  * takeScreenshotBidi
  * @returns {string} a base64 encoded screenshot
  */
-export async function takeScreenshotBidi (this: WebdriverIO.Browser, filepath: string, options?: SaveScreenshotOptions): Promise<string> {
+export async function takeScreenshotBidi (this: WebdriverIO.Browser | WebdriverIO.BrowsingContext, filepath: string, options?: SaveScreenshotOptions): Promise<string> {
     const browser = getBrowserObject(this)
     const contextManager = getContextManager(browser)
-    const context = await contextManager.getCurrentContext()
-    const tree = await this.browsingContextGetTree({})
+    const context = await contextIdOf(this)
+    const tree = await browser.browsingContextGetTree({})
     const origin: remote.BrowsingContextCaptureScreenshotParameters['origin'] = options?.fullPage ? 'document' : 'viewport'
     const givenFormat = options?.format || path.extname(filepath).slice(1)
     const imageFormat = givenFormat === 'png'
@@ -128,16 +131,40 @@ export async function takeScreenshotBidi (this: WebdriverIO.Browser, filepath: s
         }
     }
 
+    if (isBrowsingContext(this) && this.isFrame) {
+        const { top, x, y } = await frameOffset(this)
+        const html = await this.execute(() => {
+            const rect = document.documentElement.getBoundingClientRect()
+            return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        })
+        return withScreenshotEvents(browser, 'takeScreenshot', () => browser.browsingContextCaptureScreenshot({
+            context: top.contextId,
+            origin: 'viewport',
+            format,
+            clip: {
+                type: 'box',
+                x: Math.round(x + html.x),
+                y: Math.round(y + html.y),
+                width: Math.round(html.width),
+                height: Math.round(html.height)
+            }
+        }).then(({ data }) => data))
+    }
+
     /**
      * WebDriver Bidi doesn't allow to take a screenshot of an iframe, it fails with:
      * "unsupported operation - Non-top-level 'context'". Therefor we need to check if
      * we are within an iframe and if so, take a screenshot of the document element
      * instead.
      */
-    const { data } = contextManager.findParentContext(context, tree.contexts)
-        ? await browser.$('html').getElement().then(
-            (el) => this.takeElementScreenshot(el.elementId).then((data) => ({ data })))
-        : await this.browsingContextCaptureScreenshot({ context, origin, format, clip })
-    return data
+    if (contextManager.findParentContext(context, tree.contexts)) {
+        const el = await browser.$('html').getElement()
+        return browser.takeElementScreenshot(el.elementId)
+    }
+    /**
+     * the Classic command above sends its events itself
+     */
+    return withScreenshotEvents(browser, 'takeScreenshot', () => browser.browsingContextCaptureScreenshot({ context, origin, format, clip })
+        .then(({ data }) => data))
 }
 

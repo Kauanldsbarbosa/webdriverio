@@ -1,8 +1,10 @@
+import type { URLPattern } from 'urlpattern-polyfill'
 import { getBrowserObject } from '@wdio/utils'
 
 import type { MockFilterOptions } from '../../utils/interception/types.js'
 import WebDriverInterception from '../../utils/interception/index.js'
-import { getContextManager } from '../../session/context.js'
+import { getParallelContextStore } from '../../session/context.js'
+import { assertTopLevel, contextIdOf, isBrowsingContext } from '../../session/browsingContext.js'
 
 export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
 
@@ -38,11 +40,33 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
  *
  * :::
  *
+ * :::info
+ *
+ * A second `mock` with the same URL pattern and the same filter options replaces the
+ * first one: the first mock is restored, so it no longer changes requests or records
+ * calls. In a URL pattern, `*` already matches any characters, `/` included, and in a
+ * string pattern WebdriverIO changes `**` to `*`: `'**' + '/api'` and `'*' + '/api'`
+ * are the same pattern. To keep both mocks, give them different filter options.
+ * WebdriverIO does not change a `URLPattern` object: use a single `*` in it, as repeated
+ * wildcards before fixed text can make the match very slow and freeze a test.
+ *
+ * :::
+ *
+ * :::info
+ *
+ * On a [multi-remote](https://webdriver.io/docs/multiremote) browser, `mock` returns a
+ * [`MultiRemoteMock`](https://webdriver.io/docs/api/mock#multi-remote) instead of a single mock.
+ * `instances` lists the browser names, `getInstance(name)` returns that browser's mock,
+ * and `respond()`, `restore()`, and the other mock methods run on every instance.
+ * Captured requests stay on each mock: `mock.getInstance('myChromeBrowser').calls`.
+ *
+ * :::
+ *
  * <example>
     :mock.js
     it('should mock network resources', async () => {
         // via static string
-        const userListMock = await browser.mock('**' + '/users/list')
+        const userListMock = await browser.mock('*' + '/users/list')
         // you can also specifying the mock even more by filtering resources
         // by request or response headers, status code, postData, e.g. mock only responses with specific
         // header set and statusCode
@@ -55,7 +79,7 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
         })
 
         // comparator function
-        const apiV1Mock = await browser.mock('**' + '/api/v1', {
+        const apiV1Mock = await browser.mock('*' + '/api/v1', {
             statusCode: (statusCode) => statusCode >= 200 && statusCode <= 203,
             requestHeaders: (headers) => headers['Authorization'] && headers['Authorization'].startsWith('Bearer '),
             responseHeaders: (headers) => headers['Impersonation'],
@@ -65,7 +89,7 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
 
     it('should modify API responses', async () => {
         // filter by method
-        const todoMock = await browser.mock('**' + '/todos', {
+        const todoMock = await browser.mock('*' + '/todos', {
             method: 'get'
         })
 
@@ -92,12 +116,12 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
     })
 
     it('should modify text assets', async () => {
-        const scriptMock = await browser.mock('**' + '/script.min.js')
+        const scriptMock = await browser.mock('*' + '/script.min.js')
         scriptMock.respond('./tests/fixtures/script.js')
     })
 
     it('should redirect web resources', async () => {
-        const headerMock = await browser.mock('**' + '/header.png')
+        const headerMock = await browser.mock('*' + '/header.png')
         headerMock.respond('https://media.giphy.com/media/F9hQLAVhWnL56/giphy.gif')
 
         const pageMock = await browser.mock('https://google.com/')
@@ -108,7 +132,7 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
  * </example>
  *
  * @alias browser.mock
- * @param {String}              url                             url to mock
+ * @param {String|URLPattern}   url                             url to mock
  * @param {MockFilterOptions=}  filterOptions                   filter mock resource by additional options
  * @param {String|Function=}    filterOptions.method            filter resource by HTTP method
  * @param {Object|Function=}    filterOptions.requestHeaders    filter resource by specific request headers
@@ -120,21 +144,43 @@ export const SESSION_MOCKS: Record<string, Set<WebDriverInterception>> = {}
  *
  */
 export async function mock(
-    this: WebdriverIO.Browser,
-    url: string,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
+    url: string | URLPattern | globalThis.URLPattern,
     filterOptions?: MockFilterOptions
 ): Promise<WebdriverIO.Mock> {
     if (!this.isBidi) {
         throw new Error('Mocking is only supported when running tests using WebDriver Bidi')
     }
 
-    const browser = getBrowserObject(this)
-    const contextManager = getContextManager(browser)
-    const context = await contextManager.getCurrentContext()
-    if (!SESSION_MOCKS[context]) {
-        SESSION_MOCKS[context] = new Set()
+    if (isBrowsingContext(this)) {
+        assertTopLevel(this, 'mock')
     }
-    const networkInterception = await WebDriverInterception.initiate(url, filterOptions || {}, this)
-    SESSION_MOCKS[context].add(networkInterception)
+
+    const browser = getBrowserObject(this)
+    const context = await contextIdOf(this)
+    // a session-wide mock is keyed by session, so a switch of the current tab does not move it
+    const test = getParallelContextStore().getStore()
+    const contexts = isBrowsingContext(this) || test ? [context] : undefined
+    const sessionKey = contexts ? context : `session:${browser.sessionId}`
+    if (!SESSION_MOCKS[sessionKey]) {
+        SESSION_MOCKS[sessionKey] = new Set()
+    }
+    const normalizedFilterOptions = filterOptions || {}
+    for (const existingMock of Array.from(SESSION_MOCKS[sessionKey])) {
+        if (!existingMock.isSameDefinition(url, normalizedFilterOptions)) {
+            continue
+        }
+
+        await existingMock.restore()
+        SESSION_MOCKS[sessionKey].delete(existingMock)
+    }
+
+    const networkInterception = await WebDriverInterception.initiate(url, normalizedFilterOptions, browser, {
+        contexts,
+        sessionKey,
+        test
+    })
+    SESSION_MOCKS[sessionKey].add(networkInterception)
+
     return networkInterception satisfies WebdriverIO.Mock
 }

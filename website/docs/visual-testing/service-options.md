@@ -1,6 +1,7 @@
 ---
 id: service-options
 title: Service Options
+description: "Configure default options for the visual service, including screenshot capture, full-page screenshots, baselines, folders and reporting."
 ---
 
 Service options are the options that can be set when the service is instantiated and will be used for each method call.
@@ -24,32 +25,103 @@ export const config = {
 };
 ```
 
-## Default Options
+# Default Options
 
-### `addressBarShadowPadding`
+## Screenshot capture
 
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** `6`
--   **Supported Application Contexts:** Web
+---
 
-The padding needs to be added to the address bar on iOS and Android to do a proper cutout of the viewport.
+### `hideScrollBars`
 
-### `autoElementScroll`
+<Option type="boolean" default="true" required="No" contexts="Web, Hybrid App (Webview)">
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `true`
--   **Supported Application Contexts:** Web, Hybrid App (Webview)
+Hide scrollbars in the application. If set to true all scrollbars will be disabled before taking a screenshot. This is set to default `true` to prevent extra issues.
 
-This option allows you to disable the automatic scrolling of the element into the view when an element screenshot is created.
+</Option>
+### `disableBlinkingCursor`
 
+<Option type="boolean" default="false" required="No" contexts="Web, Hybrid App (Webview)">
+
+En/Disable all `input`, `textarea`, `[contenteditable]` caret "blinking" in the application. If set to `true` the caret will be set to `transparent` before taking a screenshot
+and reset when done
+
+</Option>
+### `disableCSSAnimation`
+
+<Option type="boolean" default="false" required="No" contexts="Web, Hybrid App (Webview)">
+
+En/Disable all CSS animations in the application. If set to `true` all animations will be disabled before taking a screenshot
+and reset when done
+
+</Option>
+### `enableLayoutTesting`
+
+<Option type="boolean" default="false" required="No" contexts="Web">
+
+This will hide all text on a page so only the layout will be used for comparison. Hiding will be done by adding the style `'color': 'transparent !important'` to **each** element.
+
+For the output see [Test Output](/docs/visual-testing/test-output#enablelayouttesting)
+
+:::info
+By using this flag each element that contains text (so not only `p, h1, h2, h3, h4, h5, h6, span, a, li`, but also `div|button|..`) will get this property. There is **no** option to tailor this.
+:::
+
+</Option>
+### `ignoreRegionPadding`
+
+<Option type="number" default="1" required="No" contexts="Web, Hybrid App (Webview)">
+
+Padding in device pixels added to each side of ignore regions, making each region 2× this value wider and taller. This helps avoid 1 px boundary differences that can appear on high-DPR displays or with the BiDi screenshot protocol. Set to `0` to disable.
+
+</Option>
+### `waitForFontsLoaded`
+
+<Option type="boolean" default="true" required="No" contexts="Web, Hybrid App (Webview)">
+
+Fonts, including third-party fonts, can be loaded synchronously or asynchronously. Asynchronous loading means that fonts might load after WebdriverIO determines that a page has fully loaded. To prevent font rendering issues, this module, by default, will wait for all fonts to be loaded before taking a screenshot.
+
+</Option>
+## Full-page screenshots
+
+---
+
+### `userBasedFullPageScreenshot`
+
+<Option type="boolean" default="false" required="No" contexts="Web, Hybrid App (Webview) **Introduced in visual-service@7.0.0">
+
+By default, full-page screenshots on desktop web are captured using the WebDriver BiDi protocol, which enables fast, stable, and consistent screenshots without scrolling.
+When userBasedFullPageScreenshot is set to true, the screenshot process simulates a real user: scrolling through the page, capturing viewport-sized screenshots, and stitching them together. This method is useful for pages with lazy-loaded content or dynamic rendering that depends on scroll position.
+
+Use this option if your page relies on content loading while scrolling or if you want to preserve the behavior of older screenshot methods.
+
+</Option>
+### `fullPageScrollTimeout`
+
+<Option type="number" default="1500" required="No" contexts="Web">
+
+The timeout in milliseconds to wait after a scroll. This might help identify pages with lazy loading.
+
+:::info
+
+This will only work when the service/method option `userBasedFullPageScreenshot` is set to `true`, see also [`userBasedFullPageScreenshot`](/docs/visual-testing/service-options#userbasedfullpagescreenshot)
+
+:::
+
+</Option>
+## Mobile & device
+
+---
+
+### `isHybridApp`
+
+<Option type="boolean" default="false" required="No" contexts="Hybrid App (Webview)">
+
+Set this to `true` when testing a hybrid app (a native shell with one or more embedded webviews). This adjusts how the module handles status bar and address bar cutouts for webview-based screens, falling back to safe defaults when native device rectangle data is unavailable.
+
+</Option>
 ### `addIOSBezelCorners`
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
+<Option type="boolean" default="false" required="No" contexts="Web, Hybrid App (Webview), Native App">
 
 Add bezel corners and notch/dynamic island to the screenshot for iOS devices.
 
@@ -88,35 +160,28 @@ This can only be done when the device name **CAN** automatically be determined a
 -   iPad Pro (12.9-inch) 5th Generation: `ipadpro129`
 :::
 
-### `autoSaveBaseline`
+</Option>
+### `addressBarShadowPadding`
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `true`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
+<Option type="number" default="6" required="No" contexts="Web">
 
-If no baseline image is found during the comparison the image is automatically copied to the baseline folder.
+The padding needs to be added to the address bar on iOS and Android to do a proper cutout of the viewport.
 
-### `alwaysSaveActualImage`
+</Option>
+### `toolBarShadowPadding`
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `true`
--   **Supported Application Contexts:** All
+<Option type="number" default={`6 for Android and \`15\` for iOS (\`6\` by default and \`9\` will be added automatically for the possible home bar on iPhones with a notch or iPads that have a home bar)`} required="No" contexts="Web">
 
-When setting this option to `false` it will:
+The padding which needs to be added to the toolbar bar on iOS and Android to do a proper cutout of the viewport.
 
-- not save the actual image when there is **no** difference
-- not store the jsonreport file when `createJsonReportFiles` is set to `true`. It will also show a warning in the logs that `createJsonReportFiles` is disabled
+</Option>
+## File & folder management
 
-This should create a better performance because no files are writting to the system and should make sure that there's not a lot of noise in the `actual` folder.
+---
 
 ### `baselineFolder`
 
--   **Type:** `string|()=> string`
--   **Mandatory:** No
--   **Default:** `.path/to/testfile/__snapshots__/`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
+<Option type="string|()=> string" default=".path/to/testfile/__snapshots__/" required="No" contexts="Web, Hybrid App (Webview), Native App">
 
 The directory that will hold all the baseline images that are used during the comparison. If not set, the default value will be used which will store the files in a `__snapshots__/`-folder next to the spec that executes the visual tests. A function that returns a `string` can also be used to set the `baselineFolder` value:
 
@@ -133,12 +198,31 @@ The directory that will hold all the baseline images that are used during the co
 }
 ```
 
+</Option>
+### `screenshotPath`
+
+<Option type="string | () => string" default=".tmp/" required="no" contexts="Web, Hybrid App (Webview), Native App">
+
+The directory that will hold all the actual/different screenshots. If not set, the default value will be used. A function that
+returns a string can also be used to set the screenshotPath value:
+
+```js
+{
+    screenshotPath: path.join(process.cwd(), 'foo', 'bar', 'screenshotPath')
+},
+// OR
+{
+    screenshotPath: () => {
+        // Do some magic here
+        return path.join(process.cwd(), 'foo', 'bar', 'screenshotPath');
+    }
+}
+```
+
+</Option>
 ### `clearRuntimeFolder`
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
+<Option type="boolean" default="false" required="No" contexts="Web, Hybrid App (Webview), Native App">
 
 Delete runtime folder (`actual` & `diff) on initialization
 
@@ -146,11 +230,87 @@ Delete runtime folder (`actual` & `diff) on initialization
 This will only work when the [`screenshotPath`](#screenshotpath) is set through the plugin options, and **WILL NOT WORK** when you set the folders in the methods
 :::
 
+</Option>
+### `savePerInstance`
+
+<Option type="boolean" default="false" required="no" contexts="Web, Hybrid App (Webview), Native App">
+
+Save the images per instance in a separate folder so for example all Chrome screenshots will be saved in a Chrome folder like `desktop_chrome`.
+
+</Option>
+### `formatImageName`
+
+<Option type="string" default={`{tag}-{browserName}-{width}x{height}-dpr-{dpr}`} required="No" contexts="Web, Hybrid App (Webview), Native App">
+
+The name of the saved images can be customized by passing the parameter `formatImageName` with a format string like:
+
+```sh
+{tag}-{browserName}-{width}x{height}-dpr-{dpr}
+```
+
+The following variables can be passed to format the string and will automatically be read from the instance capabilities.
+If they can't be determined the defaults will be used.
+
+-   `browserName`: The name of the browser in the provided capabilities
+-   `browserVersion`: The version of the browser provided in the capabilities
+-   `deviceName`: The device name from the capabilities
+-   `dpr`: The device pixel ratio
+-   `height`: The height of the screen
+-   `logName`: The logName from capabilities
+-   `mobile`: This will add `_app`, or the browser name after the `deviceName` to distinguish app screenshots from browser screenshots
+-   `platformName`: The name of the platform in the provided capabilities
+-   `platformVersion`: The version of the platform provided in the capabilities
+-   `tag`: The tag that is provided in the methods that is being called
+-   `width`: The width of the screen
+
+:::info
+
+You can not provide custom paths/folders in the `formatImageName`. If you want to change the path then please check changing the following options:
+
+- [`baselineFolder`](/docs/visual-testing/service-options#baselinefolder)
+- [`screenshotPath`](/docs/visual-testing/service-options#screenshotpath)
+- [`folderOptions`](/docs/visual-testing/method-options#folder-options) per method
+
+:::
+
+</Option>
+## Baseline & save behavior
+
+---
+
+### `autoSaveBaseline`
+
+<Option type="boolean" default="true" required="No" contexts="Web, Hybrid App (Webview), Native App">
+
+If no baseline image is found during the comparison the image is automatically copied to the baseline folder.
+
+</Option>
+### `autoElementScroll`
+
+<Option type="boolean" default="true" required="No" contexts="Web, Hybrid App (Webview)">
+
+This option allows you to disable the automatic scrolling of the element into the view when an element screenshot is created.
+
+</Option>
+### `alwaysSaveActualImage`
+
+<Option type="boolean" default="true" required="No" contexts="All">
+
+When setting this option to `false` it will:
+
+- not save the actual image when there is **no** difference
+- not store the jsonreport file when `createJsonReportFiles` is set to `true`. It will also show a warning in the logs that `createJsonReportFiles` is disabled
+
+This should create a better performance because no files are writting to the system and should make sure that there's not a lot of noise in the `actual` folder.
+
+</Option>
+## Reporting
+
+---
+
 ### `createJsonReportFiles` **(NEW)**
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
+<Option type="boolean" default="false" required="No">
 
 You now have the option to export the compare results into a JSON report file. By providing the option `createJsonReportFiles: true`, each image that is compared will create a report stored in the `actual` folder, next to each `actual` image result. The output will look like this:
 
@@ -271,176 +431,27 @@ The report data will give you the opportunity to build your own visual report wi
 You need to use `@wdio/visual-testing` version `5.2.0` or higher
 :::
 
-### `disableBlinkingCursor`
+</Option>
+### `diffPixelBoundingBoxProximity`
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web, Hybrid App (Webview)
+<Option type="number" default="5" required="No" contexts="Web, Hybrid App (Webview), Native App">
 
-En/Disable all `input`, `textarea`, `[contenteditable]` caret "blinking" in the application. If set to `true` the caret will be set to `transparent` before taking a screenshot
-and reset when done
+The pixel proximity used to group diff pixels together in the JSON report generated by [`createJsonReportFiles`](#createjsonreportfiles). Higher values group more pixels into fewer bounding boxes; lower values produce more accurate but more numerous boxes.
 
-### `disableCSSAnimation`
+</Option>
+## General
 
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web, Hybrid App (Webview)
-
-En/Disable all CSS animations in the application. If set to `true` all animations will be disabled before taking a screenshot
-and reset when done
-
-### `enableLayoutTesting`
-
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web
-
-This will hide all text on a page so only the layout will be used for comparison. Hiding will be done by adding the style `'color': 'transparent !important'` to **each** element.
-
-For the output see [Test Output](/docs/visual-testing/test-output#enablelayouttesting)
-
-:::info
-By using this flag each element that contains text (so not only `p, h1, h2, h3, h4, h5, h6, span, a, li`, but also `div|button|..`) will get this property. There is **no** option to tailor this.
-:::
-
-### `formatImageName`
-
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** `{tag}-{browserName}-{width}x{height}-dpr-{dpr}`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
-
-The name of the saved images can be customized by passing the parameter `formatImageName` with a format string like:
-
-```sh
-{tag}-{browserName}-{width}x{height}-dpr-{dpr}
-```
-
-The following variables can be passed to format the string and will automatically be read from the instance capabilities.
-If they can't be determined the defaults will be used.
-
--   `browserName`: The name of the browser in the provided capabilities
--   `browserVersion`: The version of the browser provided in the capabilities
--   `deviceName`: The device name from the capabilities
--   `dpr`: The device pixel ratio
--   `height`: The height of the screen
--   `logName`: The logName from capabilities
--   `mobile`: This will add `_app`, or the browser name after the `deviceName` to distinguish app screenshots from browser screenshots
--   `platformName`: The name of the platform in the provided capabilities
--   `platformVersion`: The version of the platform provided in the capabilities
--   `tag`: The tag that is provided in the methods that is being called
--   `width`: The width of the screen
-
-:::info
-
-You can not provide custom paths/folders in the `formatImageName`. If you want to change the path then please check changing the following options:
-
-- [`baselineFolder`](/docs/visual-testing/service-options#baselinefolder)
-- [`screenshotPath`](/docs/visual-testing/service-options#screenshotpath)
-- [`folderOptions`](/docs/visual-testing/method-options#folder-options) per method
-
-:::
-
-### `fullPageScrollTimeout`
-
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** `1500`
--   **Supported Application Contexts:** Web
-
-The timeout in milliseconds to wait after a scroll. This might help identify pages with lazy loading.
-
-:::info
-
-This will only work when the service/method option `userBasedFullPageScreenshot` is set to `true`, see also [`userBasedFullPageScreenshot`](/docs/visual-testing/service-options#userbasedbullpagescreenshot)
-
-:::
-
-### `hideScrollBars`
-
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `true`
--   **Supported Application Contexts:** Web, Hybrid App (Webview)
-
-Hide scrollbars in the application. If set to true all scrollbars will be disabled before taking a screenshot. This is set to default `true` to prevent extra issues.
+---
 
 ### `logLevel`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** `info`
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
+<Option type="string" default="info" required="No" contexts="Web, Hybrid App (Webview), Native App">
 
 Adds extra logs, options are `debug | info | warn | silent`
 
 Errors are always logged to the console.
 
-### `savePerInstance`
-
--   **Type:** `boolean`
--   **Default:** `false`
--   **Mandatory:** no
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
-
-Save the images per instance in a separate folder so for example all Chrome screenshots will be saved in a Chrome folder like `desktop_chrome`.
-
-### `screenshotPath`
-
--   **Type:** `string | () => string`
--   **Default:** `.tmp/`
--   **Mandatory:** no
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App
-
-The directory that will hold all the actual/different screenshots. If not set, the default value will be used. A function that
-returns a string can also be used to set the screenshotPath value:
-
-```js
-{
-    screenshotPath: path.join(process.cwd(), 'foo', 'bar', 'screenshotPath')
-},
-// OR
-{
-    screenshotPath: () => {
-        // Do some magic here
-        return path.join(process.cwd(), 'foo', 'bar', 'screenshotPath');
-    }
-}
-```
-
-### `toolBarShadowPadding`
-
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** `6` for Android and `15` for iOS (`6` by default and `9` will be added automatically for the possible home bar on iPhones with a notch or iPads that have a home bar)
--   **Supported Application Contexts:** Web
-
-The padding which needs to be added to the toolbar bar on iOS and Android to do a proper cutout of the viewport.
-
-### `userBasedFullPageScreenshot`
-
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `false`
--   **Supported Application Contexts:** Web, Hybrid App (Webview) **Introduced in visual-service@7.0.0**
-
-By default, full-page screenshots on desktop web are captured using the WebDriver BiDi protocol, which enables fast, stable, and consistent screenshots without scrolling.
-When userBasedFullPageScreenshot is set to true, the screenshot process simulates a real user: scrolling through the page, capturing viewport-sized screenshots, and stitching them together. This method is useful for pages with lazy-loaded content or dynamic rendering that depends on scroll position.
-
-Use this option if your page relies on content loading while scrolling or if you want to preserve the behavior of older screenshot methods.
-
-### `waitForFontsLoaded`
-
--   **Type:** `boolean`
--   **Mandatory:** No
--   **Default:** `true`
--   **Supported Application Contexts:** Web, Hybrid App (Webview)
-
-Fonts, including third-party fonts, can be loaded synchronously or asynchronously. Asynchronous loading means that fonts might load after WebdriverIO determines that a page has fully loaded. To prevent font rendering issues, this module, by default, will wait for all fonts to be loaded before taking a screenshot.
-
+</Option>
 ## Tabbable Options
 
 :::info NOTE
@@ -453,130 +464,103 @@ The way tabbable elements are selected is based on the module [tabbable](https:/
 
 ### `tabbableOptions`
 
--   **Type:** `object`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="object" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The options that can be changed for the lines and dots if you use the `{save|check}Tabbable`-methods. The options are explained below.
 
+</Option>
 #### `tabbableOptions.circle`
 
--   **Type:** `object`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="object" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The options to change the circle.
 
+</Option>
 ##### `tabbableOptions.circle.backgroundColor`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="string" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The background color of the circle.
 
+</Option>
 ##### `tabbableOptions.circle.borderColor`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="string" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The border color of the circle.
 
+</Option>
 ##### `tabbableOptions.circle.borderWidth`
 
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="number" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The border width of the circle.
 
+</Option>
 ##### `tabbableOptions.circle.fontColor`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="string" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The color of the font of the text in the circle. This will only be shown if [`showNumber`](./#tabbableoptionscircleshownumber) is set to `true`.
 
+</Option>
 ##### `tabbableOptions.circle.fontFamily`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="string" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The family of the font of the text in the circle. This will only be shown if [`showNumber`](./#tabbableoptionscircleshownumber) is set to `true`.
 
 Make sure to set fonts that are supported by the browsers.
 
+</Option>
 ##### `tabbableOptions.circle.fontSize`
 
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="number" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The size of the font of the text in the circle. This will only be shown if [`showNumber`](./#tabbableoptionscircleshownumber) is set to `true`.
 
+</Option>
 ##### `tabbableOptions.circle.size`
 
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="number" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The size of the circle.
 
+</Option>
 ##### `tabbableOptions.circle.showNumber`
 
--   **Type:** `showNumber`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="showNumber" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 Show the tab sequence number in the circle.
 
+</Option>
 #### `tabbableOptions.line`
 
--   **Type:** `object`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="object" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The options to change the line.
 
+</Option>
 ##### `tabbableOptions.line.color`
 
--   **Type:** `string`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="string" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The color of the line.
 
+</Option>
 ##### `tabbableOptions.line.width`
 
--   **Type:** `number`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%401.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values
--   **Supported Application Contexts:** Web
+<Option type="number" default="See [here](https://github.com/webdriverio/visual-testing/blob/%40wdio/image-comparison-core%402.0.0/packages/image-comparison-core/src/helpers/options.ts#L27-L86) for all default values" required="No" contexts="Web">
 
 The width of the line.
 
+</Option>
 ## Compare options
 
 ### `compareOptions`
 
--   **Type:** `object`
--   **Mandatory:** No
--   **Default:** See [here](https://github.com/webdriverio/visual-testing/blob/6a988808c9adc58f58c5a66cd74296ae5c1ad6dc/packages/webdriver-image-comparison/src/helpers/options.ts#L46-L60) for all default values
--   **Supported Application Contexts:** Web, Hybrid App (Webview), Native App (See [Method Compare options](./method-options#compare-check-options) for more information)
+<Option type="object" default="See [here](https://github.com/webdriverio/visual-testing/blob/6a988808c9adc58f58c5a66cd74296ae5c1ad6dc/packages/webdriver-image-comparison/src/helpers/options.ts#L46-L60) for all default values" required="No" contexts="Web, Hybrid App (Webview), Native App (See [Method Compare options](./method-options#compare-check-options) for more information)">
 
 The compare options can also be set as service options, they are described in the [Method Compare options](/docs/visual-testing/method-options#compare-check-options)
+
+</Option>

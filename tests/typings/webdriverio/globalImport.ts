@@ -1,5 +1,7 @@
 import { expectType } from 'tsd'
 import { $, $$, browser, driver, multiRemoteBrowser } from '@wdio/globals'
+// @ts-expect-error removed in favor of multiRemoteBrowser
+import { multiremotebrowser } from '@wdio/globals'
 import { fn, spyOn, mock, unmock, mocked } from '@wdio/browser-runner'
 
 ;(async () => {
@@ -24,8 +26,8 @@ import { fn, spyOn, mock, unmock, mocked } from '@wdio/browser-runner'
     expectType<Function>(fn)
     expectType<Function>(spyOn)
 
-    mock('foobar', (importOrig) => {
-        expectType<Promise<unknown>>(importOrig())
+    mock('foobar', (originalModule) => {
+        expectType<Readonly<Record<string, unknown>>>(originalModule)
         return { default: 'foobar' }
     })
     unmock('foobar')

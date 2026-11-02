@@ -3,26 +3,52 @@ import logger from '@wdio/logger'
 
 import WebDriver, { DEFAULTS } from 'webdriver'
 import { validateConfig } from '@wdio/config'
-import { enableFileLogging, wrapCommand, isBidi } from '@wdio/utils'
+import { enableFileLogging, wrapCommand, isBidi, resolveCustomCommandOptions } from '@wdio/utils'
 import type { Options, Capabilities } from '@wdio/types'
 import type * as WebDriverTypes from 'webdriver'
 
-import MultiRemote from './multiremote.js'
+import MultiRemote from './multiRemote.js'
 import SevereServiceErrorImport from './utils/SevereServiceError.js'
 import detectBackend from './utils/detectBackend.js'
 import { getProtocolDriver } from './utils/driver.js'
 import { WDIO_DEFAULTS, Key as KeyConstant } from './constants.js'
 import { getPrototype, addLocatorStrategyHandler, isStub } from './utils/index.js'
 import { registerSessionManager } from './session/index.js'
+import { markAttachedSession } from './utils/scriptTimeout.js'
+import { enableBrowsingContextCommands } from './browsingContext.js'
 import { environment } from './environment.js'
 
+import { applyBidiBrowserOverwrites } from './utils/bidi/browserOverwrites.js'
 import type { AttachOptions, CustomCommandOptions } from './types.js'
-import type * as elementCommands from './commands/element.js'
 import { IMPLICIT_WAIT_EXCLUSION_LIST } from './middlewares.js'
 
 export * from './types.js'
+export { PARALLEL_CONTEXT_STORE_KEY } from './session/context.js'
 export const Key = KeyConstant
 export const SevereServiceError = SevereServiceErrorImport
+/**
+ * Thrown by `$` when the selector matches more than one element and strict mode
+ * is enabled, see https://webdriver.io/docs/selectors#strict-mode
+ */
+export { StrictSelectorError } from './utils/strictMode.js'
+/**
+ * The session's context pointer. The session REPL uses this to aim
+ * `browser.$` and `browser.execute` at a frame it is holding. Public
+ * commands do not move that pointer.
+ */
+export { getContextManager } from './session/context.js'
+/**
+ * Device descriptors used by `browser.emulate('device', name)`
+ */
+export { deviceDescriptorsSource, type DeviceName } from './deviceDescriptorsSource.js'
+/**
+ * Brands of WebdriverIO objects: `value[WDIO_KIND]` is `'browser'`, `'element'`,
+ * `'element-array'`, `'mock'` or `'browsing-context'`, and `value[WDIO_CHAINABLE]` is
+ * `true` on an unresolved `$()`.
+ * They are `Symbol.for('wdio.kind')` and `Symbol.for('wdio.chainable')`, so other
+ * packages can read them without an import.
+ */
+export { WDIO_KIND, WDIO_CHAINABLE, type WdioKind } from '@wdio/utils'
 
 /**
  * A method to create a new session with WebdriverIO.
@@ -44,7 +70,10 @@ export const remote = async function (
     const keysToKeep = Object.keys(environment.value.variables.WDIO_WORKER_ID ? params : DEFAULTS) as (keyof Capabilities.WebdriverIOConfig)[]
     const config = validateConfig<Capabilities.WebdriverIOConfig>(WDIO_DEFAULTS, params, keysToKeep)
 
-    await enableFileLogging(config.outputDir)
+    /**
+     * in a worker, keep its log file
+     */
+    await enableFileLogging(config.outputDir, { keepLogPath: true })
     logger.setLogLevelsConfig(config.logLevels, config.logLevel)
 
     const modifier = (client: WebDriverTypes.Client, options: Capabilities.WebdriverIOConfig) => {
@@ -65,6 +94,9 @@ export const remote = async function (
     const { Driver, options } = await getProtocolDriver({ ...params, ...config })
     const prototype = getPrototype('browser')
     const instance = await Driver.newSession(options, modifier, prototype, wrapCommand, IMPLICIT_WAIT_EXCLUSION_LIST) as WebdriverIO.Browser
+    if (!isStub(options.automationProtocol)) {
+        enableBrowsingContextCommands(instance)
+    }
 
     /**
      * we need to overwrite the original addCommand and overwriteCommand
@@ -83,6 +115,9 @@ export const remote = async function (
     if (!isStub(options.automationProtocol)) {
         await registerSessionManager(instance)
     }
+
+    applyBidiBrowserOverwrites(instance)
+
     return instance
 }
 
@@ -107,7 +142,9 @@ export const attach = async function (attachOptions: AttachOptions): Promise<Web
         prototype,
         wrapCommand
     ) as WebdriverIO.Browser
+    enableBrowsingContextCommands(driver)
     driver.addLocatorStrategy = addLocatorStrategyHandler(driver)
+    markAttachedSession(driver)
 
     /**
      * Wait for the Bidi handler to be connected before registering the session manager
@@ -116,6 +153,9 @@ export const attach = async function (attachOptions: AttachOptions): Promise<Web
         await (driver['_bidiHandler'] as WebDriverTypes.BidiHandler).waitForConnected()
     }
     await registerSessionManager(driver)
+
+    applyBidiBrowserOverwrites(driver)
+
     return driver
 }
 
@@ -124,10 +164,10 @@ export const attach = async function (attachOptions: AttachOptions): Promise<Web
  * This is handy when you're testing features that require multiple users (for example, chat or WebRTC applications).
  *
  * Instead of creating a couple of remote instances where you need to execute common commands like newSession() or url() on each instance,
- * you can simply create a multiremote instance and control all browsers at the same time.
+ * you can simply create a multi-remote instance and control all browsers at the same time.
  *
  * <b>
- * NOTE: Multiremote is not meant to execute all your tests in parallel.
+ * NOTE: Multi-remote is not meant to execute all your tests in parallel.
  * It is intended to help coordinate multiple browsers and/or mobile devices for special integration tests (e.g. chat applications).
  * </b>
  *
@@ -138,31 +178,55 @@ export const attach = async function (attachOptions: AttachOptions): Promise<Web
  *
  * @see <a href="https://webdriver.io/docs/multiremote">External document and example usage</a>.
  */
-export const multiremote = async function (
-    params: Capabilities.RequestedMultiremoteCapabilities,
+export const multiRemote = async function (
+    params: Capabilities.RequestedMultiRemoteCapabilities,
     { automationProtocol }: { automationProtocol?: string } = {}
 ): Promise<WebdriverIO.MultiRemoteBrowser> {
     const multibrowser = new MultiRemote()
     const browserNames = Object.keys(params)
 
     /**
-     * create all instance sessions
+     * create all instance sessions, then register them in capability order.
+     * `Promise.all` keeps result order even when the sessions resolve out of order.
+     * The first failure closes sessions that already started and rejects
+     * immediately. A session that is still connecting closes itself when it
+     * starts, so a live browser is not left open for the rest of that retry.
      */
-    await Promise.all(
-        browserNames.map(async (browserName) => {
-            const instance = await remote(params[browserName])
-            return multibrowser.addInstance(browserName, instance)
+    const started: WebdriverIO.Browser[] = []
+    let startupFailed = false
+    const pending = browserNames.map(async (browserName) => {
+        const instance = await remote(params[browserName])
+        if (startupFailed) {
+            await instance.deleteSession()
+            return [browserName, instance] as const
+        }
+        started.push(instance)
+        return [browserName, instance] as const
+    })
+    let sessions: (readonly [string, WebdriverIO.Browser])[]
+    try {
+        sessions = await Promise.all(pending)
+    } catch (err) {
+        startupFailed = true
+        const orphaned = started.splice(0)
+        void Promise.allSettled(pending).then(() => {
+            return Promise.allSettled(started.splice(0).map((instance) => instance.deleteSession()))
         })
-    )
+        await Promise.allSettled(orphaned.map((instance) => instance.deleteSession()))
+        throw err
+    }
+    for (const [browserName, instance] of sessions) {
+        await multibrowser.addInstance(browserName, instance)
+    }
 
     /**
      * use attachToSession capability to wrap instances around blank pod
      */
     const prototype = getPrototype('browser')
-    const sessionParams = isStub(automationProtocol) ? undefined : {
+    const firstBrowser = multibrowser.instances.get(browserNames[0])
+    const sessionParams = isStub(automationProtocol) || !firstBrowser ? undefined : {
         sessionId: '',
-        isW3C: multibrowser.instances[browserNames[0]].isW3C,
-        logLevel: multibrowser.instances[browserNames[0]].options.logLevel
+        logLevel: firstBrowser.options.logLevel
     }
 
     const ProtocolDriver = typeof automationProtocol === 'string'
@@ -176,41 +240,56 @@ export const multiremote = async function (
     ) as WebdriverIO.MultiRemoteBrowser
 
     /**
-     * in order to get custom command overwritten or added to multiremote instance
+     * in order to get custom command overwritten or added to multi-remote instance
      * we need to pass in the prototype of the multibrowser
      */
     if (!isStub(automationProtocol)) {
         const origAddCommand = driver.addCommand.bind(driver)
-        driver.addCommand = function (name: string, fn: any, attachToElementOrOptions?: boolean | CustomCommandOptions<boolean>): void {
-            const options: CustomCommandOptions<boolean> = (typeof attachToElementOrOptions === 'object' && attachToElementOrOptions !== null)
-                ? attachToElementOrOptions
-                : { attachToElement: attachToElementOrOptions } satisfies CustomCommandOptions<boolean>
+        driver.addCommand = function (name: string, fn: any, options?: CustomCommandOptions<boolean>): void {
+            const resolved = resolveCustomCommandOptions('addCommand', options)
 
             driver.instances.forEach(instanceName =>
-                driver.getInstance(instanceName).addCommand(name, fn, options)
+                driver.getInstance(instanceName).addCommand(name, fn, resolved)
             )
+
+            /**
+             * browsing contexts belong to the instances, the multi-remote
+             * object has none
+             */
+            if (resolved.attachToBrowsingContext) {
+                return
+            }
 
             return origAddCommand(
                 name,
                 fn,
                 {
-                    attachToElement: options.attachToElement,
+                    attachToElement: resolved.attachToElement,
                     proto: Object.getPrototypeOf(multibrowser.baseInstance),
-                    instances: multibrowser.instances
+                    instances: Object.fromEntries(multibrowser.instances)
                 }
             )
         }
 
-        const origOverwriteCommand = driver.overwriteCommand.bind(driver) as typeof driver.overwriteCommand
-        driver.overwriteCommand = (name, fn, attachToElement) => {
-            return origOverwriteCommand<keyof typeof elementCommands, any, any>(
+        const origOverwriteCommand = driver.overwriteCommand.bind(driver) as Function
+        driver.overwriteCommand = ((name: string, fn: Function, options?: CustomCommandOptions<boolean>) => {
+            const resolved = resolveCustomCommandOptions('overwriteCommand', options)
+            if (resolved.attachToBrowsingContext) {
+                driver.instances.forEach(instanceName =>
+                    (driver.getInstance(instanceName).overwriteCommand as Function)(name, fn, resolved)
+                )
+                return
+            }
+            return origOverwriteCommand(
                 name,
                 fn,
-                attachToElement,
-                Object.getPrototypeOf(multibrowser.baseInstance),
-                multibrowser.instances
+                {
+                    attachToElement: resolved.attachToElement,
+                    proto: Object.getPrototypeOf(multibrowser.baseInstance),
+                    instances: Object.fromEntries(multibrowser.instances)
+                }
             )
-        }
+        }) as typeof driver.overwriteCommand
     }
 
     driver.addLocatorStrategy = addLocatorStrategyHandler(driver)

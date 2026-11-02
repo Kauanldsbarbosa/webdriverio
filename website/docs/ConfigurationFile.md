@@ -1,6 +1,7 @@
 ---
 id: configurationfile
 title: Configuration File
+description: "Browse an annotated example wdio.conf.js that lists every supported testrunner option, capability and hook with explanations."
 ---
 
 The configuration file contains all necessary information to run your test suite. It’s a NodeJS module that exports a JSON.
@@ -82,8 +83,8 @@ export const config = {
     // ============
     // Define your capabilities here. WebdriverIO can run multiple capabilities at the same
     // time. Depending on the number of capabilities, WebdriverIO launches several test
-    // sessions. Within your `capabilities`, you can overwrite the `spec` and `exclude`
-    // options in order to group specific specs to a specific capability.
+    // sessions. Within your `capabilities`, you can overwrite which files run with
+    // `wdio:specs` and `wdio:exclude` in order to group specific specs to a specific capability.
     //
     // First, you can define how many instances should be started at the same time. Let's
     // say you have 3 different capabilities (Chrome, Firefox, and Safari) and you have
@@ -251,7 +252,7 @@ export const config = {
         snippets: true,     // <boolean> hide step definition snippets for pending steps
         source: true,       // <boolean> hide source URIs
         strict: false,      // <boolean> fail if there are any undefined or pending steps
-        tagExpression: '',  // <string> (expression) only execute the features or scenarios with tags matching the expression
+        tags: '',           // <string> (expression) only execute the features or scenarios with tags matching the expression
         timeout: 20000,     // <number> timeout for step definitions
         ignoreUndefinedDefinitions: false, // <boolean> Enable this config to treat undefined definitions as warnings.
         scenarioLevelReporter: false // Enable this to make webdriver.io behave as if scenarios and not steps were the tests.
@@ -475,17 +476,18 @@ export const config = {
     },
     /**
      * Runs before a WebdriverIO assertion library makes an assertion.
-     * @param commandName command name
-     * @param args        arguments that command would receive
+     * @param {object} params                 assertion information
+     * @param {string} params.matcherName     name of the matcher that the test called (for an alias, the alias name)
+     * @param {*}      params.expectedValue   value that is passed into the matcher
+     * @param {object} params.options         assertion options
      */
     beforeAssertion: function (params) {
     },
     /**
-     * Runs after a WebdriverIO command gets executed
-     * @param commandName  command name
-     * @param args         arguments that command would receive
-     * @param result       result of the command
-     * @param error        error in case something went wrong
+     * Runs after a WebdriverIO assertion library makes an assertion.
+     * @param {object} params                 assertion information, the same as in `beforeAssertion`
+     * @param {object} params.result          result of the matcher, with `pass` (boolean) and `message()`.
+     *                                        `pass` is true when the value matches, also with `.not`
      */
     afterAssertion: function (params) {
     }

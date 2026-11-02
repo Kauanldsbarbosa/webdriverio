@@ -5,8 +5,7 @@ import { themes } from 'prism-react-renderer'
 import remark from '@docusaurus/remark-plugin-npm2yarn'
 import type { Config } from '@docusaurus/types'
 import type { ThemeConfig } from '@docusaurus/preset-classic'
-import './docusaurusVersions'
-import pastVersions from './docusaurusVersions'
+import versions, { currentVersion } from './docusaurusVersions'
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 
 const organizationName = 'webdriverio' // Usually your GitHub org/user name.
@@ -21,14 +20,30 @@ const mendableAnonKey = 'c4096c1b-8c46-4891-8ba2-5f0e2ef4fa81'
 
 const config: Config = {
     title: 'WebdriverIO',
-    tagline: 'Next-gen browser and mobile automation test framework for Node.js',
+    tagline: 'Open source test automation for web, mobile and desktop apps',
     url: 'https://webdriver.io',
     baseUrl: '/',
+    /**
+     * Leave `trailingSlash` unset: with `trailingSlash: false` Docusaurus writes
+     * the `$$` command pages (e.g. /docs/api/browser/$$) to the `$` route.
+     * Vercel serves `docs/foo/index.html` at `/docs/foo` either way.
+     */
     onBrokenLinks: 'throw',
+    future: {
+        /**
+         * Rspack, SWC and Lightning CSS instead of Webpack, Babel and cssnano.
+         * Cuts the multi-locale production build time considerably.
+         */
+        faster: true,
+        v4: {
+            removeLegacyPostBuildHeadAttribute: true,
+        },
+    },
     favicon: 'img/favicon.png',
     organizationName: 'webdriverio',
     projectName: 'webdriverio',
     markdown: {
+        mermaid: true,
         hooks: {
             onBrokenMarkdownLinks: 'throw',
         },
@@ -39,38 +54,41 @@ const config: Config = {
     },
     i18n: {
         defaultLocale: 'en',
-        locales: [
-            'en',
-            'ar',
-            'de',
-            'es',
-            // 'fa', => 3 backticks are added on line 5 which breaks the markdown parser
-            'fr',
-            'hi',
-            'it',
-            // 'ja', => links will break, they are also translated
-            'ko',
-            'pl',
-            'pt',
-            'ru',
-            'sv',
-            'ta',
-            'uk',
-            'vi',
-            'zh',
-        ],
+        /**
+         * Translations are disabled until webdriverio/i18n is updated for v10.
+         * To re-enable, restore the locales below and the `localeDropdown`
+         * navbar item, then drop the locale redirect in `website/vercel.json`:
+         * ar, de, es, fr, hi, it, ko, pl, pt, ru, sv, ta, uk, vi, zh
+         * ('fa' and 'ja' were already off: broken markdown / translated links)
+         */
+        locales: ['en'],
     },
     themeConfig: {
-        image: 'img/logo-webdriver-io.png',
-        metadata: [{ name: 'twitter:card', content: 'summary' }],
+        /**
+         * Share card for every page (source: scripts/social-card.html).
+         * The size tags below describe this image; drop them if a page sets
+         * its own `image` in front matter.
+         */
+        image: 'img/social-card.jpg',
+        metadata: [
+            { name: 'twitter:card', content: 'summary_large_image' },
+            { name: 'twitter:site', content: `@${projectName}` },
+            { property: 'og:image:width', content: '1200' },
+            { property: 'og:image:height', content: '630' },
+            { property: 'og:image:alt', content: 'The WebdriverIO robot above the WebdriverIO logo: test automation for web, mobile and desktop' },
+            { name: 'twitter:image:alt', content: 'The WebdriverIO robot above the WebdriverIO logo: test automation for web, mobile and desktop' },
+        ],
         colorMode: {
-            defaultMode: 'light',
+            defaultMode: 'dark',
             disableSwitch: false,
             respectPrefersColorScheme: true
         },
         prism: {
             theme: themes.github,
-            darkTheme: themes.dracula
+            darkTheme: themes.oneDark
+        },
+        mermaid: {
+            theme: { light: 'neutral', dark: 'dark' },
         },
         algolia: {
             apiKey: 'f86258c57f779a1358e0a9054aeadad5',
@@ -79,7 +97,7 @@ const config: Config = {
         },
         announcementBar: {
             id: 'supportus',
-            content: '🇺🇦  &nbsp;We stand with the people of Ukraine. We encourage compassion, and hope for peace. &nbsp; 🇺🇦<br>Please support humanitarian efforts for the Ukraine crisis through the <a target="_blank" rel="noopener noreferrer" href="https://www.icrc.org/en/donate/ukraine">International Committee of the Red Cross</a>! #StandWithUkraine',
+            content: '🇺🇦 We stand with Ukraine. Support humanitarian relief through the <a target="_blank" rel="noopener noreferrer" href="https://www.icrc.org/en/donate/ukraine">International Committee of the Red Cross</a>.',
         },
         navbar: {
             // title: 'I/O',
@@ -95,64 +113,44 @@ const config: Config = {
                 docId: 'gettingstarted',
             }, {
                 type: 'doc',
-                label: 'API',
+                label: 'Reference',
                 position: 'left',
                 docId: 'api',
             }, {
-                to: 'blog', label: 'Blog', position: 'left'
-            }, {
-                type: 'doc',
-                label: 'Contribute',
+                type: 'docSidebar',
+                label: 'Ecosystem',
                 position: 'left',
-                docId: 'contribute',
+                sidebarId: 'ecosystem',
+            }, {
+                to: 'blog', label: 'Blog', position: 'left'
             }, {
                 to: '/community/support',
                 label: 'Community',
                 position: 'left',
                 activeBaseRegex: '/community/'
             }, {
-                type: 'doc',
-                docId: 'sponsor',
-                label: 'Sponsor',
-                position: 'left'
-            }, {
-                label: 'v9',
+                label: currentVersion.label,
                 position: 'right',
-                items: pastVersions.map(v => ({
+                items: versions.map(v => ({
                     label: v.label,
                     href: v.path,
-                    className: 'dropdown-version-item'
                 }))
             }, {
-                type: 'localeDropdown',
+                href: discordUrl,
                 position: 'right',
-                dropdownItemsAfter: [{
-                    type: 'html',
-                    value: '<hr style="margin: 0.3rem 0;">',
-                }, {
-                    href: 'https://github.com/webdriverio/i18n#supported-languages',
-                    label: 'Add your language',
-                }]
+                className: 'header-discord-link',
+                'aria-label': 'Support Chat on Discord',
             }, {
                 href: repoUrl,
                 position: 'right',
                 className: 'header-github-link',
                 'aria-label': 'GitHub repository',
             }, {
-                href: xUrl,
+                type: 'doc',
+                docId: 'sponsor',
+                label: 'Sponsor',
                 position: 'right',
-                className: 'header-twitter-link',
-                'aria-label': '@webdriverio on 𝕏',
-            }, {
-                href: youtubeUrl,
-                position: 'right',
-                className: 'header-youtube-link',
-                'aria-label': '@webdriverio on YouTube',
-            }, {
-                href: discordUrl,
-                position: 'right',
-                className: 'header-discord-link',
-                'aria-label': 'Support Chat on Discord',
+                className: 'navbar-sponsor-button',
             }],
         },
         footer: {
@@ -161,46 +159,64 @@ const config: Config = {
                 title: 'Docs',
                 items: [{
                     label: 'Getting Started',
-                    to: 'docs/gettingstarted',
+                    to: '/docs/gettingstarted',
+                }, {
+                    label: 'AI Agents & MCP',
+                    to: '/docs/ai-agents',
+                }, {
+                    label: 'WebdriverIO Session',
+                    to: '/docs/session',
+                }, {
+                    label: 'Platforms',
+                    to: '/docs/platforms/web',
                 }, {
                     label: 'API Reference',
-                    to: 'docs/api',
+                    to: '/docs/api',
                 }, {
-                    label: 'Contribute',
-                    to: 'docs/contribute/',
-                }, {
-                    label: 'Help',
-                    to: 'community/support',
+                    label: 'Ecosystem',
+                    to: '/docs/ecosystem',
                 }],
             }, {
                 title: 'Community',
                 items: [{
+                    label: 'Support',
+                    to: '/community/support',
+                }, {
+                    label: 'Discord',
+                    href: discordUrl,
+                }, {
+                    label: 'GitHub Discussions',
+                    href: `${repoUrl}/discussions`,
+                }, {
                     label: 'Stack Overflow',
                     href: 'https://stackoverflow.com/questions/tagged/webdriver-io',
                 }, {
-                    label: 'Support Chat',
-                    href: 'https://discord.webdriver.io',
+                    label: 'X',
+                    href: xUrl,
                 }, {
-                    label: 'Slack',
-                    href: 'https://seleniumhq.slack.com/join/shared_invite/zt-f7jwg1n7-RVw4v4sMA7Zjufira_~EVw#/'
-                }, {
-                    label: '𝕏',
-                    href: 'https://x.com/webdriverio',
+                    label: 'YouTube',
+                    href: youtubeUrl,
                 }],
             }, {
-                title: 'More',
+                title: 'Project',
                 items: [{
                     label: 'Blog',
-                    to: 'blog',
+                    to: '/blog',
+                }, {
+                    label: 'Contribute',
+                    to: '/docs/contribute',
+                }, {
+                    label: 'Governance',
+                    href: `${repoUrl}/blob/main/GOVERNANCE.md`,
                 }, {
                     label: 'Sponsor',
-                    to: 'docs/sponsor',
+                    to: '/docs/sponsor',
                 }, {
                     label: 'Swag Store',
                     href: 'https://shop.webdriver.io',
                 }, {
-                    label: 'YouTube',
-                    href: youtubeUrl,
+                    label: 'llms.txt',
+                    href: 'pathname:///llms.txt',
                 }],
             }, {
                 title: 'Sponsored by',
@@ -208,6 +224,11 @@ const config: Config = {
                     html: `
                       <a href="https://www.browserstack.com/automation-webdriverio" target="_blank" rel="noreferrer noopener" aria-label="Premium Sponsor BrowserStack">
                         <img src="/img/sponsors/browserstack_white.svg" alt="BrowserStack" />
+                      </a>`
+                }, {
+                    html: `
+                      <a href="https://momentic.ai/" target="_blank" rel="noreferrer noopener" aria-label="Premium Sponsor Momentic">
+                        <img src="/img/sponsors/momentic_white.svg" alt="Momentic" />
                       </a>`
                 }]
             }],
@@ -225,15 +246,14 @@ const config: Config = {
               </p>
             `,
         },
-        codeblock: {
-            showRunmeLink: true,
-            runmeLinkLabel: 'Run Example'
-        },
     } satisfies ThemeConfig,
     presets: [
         [
             'classic', {
                 docs: {
+                    // Feeds sitemap <lastmod>. The sitemap plugin skips its own
+                    // git lookup when this is left unset.
+                    showLastUpdateTime: true,
                     sidebarPath: path.resolve(__dirname, 'sidebars.ts'),
                     // Please change this to your repo.
                     editUrl:`${repoUrl}/edit/${branch}/website/`,
@@ -247,6 +267,8 @@ const config: Config = {
                     ]
                 },
                 blog: {
+                    blogDescription: 'Release notes, guides and project news from the WebdriverIO team',
+                    showLastUpdateTime: true,
                     showReadingTime: true,
                     postsPerPage: 3,
                     blogSidebarCount: 7,
@@ -259,46 +281,23 @@ const config: Config = {
                 pages: {
                     remarkPlugins: [remark],
                 },
-                googleAnalytics: {
-                    trackingID: 'UA-47063382-1',
-                    anonymizeIP: true,
+                sitemap: {
+                    /**
+                     * emit <lastmod> so search engines and AI crawlers can tell
+                     * which pages actually changed
+                     */
+                    lastmod: 'date',
+                    changefreq: 'weekly',
                 },
             },
         ]
     ],
     plugins: [
         [
-            'client-redirects',
-            {
-                fromExtensions: ['html'],
-                /**
-                 * v7 -> v8 doc redirects
-                 */
-                redirects: [{
-                    from: '/docs/browserobject',
-                    to: '/docs/api/browser'
-                }, {
-                    from: '/docs/options',
-                    to: '/docs/configuration'
-                }, {
-                    from: '/docs/what-is-webdriverio',
-                    to: '/docs/why-webdriverio'
-                }, {
-                    from: '/docs/sync-vs-async',
-                    to: '/docs/gettingstarted'
-                }, {
-                    from: '/docs/clioptions',
-                    to: '/docs/testrunner'
-                }, {
-                    from: '/docs/devtools-service',
-                    to: '/docs/wdio-devtools-service'
-                }]
-            }
-        ],
-        [
             'content-docs',
             {
                 id: 'community',
+                showLastUpdateTime: true,
                 path: 'community',
                 editUrl: `https://github.com/${organizationName}/${projectName}/edit/${branch}/website/`,
                 routeBasePath: 'community',
@@ -307,74 +306,54 @@ const config: Config = {
         ],
         'ideal-image',
         [
-            'pwa',
+            '@signalwire/docusaurus-plugin-llms-txt',
             {
-                debug: false,
-                offlineModeActivationStrategies: ['appInstalled', 'queryString'],
-                // swRegister: false,
-                swCustom: path.resolve(__dirname, 'src', 'sw.js'),
-                pwaHead: [
-                    {
-                        tagName: 'link',
-                        rel: 'icon',
-                        href: 'img/logo-webdriver-io.png',
-                    },
-                    {
-                        tagName: 'link',
-                        rel: 'manifest',
-                        href: '/manifest.json',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'theme-color',
-                        content: 'rgb(234, 90, 7)',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'apple-mobile-web-app-capable',
-                        content: 'yes',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'apple-mobile-web-app-status-bar-style',
-                        content: '#000',
-                    },
-                    {
-                        tagName: 'link',
-                        rel: 'apple-touch-icon',
-                        href: 'img/logo-webdriver-io.png',
-                    },
-                    {
-                        tagName: 'link',
-                        rel: 'mask-icon',
-                        href: 'img/logo-webdriver-io.svg',
-                        color: 'rgb(234, 90, 7)',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'msapplication-TileImage',
-                        content: 'img/logo-webdriver-io.png',
-                    },
-                    {
-                        tagName: 'meta',
-                        name: 'msapplication-TileColor',
-                        content: '#000',
-                    },
-                ],
+                /**
+                 * emits `/llms.txt` (an annotated index of the docs), plus a
+                 * clean Markdown twin for every page, e.g. `/docs/api/browser.md`.
+                 * Without this, anything reading the site has to scrape the
+                 * rendered HTML and strip the navbar, announcement bar and footer
+                 * off every page.
+                 */
+                siteTitle: 'WebdriverIO',
+                siteDescription: 'WebdriverIO is an open source, openly governed test automation framework for web browsers, native and hybrid mobile apps, desktop apps and VS Code extensions.',
+                depth: 2,
+                content: {
+                    enableMarkdownFiles: true,
+                    /**
+                     * `/llms-full.txt` inlines the whole corpus into one file, for
+                     * consumers that would otherwise crawl every page individually
+                     */
+                    enableLlmsFullTxt: true,
+                    /**
+                     * docs only for now. Whether the blog and community pages
+                     * should be included too is still an open question
+                     */
+                    includeDocs: true,
+                    includeBlog: false,
+                    includePages: false,
+                    excludeRoutes: [
+                        '/search',
+                        '**/search',
+                        '/404',
+                    ],
+                },
             },
         ],
     ],
-    themes: [path.resolve(__dirname, 'node_modules', 'docusaurus-theme-github-codeblock', 'build', 'index.js')],
-    stylesheets: [
-        'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;700&display=block',
-        'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=block'
+    clientModules: [
+        path.resolve(__dirname, 'src', 'clientModules', 'fonts.ts'),
+        path.resolve(__dirname, 'src', 'clientModules', 'vercelAnalytics.ts'),
     ],
-    scripts: [
-        'https://unpkg.com/mermaid@8.5.1/dist/mermaid.min.js',
-        'https://buttons.github.io/buttons.js',
-        '/js/ribbons.js',
-        '/js/flowchart.js'
-    ]
+    themes: [
+        path.resolve(__dirname, 'node_modules', 'docusaurus-theme-github-codeblock', 'build', 'index.js'),
+        '@docusaurus/theme-mermaid',
+    ],
+    headTags: [
+        { tagName: 'link', attributes: { rel: 'manifest', href: '/manifest.json' } },
+        { tagName: 'meta', attributes: { name: 'theme-color', content: 'rgb(234, 90, 7)' } },
+        { tagName: 'link', attributes: { rel: 'apple-touch-icon', href: '/img/logo-webdriver-io.png' } },
+    ],
 }
 
 export default config

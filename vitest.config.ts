@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
     test: {
         dangerouslyIgnoreUnhandledErrors: true,
-        include: ['packages/**/*.test.ts'],
+        include: ['packages/**/*.test.ts', 'infra/**/*.test.ts'],
         typecheck: {
             enabled: true,
             ignoreSourceErrors : true
@@ -12,7 +12,11 @@ export default defineConfig({
          * not to ESM ported packages
          */
         exclude: [
-            'dist', '.idea', '.git', '.cache', '**/node_modules/**'
+            'dist', '.idea', '.git', '.cache', '**/node_modules/**',
+            /**
+             * in-page scripts, run in a real browser by `vitest.browser.config.ts`
+             */
+            '**/*.browser.test.ts'
         ],
         env: {
             WDIO_SKIP_DRIVER_SETUP: '1'
@@ -39,7 +43,8 @@ export default defineConfig({
             }
         },
         setupFiles: [
-            '__mocks__/fetch.ts'
+            '__mocks__/fetch.ts',
+            'tests/setup/strictSelectors.ts'
         ],
         testTimeout: 30000
     }

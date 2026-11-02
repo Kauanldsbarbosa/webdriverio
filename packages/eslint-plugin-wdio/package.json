@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-wdio",
-  "version": "9.27.2",
+  "version": "10.1.0",
   "description": "Eslint rules for WebdriverIO",
   "author": "Christian Bromann <mail@bromann.dev>",
   "homepage": "https://github.com/webdriverio/webdriverio/tree/main/packages/eslint-plugin-wdio",
@@ -16,9 +16,9 @@
     }
   },
   "type": "module",
-  "typeScriptVersion": "3.8.3",
+  "typeScriptVersion": "6.0.3",
   "engines": {
-    "node": ">=18.20.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1"
   },
   "repository": {
     "type": "git",
@@ -36,16 +36,17 @@
     "url": "https://github.com/webdriverio/webdriverio/issues"
   },
   "devDependencies": {
-    "@types/estree": "^1.0.8",
-    "eslint": "^9.39.2",
-    "expect-webdriverio": "^5.6.5",
-    "globals": "^16.5.0",
-    "typescript-eslint": "^8.54.0"
+    "@types/estree": "^1.0.9",
+    "@wdio/types": "workspace:*",
+    "eslint": "^10.11.0",
+    "expect-webdriverio": "^8.0.0",
+    "globals": "^17.12.0",
+    "typescript-eslint": "^8.71.0"
   },
   "peerDependencies": {
-    "eslint": "^9.39.2",
-    "globals": "^16.5.0",
-    "typescript-eslint": "^8.54.0"
+    "eslint": "^10.0.0",
+    "globals": "^16.5.0 || ^17.0.0",
+    "typescript-eslint": "^8.56.0"
   },
   "peerDependenciesMeta": {
     "typescript-eslint": {

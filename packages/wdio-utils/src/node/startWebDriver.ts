@@ -9,34 +9,62 @@ import logger from '@wdio/logger'
 import split2 from 'split2'
 import { deepmerge } from 'deepmerge-ts'
 
-import { start as startSafaridriver, type SafaridriverOptions as SafaridriverParameters } from 'safaridriver'
-import { start as startGeckodriver, type GeckodriverParameters } from 'geckodriver'
-import { start as startEdgedriver, findEdgePath, type EdgedriverParameters } from 'edgedriver'
-import type { InstallOptions } from '@puppeteer/browsers'
+import { start as startSafaridriver } from 'safaridriver'
+import { start as startGeckodriver } from 'geckodriver'
 
 import type { Capabilities } from '@wdio/types'
 
-import { parseParams, setupPuppeteerBrowser, setupChromedriver, getCacheDir, generateDefaultPrefs } from './utils.js'
-import { isChrome, isFirefox, isEdge, isSafari, isAppiumCapability } from '../utils.js'
+import { parseParams, setupPuppeteerBrowser, setupChromedriver, getCacheDir, generateDefaultPrefs, setDefaultEdgedriverCdnUrl } from './utils.js'
+import { isChrome, isFirefox, isEdge, isSafari, isAppiumCapability, sleep } from '../utils.js'
 import { SUPPORTED_BROWSERNAMES } from '../constants.js'
 
-export type ChromedriverParameters = (
-    Partial<InstallOptions> &
-    Omit<EdgedriverParameters, 'port' | 'edgeDriverVersion' | 'customEdgeDriverPath'> &
-    Pick<GeckodriverParameters, 'spawnOpts'>
-)
-declare global {
-    namespace WebdriverIO {
-        interface ChromedriverOptions extends ChromedriverParameters { }
-        interface GeckodriverOptions extends Omit<GeckodriverParameters, 'port'> { }
-        interface EdgedriverOptions extends Omit<EdgedriverParameters, 'port'> { }
-        interface SafaridriverOptions extends Omit<SafaridriverParameters, 'port'> { }
-    }
-}
+export type { ChromedriverParameters } from '../driverOptions.js'
 
 const log = logger('@wdio/utils')
+let profileRootLogged = false
 const DRIVER_WAIT_TIMEOUT = 10 * 1000 // 10s
 const DRIVER_RETRY_INTERVAL = 100
+const TRANSIENT_SPAWN_CODES = new Set(['EBUSY', 'EAGAIN', 'EACCES'])
+const SPAWN_RETRY_ATTEMPTS = 5
+const SPAWN_RETRY_DELAY = 200
+
+/**
+ * Spawn a driver binary and retry when Windows still holds a lock on the
+ * executable after the previous session was killed (`spawn EBUSY`).
+ */
+async function spawnDriver (command: string, args: readonly string[], options: cp.SpawnOptions) {
+    let lastError: unknown
+    for (let attempt = 1; attempt <= SPAWN_RETRY_ATTEMPTS; attempt++) {
+        try {
+            return cp.spawn(command, args, options)
+        } catch (err) {
+            lastError = err
+            const code = (err as NodeJS.ErrnoException).code
+            if (!code || !TRANSIENT_SPAWN_CODES.has(code) || attempt === SPAWN_RETRY_ATTEMPTS) {
+                throw err
+            }
+            log.warn(`Failed to spawn ${command} (${code}), retrying ${attempt}/${SPAWN_RETRY_ATTEMPTS} ...`)
+            await sleep(SPAWN_RETRY_DELAY * attempt)
+        }
+    }
+    throw lastError
+}
+
+/**
+ * Chrome and Edge ignore XDG_SESSION_TYPE before 140 (Chrome for Testing before 135),
+ * and later versions fall back to X11 unless it is `wayland`
+ */
+function addWaylandFlag(browserOptions: { args?: string[] }) {
+    const args = browserOptions.args || []
+    if (
+        process.platform !== 'linux' || !process.env.WAYLAND_DISPLAY || process.env.DISPLAY ||
+        args.some((arg) => /^(--)?(ozone-platform|headless)(=|$)/.test(arg)) // the user chose a platform, or headless needs none
+    ) {
+        return
+    }
+    log.info('Wayland but no X server, adding --ozone-platform=wayland to the browser args')
+    browserOptions.args = [...args, '--ozone-platform=wayland']
+}
 
 export async function startWebDriver(options: Capabilities.RemoteConfig) {
     /**
@@ -97,29 +125,12 @@ export async function startWebDriver(options: Capabilities.RemoteConfig) {
                 caps['goog:chromeOptions'] || {}
             )
 
-            /**
-             * Add unique user data directory for each worker to prevent
-             * "user data directory is already in use" errors on Windows
-             * when multiple workers start Chrome simultaneously
-             */
-            if (process.platform === 'win32' && process.env.WDIO_WORKER_ID) {
-                const existingArgs = caps['goog:chromeOptions']?.args || []
-                const hasUserDataDir = existingArgs.some(arg =>
-                    typeof arg === 'string' && arg.includes('user-data-dir'))
-
-                if (!hasUserDataDir) {
-                    const userDataDir = path.join(
-                        options.outputDir || os.tmpdir(),
-                        `wdio-chrome-${process.env.WDIO_WORKER_ID}-${Date.now()}`
-                    )
-                    caps['goog:chromeOptions'].args = [...existingArgs, `--user-data-dir=${userDataDir}`]
-                }
-            }
+            addWaylandFlag(caps['goog:chromeOptions'])
         }
 
         const { executablePath: chromedriverExcecuteablePath } = chromedriverBinary
             ? { executablePath: chromedriverBinary }
-            : await setupChromedriver(cacheDir, browserVersion)
+            : await setupChromedriver(cacheDir, browserVersion, caps['wdio:electronVersion'])
 
         chromedriverOptions.allowedOrigins = chromedriverOptions.allowedOrigins || ['*']
         chromedriverOptions.allowedIps = chromedriverOptions.allowedIps || ['0.0.0.0']
@@ -127,7 +138,7 @@ export async function startWebDriver(options: Capabilities.RemoteConfig) {
         /**
          * Set NODE_OPTIONS empty to avoid passing it to the chromedriver process so that Electron doesn't crash
          */
-        driverProcess = cp.spawn(chromedriverExcecuteablePath, driverParams, {
+        driverProcess = await spawnDriver(chromedriverExcecuteablePath, driverParams, {
             env: { ...process.env, NODE_OPTIONS: '' },
             ...(chromedriverOptions.spawnOpts || {})
         })
@@ -170,6 +181,16 @@ export async function startWebDriver(options: Capabilities.RemoteConfig) {
             geckodriverOptions.customGeckoDriverPath = binary
         }
 
+        // on a Windows runner of GitHub Actions, profiles in %TEMP% fill the system disk queue and Firefox stalls
+        const runnerTemp = process.env.RUNNER_TEMP
+        if (os.platform() === 'win32' && runnerTemp && !geckodriverOptions.profileRoot && !caps['moz:firefoxOptions']?.androidPackage) {
+            geckodriverOptions.profileRoot = runnerTemp
+            if (!profileRootLogged) {
+                profileRootLogged = true
+                log.info(`Create the Firefox profiles in RUNNER_TEMP (${runnerTemp}). To keep the default folder, set 'wdio:geckodriverOptions': { profileRoot: os.tmpdir() }`)
+            }
+        }
+
         driver = 'GeckoDriver'
         driverProcess = await startGeckodriver({ ...geckodriverOptions, cacheDir, port, allowHosts: ['localhost'] })
     } else if (isEdge(caps.browserName)) {
@@ -181,6 +202,8 @@ export async function startWebDriver(options: Capabilities.RemoteConfig) {
             edgedriverOptions.customEdgeDriverPath = binary
         }
 
+        setDefaultEdgedriverCdnUrl()
+        const { start: startEdgedriver, findEdgePath } = await import('edgedriver')
         driver = 'EdgeDriver'
         driverProcess = await startEdgedriver({ ...edgedriverOptions, cacheDir, port, allowedIps: ['0.0.0.0'] }).catch((err) => {
             log.warn(`Couldn't start EdgeDriver: ${err.message}, retry ...`)
@@ -200,6 +223,8 @@ export async function startWebDriver(options: Capabilities.RemoteConfig) {
             caps['ms:edgeOptions'].binary = findEdgePath()
             log.info(`Found Edge binary at ${caps['ms:edgeOptions'].binary}`)
         }
+
+        addWaylandFlag(caps['ms:edgeOptions'])
     } else {
         throw new Error(
             `Unknown browser name "${caps.browserName}". Make sure to pick from one of the following ` +

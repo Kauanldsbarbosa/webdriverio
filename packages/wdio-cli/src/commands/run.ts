@@ -6,7 +6,7 @@ import type { Argv } from 'yargs'
 import Launcher from '../launcher.js'
 import Watcher from '../watcher.js'
 import { coerceOptsFor, } from '../utils.js'
-import { CLI_EPILOGUE } from '../constants.js'
+import { CLI_EPILOGUE, TS_FILE_EXTENSIONS } from '../constants.js'
 import type { RunCommandArguments } from '../types.js'
 import { config } from 'create-wdio/config/cli'
 import { ConfigParser } from '@wdio/config/node'
@@ -130,6 +130,19 @@ export const cmdArgs = {
             }
             return { current, total }
         }
+    },
+    cpuProf: {
+        desc: 'Enable Node.js CPU profiling for worker processes (--cpu-prof)',
+        type: 'boolean',
+    },
+    heapProf: {
+        desc: 'Enable Node.js heap profiling for worker processes (--heap-prof)',
+        type: 'boolean',
+    },
+    debug: {
+        desc: 'Pause failing tests and browser.debug() in an agent session. Only `agent` is supported',
+        type: 'string',
+        choices: ['agent']
     }
 } as const
 
@@ -143,6 +156,7 @@ export const builder = (yargs: Argv) => {
         .example('$0 run wdio.conf.js --headless=false', 'Run all tests in headed (non-headless) mode')
         .example('$0 run wdio.conf.js --mochaOpts.timeout 60000', 'Run suite with custom Mocha timeout')
         .example('$0 run wdio.conf.js --tsConfigPath=./configs/bdd-tsconfig.json', 'Run suite with tsx using custom tsconfig.json')
+        .example('$0 run wdio.conf.js --debug=agent', 'Pause browser.debug() and failing tests for an agent')
         .epilogue(CLI_EPILOGUE)
         .help()
 }
@@ -217,7 +231,6 @@ export async function handler(argv: RunCommandArguments) {
      * Load tsx before attempting to read the config file if it's TypeScript.
      * This prevents "Unknown file extension" errors when calling tsConfigPathFromConfigFile.
      */
-    const TS_FILE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts']
     if (TS_FILE_EXTENSIONS.some((ext) => confAccess.endsWith(ext))) {
         const { resolve } = await import('import-meta-resolve')
         const tsxPath = resolve('tsx', import.meta.url)

@@ -1,6 +1,6 @@
 import type { ElementReference } from '@wdio/protocols'
 import type { BaseActionParams, KeyActionType } from './base.js'
-import BaseAction from './base.js'
+import BaseAction, { DEFAULT_DURATION_MOVES } from './base.js'
 import type { ChainablePromiseElement } from '../../types.js'
 
 const buttonNumbers = [0, 1, 2] as const
@@ -74,7 +74,7 @@ function mapButton(params: PointerActionParams | ButtonNames | Button) {
 }
 
 export default class PointerAction extends BaseAction {
-    constructor (instance: WebdriverIO.Browser, params: BaseActionParams = {}) {
+    constructor (instance: WebdriverIO.Browser | WebdriverIO.BrowsingContext, params: BaseActionParams = {}) {
         if (!params.parameters) {
             params.parameters = { pointerType: POINTER_TYPE_DEFAULT }
         }
@@ -106,6 +106,9 @@ export default class PointerAction extends BaseAction {
         }
         removeDefaultParams(seq)
 
+        if (typeof params === 'number' || !params || params.duration === undefined) {
+            DEFAULT_DURATION_MOVES.add(seq)
+        }
         this.sequence.push(seq)
         return this
     }

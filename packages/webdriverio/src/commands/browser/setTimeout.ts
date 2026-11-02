@@ -13,6 +13,12 @@ import type { Timeouts } from '@wdio/protocols'
  *
  * :::
  *
+ * WebDriver BiDi has no script timeout, so in a BiDi session WebdriverIO applies the
+ * `script` timeout to [`execute`](/docs/api/browser/execute) itself: a script that does not
+ * finish in time fails with a `script timeout` error, as with WebDriver Classic. Every BiDi
+ * command also stops after [`bidiResponseTimeout`](/docs/configuration#bidiresponsetimeout)
+ * (180 seconds by default), so a longer `script` timeout needs a longer `bidiResponseTimeout` too.
+ *
  * <example>
     :setTimeout.js
     it('should change timeout duration for session with long code duration', async () => {
@@ -21,9 +27,9 @@ import type { Timeouts } from '@wdio/protocols'
             'script': 60000
         });
         // Execute code which takes a long time
-        await browser.executeAsync((done) => {
+        await browser.execute(async () => {
             console.log('Wake me up before you go!');
-            setTimeout(done, 59000);
+            await new Promise((resolve) => setTimeout(resolve, 59000));
         });
     });
  * </example>
@@ -31,7 +37,7 @@ import type { Timeouts } from '@wdio/protocols'
  * @param {Timeouts}  timeouts            Object containing session timeout values
  * @param {Number=}   timeouts.implicit  Time in milliseconds to retry the element location strategy when finding an element.
  * @param {Number=}   timeouts.pageLoad  Time in milliseconds to wait for the document to finish loading.
- * @param {Number=}   timeouts.script    Scripts injected with [`execute`](https://webdriver.io/docs/api/browser/execute) or [`executeAsync`](https://webdriver.io/docs/api/browser/executeAsync) will run until they hit the script timeout duration, which is also given in milliseconds.
+ * @param {Number=}   timeouts.script    Scripts injected with [`execute`](https://webdriver.io/docs/api/browser/execute) will run until they hit the script timeout duration, which is also given in milliseconds. Async functions are awaited and count against this timeout.
  * @see https://w3c.github.io/webdriver/#set-timeouts
  *
  */
@@ -44,18 +50,31 @@ export async function setTimeout(
         throw new Error('Parameter for "setTimeout" command needs to be an object')
     }
 
+    if ('page load' in timeouts) {
+        throw new Error('The `page load` timeout key was removed in WebdriverIO v10. Use `{ pageLoad: ... }`.')
+    }
+
     /**
      * If value is not an integer, or it is less than 0 or greater than the maximum safe
-     * integer, return error with error code invalid argument.
+    * integer, return error with error code invalid argument.
      */
-    const timeoutValues = Object.values(timeouts)
-    if (timeoutValues.length && timeoutValues.every(timeout => typeof timeout !== 'number' || timeout < 0 || timeout > Number.MAX_SAFE_INTEGER)) {
+    const timeoutKeys = ['implicit', 'pageLoad', 'script'] as const
+    const knownTimeoutValues = Object.entries(timeouts)
+        .filter(([key]) => timeoutKeys.includes(key as typeof timeoutKeys[number]))
+        .map(([, timeout]) => timeout)
+    const timeoutValues = knownTimeoutValues.length > 0
+        ? knownTimeoutValues
+        : Object.values(timeouts)
+    const definedTimeoutValues = timeoutValues.filter(timeout => timeout !== undefined)
+    if (
+        definedTimeoutValues.some(timeout => typeof timeout !== 'number' || timeout < 0 || timeout > Number.MAX_SAFE_INTEGER) ||
+        (timeoutValues.length > 0 && definedTimeoutValues.length === 0)
+    ) {
         throw new Error('Specified timeout values are not valid integer (see https://webdriver.io/docs/api/browser/setTimeout for documentation).')
     }
 
     const implicit = timeouts.implicit as number
-    // Previously also known as `page load` with JsonWireProtocol
-    const pageLoad = (timeouts as unknown as { 'page load': number })['page load'] || timeouts.pageLoad
+    const pageLoad = timeouts.pageLoad
     const script = timeouts.script as number
     const setTimeouts = this.setTimeouts.bind(this)
 

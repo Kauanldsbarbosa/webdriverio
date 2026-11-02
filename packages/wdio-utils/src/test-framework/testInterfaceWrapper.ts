@@ -14,7 +14,8 @@ import type {
     SpecFunction,
     BeforeHookParam,
     AfterHookParam,
-    SpecArguments
+    SpecArguments,
+    FrameworkResult
 } from './types.js'
 
 const MOCHA_COMMANDS: ['skip', 'only'] = ['skip', 'only']
@@ -30,6 +31,7 @@ const MOCHA_COMMANDS: ['skip', 'only'] = ['skip', 'only']
  * @param  {Function} afterArgsFn   function that returns args for `afterFn`
  * @param  {string}   cid           cid
  * @param  {number}   repeatTest    number of retries if hook fails
+ * @param  {string}   hookTitle     hook description, e.g. `beforeEach('seed database', fn)`
  * @return {Function}               wrapped framework hook function
  */
 export const runHook = function (
@@ -42,7 +44,8 @@ export const runHook = function (
     afterFnArgs: HookFnArgs<unknown>,
     cid: string,
     repeatTest: number,
-    timeout: number
+    timeout: number,
+    hookTitle?: string
 ) {
     const wrappedHook = function (
         this: unknown,
@@ -81,6 +84,11 @@ export const runHook = function (
      * make sure Mocha grabs the correct hook function body
      */
     wrappedHook.toString = () => hookFn.toString()
+    /**
+     * Mocha titles a hook after its description or its function name (`"before each" hook: login`),
+     * so keep them instead of the name `wrappedHook`
+     */
+    Object.defineProperty(wrappedHook, 'name', { value: hookTitle ?? hookFn?.name ?? '' })
     return origFn(wrappedHook, timeout)
 }
 
@@ -109,7 +117,8 @@ export const runSpec = function (
     afterFnArgs: HookFnArgs<unknown>,
     cid: string,
     repeatTest: number,
-    timeout: number
+    timeout: number,
+    frameworkResult?: () => FrameworkResult | undefined
 ) {
     const wrappedFn = function (
         this: unknown,
@@ -122,13 +131,17 @@ export const runSpec = function (
             number
         ]
     ) {
+        const spec: SpecFunction = {
+            specFn,
+            specFnArgs: filterSpecArgs(specFnArgs)
+        }
+        if (frameworkResult) {
+            spec.frameworkResult = frameworkResult
+        }
         return testFnWrapper.call(
             this,
             'Test',
-            {
-                specFn,
-                specFnArgs: filterSpecArgs(specFnArgs)
-            },
+            spec,
             {
                 beforeFn,
                 beforeFnArgs
@@ -171,7 +184,8 @@ export const wrapTestFunction = function (
     beforeArgsFn: HookFnArgs<unknown>,
     afterFn: Function | Function[],
     afterArgsFn: HookFnArgs<unknown>,
-    cid: string
+    cid: string,
+    frameworkResult?: () => FrameworkResult | undefined
 ) {
     return function (...specArguments: SpecArguments) {
         /**
@@ -217,7 +231,8 @@ export const wrapTestFunction = function (
                     afterArgsFn,
                     cid,
                     retryCnt as number,
-                    timeout
+                    timeout,
+                    frameworkResult
                 )
             }
 
@@ -236,7 +251,8 @@ export const wrapTestFunction = function (
             afterArgsFn,
             cid,
             retryCnt as number,
-            timeout
+            timeout,
+            typeof specTitle === 'string' ? specTitle : undefined
         )
     }
 }
@@ -264,7 +280,8 @@ export const wrapGlobalTestMethod = function (
     afterArgsFn: HookFnArgs<unknown>,
     fnName: string,
     cid: string,
-    scope = globalThis
+    scope = globalThis,
+    frameworkResult?: () => FrameworkResult | undefined
 ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const origFn = (scope as any)[fnName];
@@ -276,7 +293,8 @@ export const wrapGlobalTestMethod = function (
         beforeArgsFn,
         afterFn,
         afterArgsFn,
-        cid
+        cid,
+        frameworkResult
     )
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     addMochaCommands(origFn, (scope as any)[fnName])

@@ -2,6 +2,7 @@
 index: 1
 id: considerations
 title: Considerations
+description: "Understand the limits of image comparison, platform consistency, mismatch percentages and headless browsers before relying on visual tests."
 ---
 
 # Key Considerations for Optimal Use
@@ -10,7 +11,7 @@ Before diving into the powerful features of the `@wdio/visual-service`, it's cru
 
 ## Nature of Comparison
 
--   **Pixel-by-Pixel Basis:** The module performs a pixel-by-pixel comparison of images. While certain aspects can be adjusted (see Comparison Options), the core approach remains a basic pixel comparison.
+-   **Perceptual Comparison:** The module performs a perceptual pixel comparison of images using the YIQ color space, which aligns more closely with how humans perceive color differences. Certain aspects can be adjusted via [Comparison Options](./compare-options).
 -   **Impact of Browser Updates:** Be aware that updates to browsers, like Chrome, may affect font rendering, potentially necessitating an update to your baseline images.
 
 ## Consistency in Platforms

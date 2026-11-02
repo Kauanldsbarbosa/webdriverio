@@ -13,7 +13,8 @@ import {
 } from './__fixtures__/testdata.js'
 import { State } from '../src/types.js'
 import SpecReporter from '../src/index.js'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TestStats } from '@wdio/reporter'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runnerEnd } from '../../wdio-allure-reporter/tests/__fixtures__/runner.js'
 
 vi.mock('chalk')
@@ -28,7 +29,7 @@ const getRunnerConfig = (config: any = {}) => {
         capabilities: config.capabilities || defaultCaps,
         config,
         sessionId: fakeSessionId,
-        isMultiremote: Boolean(config.isMultiremote)
+        isMultiRemote: Boolean(config.isMultiRemote)
     })
 }
 
@@ -42,7 +43,6 @@ describe('SpecReporter', () => {
     describe('on create', () => {
         it('should verify initial properties', () => {
             expect(reporter['_suiteUids'].size).toBe(0)
-            expect(reporter['_indents']).toBe(0)
             expect(reporter['_suiteIndents']).toEqual({})
             expect(reporter['_stateCounts']).toEqual({
                 passed: 0,
@@ -77,6 +77,12 @@ describe('SpecReporter', () => {
             tmpReporter.onHookEnd({ error: new Error('boom!') } as any)
             expect(tmpReporter['_stateCounts'].failed).toBe(1)
         })
+
+        it('does not count a failed hook whose error is on its test or on a retried attempt', () => {
+            tmpReporter.onHookEnd({ error: new Error('boom!'), failedTestUid: 'test-1' } as any)
+            tmpReporter.onHookEnd({ error: new Error('boom!'), retried: true } as any)
+            expect(tmpReporter['_stateCounts'].failed).toBe(0)
+        })
     })
 
     describe('getEventsToReport', () => {
@@ -92,6 +98,33 @@ describe('SpecReporter', () => {
                 hooksAndTests: [{}, { error: 11 }, {}, { type: 'test', title: '33' }, {}, { error: 22 }, {}]
             } as any)).toEqual([{ error: 11 }, { type: 'test', title: '33' }, { error: 22 }])
         })
+
+        // a Scenario Outline whose name has no <placeholder>: its example rows have the same title
+        it('keeps a test of the same title when a later test of that title passes on retry', () => {
+            const stat = (uid: string, state: string, retries: number) =>
+                Object.assign(new TestStats({ type: 'test:start', uid, title: 'outline', fullTitle: 'f: outline', cid: '0-0', specs: [] }), { state, retries })
+            const row1 = stat('row1', 'failed', 0)
+            const row2Attempt = stat('row2', 'failed', 0)
+            const row2Retry = stat('row2', 'passed', 1)
+            const events = tmpReporter.getEventsToReport({
+                tests: [row1, row2Attempt, row2Retry], hooks: [], hooksAndTests: [row1, row2Attempt, row2Retry]
+            } as any)
+            expect(events).toEqual([row1, row2Retry])
+        })
+
+        // parallel mode: the attempts of the two rows come interleaved; a Cucumber scenario keeps its uid on a retry
+        it('pairs a retry with the earlier attempt of the same uid when tests of the same title overlap', () => {
+            const stat = (uid: string, state: string, retries: number) =>
+                Object.assign(new TestStats({ type: 'test:start', uid, title: 'outline', fullTitle: 'f: outline', cid: '0-0', specs: [] }), { state, retries })
+            const a0 = stat('row-a', 'failed', 0)
+            const b0 = stat('row-b', 'failed', 0)
+            const a1 = stat('row-a', 'failed', 1)
+            const b1 = stat('row-b', 'passed', 1)
+            const events = tmpReporter.getEventsToReport({
+                tests: [a0, b0, a1, b1], hooks: [], hooksAndTests: [a0, b0, a1, b1]
+            } as any)
+            expect(events).toEqual([a1, b1])
+        })
     })
 
     describe('onTestPass', () => {
@@ -104,6 +137,85 @@ describe('SpecReporter', () => {
 
         it('should increase stateCounts.passed by 1', () => {
             expect(reporter['_stateCounts'].passed).toBe(1)
+        })
+    })
+
+    it('should replace a passed test when the same test later fails', () => {
+        const test = {
+            uid: 'late-failure',
+            title: 'passes its body',
+            state: State.PASSED
+        } as any
+
+        tmpReporter.onTestPass(test)
+        tmpReporter.onTestFail(test)
+
+        expect(tmpReporter['_stateCounts']).toMatchObject({
+            passed: 0,
+            failed: 1
+        })
+    })
+
+    it('should not subtract a late failure twice when its suite is retried', () => {
+        const test = { uid: 'late-failure' } as any
+
+        tmpReporter.onTestPass(test)
+        tmpReporter.onTestFail(test)
+        tmpReporter.onSuiteRetry()
+
+        expect(tmpReporter['_stateCounts']).toMatchObject({
+            passed: 0,
+            failed: 0,
+            retried: 1
+        })
+    })
+
+    // Cucumber at step level: the step that fails in an attempt that is retried sends test:retry, not test:fail
+    it('removes the counts of every retried attempt, and only those', () => {
+        const step = (uid: string) => ({ uid }) as any
+        tmpReporter.onSuiteStart({ uid: 'scenario', type: 'scenario' } as any)
+        tmpReporter.onTestPass(step('a1'))
+        // a2 fails and sends test:retry: the spec reporter counts nothing for it
+        tmpReporter.onTestSkip(step('a3'))
+        tmpReporter.onSuiteRetry()
+        tmpReporter.onTestPass(step('b1'))
+        tmpReporter.onHookEnd({ error: new Error('After hook fails') } as any)
+        tmpReporter.onTestPending(step('b2'))
+        tmpReporter.onSuiteRetry()
+        tmpReporter.onTestPass(step('c1'))
+        tmpReporter.onTestFail(step('c2'))
+        tmpReporter.onSuiteEnd()
+
+        expect(tmpReporter.getCountDisplay('')).toEqual(['green 1 passing ', 'red 1 failing', 'yellow 2 retried'])
+    })
+
+    // parallel mode: the events of scenarios in other windows come between the events of the retried scenario
+    it('removes only the counts of the retried scenario when scenarios overlap', () => {
+        const step = (uid: string, parentUid: string) => ({ uid, parentUid }) as any
+        tmpReporter.onSuiteStart({ uid: 'A', type: 'scenario' } as any)
+        tmpReporter.onTestPass(step('a1', 'A'))
+        tmpReporter.onSuiteStart({ uid: 'B', type: 'scenario' } as any)
+        tmpReporter.onTestFail(step('b1', 'B'))
+        // a2 fails and sends test:retry: the spec reporter counts nothing for it
+        tmpReporter.onSuiteRetry({ uid: 'A' } as any)
+        tmpReporter.onSuiteEnd({ uid: 'B' } as any)
+        tmpReporter.onTestPass(step('a1', 'A'))
+        tmpReporter.onTestPass(step('a2', 'A'))
+        tmpReporter.onSuiteEnd({ uid: 'A' } as any)
+
+        expect(tmpReporter.getCountDisplay('')).toEqual(['green 2 passing ', 'red 1 failing', 'yellow 1 retried'])
+    })
+
+    it('should retain a passed test when another test with the same UID fails', () => {
+        const passedTest = { uid: 'same-title' } as any
+        const failedTest = { uid: 'same-title' } as any
+
+        tmpReporter.onTestPass(passedTest)
+        tmpReporter.onTestFail(failedTest)
+
+        expect(tmpReporter['_stateCounts']).toMatchObject({
+            passed: 1,
+            failed: 1
         })
     })
 
@@ -129,22 +241,8 @@ describe('SpecReporter', () => {
             } as any)
         })
 
-        it('should have a pending reason', () => {
-            expect(reporter['_pendingReasons'][0]).toBe('some random reason')
-        })
-
         it('should increase stateCounts.skipped by 1', () => {
             expect(reporter['_stateCounts'].skipped).toBe(1)
-        })
-    })
-
-    describe('onSuiteEnd', () => {
-        beforeAll(() => {
-            reporter.onSuiteEnd()
-        })
-
-        it('should decrease indents', () => {
-            expect(reporter['_indents']).toBe(0)
         })
     })
 
@@ -221,7 +319,7 @@ describe('SpecReporter', () => {
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
 
-            it('should print jobs of all instance when run with multiremote', () => {
+            it('should print jobs of all instance when run with multi-remote', () => {
                 const options = {
                     hostname: 'ondemand.saucelabs.com',
                     user: 'foobar',
@@ -232,7 +330,7 @@ describe('SpecReporter', () => {
                         browserA: { browserName: 'chrome' },
                         browserB: { browserName: 'firefox' }
                     },
-                    isMultiremote: true
+                    isMultiRemote: true
                 })
                 printReporter.runnerStat.instanceOptions['foobar'] = options
                 printReporter.runnerStat.instanceOptions['barfoo'] = options
@@ -257,7 +355,7 @@ describe('SpecReporter', () => {
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
 
-            it('should print link to Sauce Labs job details page if run with Sauce Connect (jsonwp)', () => {
+            it('should print link to Sauce Labs job details page if run with Sauce Connect (legacy hostname)', () => {
                 const runner = getRunnerConfig({
                     capabilities: {
                         tunnelName: 'foobar',
@@ -292,31 +390,53 @@ describe('SpecReporter', () => {
                 }
                 printReporter.printReport(getRunnerConfig({}))
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
+
+                printReporter.write.mockClear()
+
+                printReporter.runnerStat.instanceOptions[fakeSessionId] = {
+                    hostname: 'ondemand.asia-south-2.saucelabs.com',
+                    user: 'foobar',
+                    key: '123'
+                }
+                printReporter.printReport(getRunnerConfig({}))
+                expect(printReporter.write.mock.calls).toMatchSnapshot()
+
+                printReporter.write.mockClear()
+
+                /**
+                 * the data center is also derived from `region` alone, without
+                 * the region appearing in the hostname
+                 */
+                printReporter.runnerStat.instanceOptions[fakeSessionId] = {
+                    hostname: 'ondemand.saucelabs.com',
+                    region: 'asia-south-2',
+                    user: 'foobar',
+                    key: '123'
+                }
+                printReporter.printReport(getRunnerConfig({}))
+                expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
         })
 
         describe('with disabled sharable Sauce report links', () => {
-            const options = { sauceLabsSharableLinks: false }
-            beforeEach(() => {
-                tmpReporter = new SpecReporter(options)
-                // tmpReporter.suiteUids = SUITE_UIDS
-                // tmpReporter.suites = SUITES
-                // tmpReporter.stateCounts = {
-                //     passed: 4,
-                //     failed: 1,
-                //     skipped: 1,
-                // }
-                tmpReporter.write = vi.fn()
-            })
-
-            it('should print the default Sauce Labs job details page link', () => {
-                const runner = getRunnerConfig({
-                    hostname: 'ondemand.saucelabs.com',
-                    user: 'foobar',
-                    key: '123',
-                })
-                tmpReporter.printReport(runner)
-                expect(vi.mocked(tmpReporter.write).mock.calls).toMatchSnapshot()
+            it('prints the Sauce Labs job url without an auth token', () => {
+                const printReporter = new SpecReporter({ sauceLabsSharableLinks: false })
+                printReporter.write = vi.fn()
+                printReporter.runnerStat = {
+                    instanceOptions: {
+                        [fakeSessionId]: {
+                            hostname: 'ondemand.saucelabs.com',
+                            user: 'foobar',
+                            key: '123'
+                        }
+                    }
+                } as any
+                printReporter['_suiteUids'] = SUITE_UIDS
+                printReporter.suites = SUITES
+                printReporter.printReport(getRunnerConfig({}))
+                const output = vi.mocked(printReporter.write).mock.calls.map((call) => String(call[0])).join('\n')
+                expect(output).toContain(`https://app.saucelabs.com/tests/${fakeSessionId}`)
+                expect(output).not.toContain('?auth=')
             })
         })
 
@@ -360,21 +480,14 @@ describe('SpecReporter', () => {
             expect(result).toMatchSnapshot()
         })
 
-        it('should list multiple specs', () => {
-            const config = getRunnerConfig() as any
-            config.specs.push('/foo/bar/loo.js', '/bar/foo/baz.js')
-            const result = reporter.getHeaderDisplay(config)
-            expect(result).toMatchSnapshot()
-        })
-
-        it('should validate header output in multiremote', () => {
+        it('should validate header output in multi-remote', () => {
             const result = tmpReporter.getHeaderDisplay(
                 getRunnerConfig({
                     capabilities: {
                         browserA: { browserName: 'chrome' },
                         browserB: { browserName: 'firefox' }
                     },
-                    isMultiremote: true,
+                    isMultiRemote: true,
                 }))
 
             expect(result).toMatchSnapshot()
@@ -382,6 +495,21 @@ describe('SpecReporter', () => {
     })
 
     describe('getResultDisplay', () => {
+        // the spec file line shows the path from the working folder, else the whole path
+        const fileLine = (file: string) => {
+            tmpReporter.getOrderedSuites = vi.fn(() => [{ ...Object.values(SUITES)[0], file }]) as any
+            return tmpReporter.getResultDisplay().find((line) => line.includes('» '))
+        }
+        it('shows a spec file in the working folder from there', () => {
+            expect(fileLine(path.join(process.cwd(), 'specs', 'login.spec.js'))).toBe(`» ${path.join('specs', 'login.spec.js')}`)
+        })
+        it.each([
+            ['outside the working folder', path.resolve(process.cwd(), '..', 'other', 'login.spec.js')],
+            ['in a folder whose name starts with the name of the working folder', `${process.cwd()}lication${path.sep}login.spec.js`]
+        ])('shows the whole path of a spec file %s', (_, file) => {
+            expect(fileLine(file)).toBe(`» ${file}`)
+        })
+
         it('should validate the result output with tests', () => {
             tmpReporter.getOrderedSuites = vi.fn(() => Object.values(SUITES)) as any
             const result = tmpReporter.getResultDisplay()
@@ -400,7 +528,7 @@ describe('SpecReporter', () => {
             expect(result).toMatchSnapshot()
         })
 
-        it('should not print if argument is a single line doc string', () => {
+        it('prints a single line doc string', () => {
             tmpReporter.getOrderedSuites = vi.fn(() => {
                 const suites = Object.values(JSON.parse(JSON.stringify(SUITES_WITH_DATA_TABLE))) as any[]
                 suites[0].hooksAndTests[0].argument = 'some different format'
@@ -537,15 +665,6 @@ describe('SpecReporter', () => {
             expect(tmpReporter['_orderedSuites'][1]).toEqual({ uid: 3 })
         })
 
-        it('should return the cached ordered suites', () => {
-            tmpReporter['_orderedSuites'] = ['foo', 'bar'] as any
-            const result = tmpReporter.getOrderedSuites()
-
-            expect(result.length).toBe(2)
-            expect(result[0]).toBe('foo')
-            expect(result[1]).toBe('bar')
-        })
-
         it('should return no suites', () => {
             expect(tmpReporter.getOrderedSuites().length).toBe(0)
         })
@@ -573,6 +692,21 @@ describe('SpecReporter', () => {
             expect(result[0].hooks.length).toBe(1)
             expect(result[3].hooks.length).toBe(1)
         })
+
+        it('does not show a root suite hook that the framework skipped', () => {
+            tmpReporter['_suiteUids'] = new Set(['5'])
+            tmpReporter.suites = { '5': { uid: 5 } } as any
+            tmpReporter.currentSuites = [{
+                hooks: [{
+                    type: 'hook',
+                    title: '"before all" hook in "{root}"',
+                    state: 'skipped'
+                }]
+            }] as any
+            const result = tmpReporter.getOrderedSuites()
+            expect(result[0].hooks).toEqual([])
+            expect(result.at(-1)!.hooks).toEqual([])
+        })
     })
 
     describe('indent', () => {
@@ -593,52 +727,36 @@ describe('SpecReporter', () => {
         })
     })
 
-    describe('getSymbol', () => {
-        it('should get the checkbox symbol', () => {
-            expect(tmpReporter.getSymbol(State.PASSED)).toBe('✓')
-        })
-
-        it('should get the x symbol', () => {
-            expect(tmpReporter.getSymbol(State.FAILED)).toBe('✖')
-        })
-
-        it('should get the - symbol', () => {
-            expect(tmpReporter.getSymbol(State.SKIPPED)).toBe('-')
-        })
-
-        it('should get the ? symbol', () => {
-            expect(tmpReporter.getSymbol()).toBe('?')
-        })
-    })
-
-    describe('custom getSymbol', () => {
-        const options = { symbols: { passed: 'Y', failed: 'N' } }
-        beforeEach(() => {
-            tmpReporter = new SpecReporter(options)
-        })
-
-        it('should get new passed symbol', () => {
-            expect(tmpReporter.getSymbol(State.PASSED)).toBe(options.symbols.passed)
-        })
-
-        it('should get new failed symbol', () => {
-            expect(tmpReporter.getSymbol(State.FAILED)).toBe(options.symbols.failed)
-        })
-
-        it('should get the skipped symbol that is not set', () => {
-            expect(tmpReporter.getSymbol(State.SKIPPED)).toBe('-')
+    describe('custom symbols', () => {
+        it('prints provided symbols and keeps the default skipped symbol', () => {
+            const printReporter = new SpecReporter({ symbols: { passed: 'Y', failed: 'N' } })
+            printReporter.write = vi.fn()
+            printReporter['_suiteUids'] = SUITE_UIDS
+            printReporter.suites = SUITES
+            printReporter.printReport(getRunnerConfig())
+            const output = vi.mocked(printReporter.write).mock.calls.map((call) => String(call[0])).join('\n')
+            expect(output).toContain('Y foo')
+            expect(output).toContain('N a failed test')
+            expect(output).toContain('- a skipped test')
+            expect(output).not.toContain('✓')
+            expect(output).not.toContain('✖')
         })
     })
 
     describe('add console logs', () => {
         const options = { addConsoleLogs: true }
+        const originalStdoutWrite = process.stdout.write.bind(process.stdout)
+
+        afterEach(() => {
+            process.stdout.write = originalStdoutWrite
+        })
 
         it('should add console log to report for passing test', () => {
             tmpReporter = new SpecReporter(options)
             tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
             tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue({ uid: 'foo1' } as any)
+            process.stdout.write('Printing to console spec')
             tmpReporter.onTestPass({
                 title:'test1',
                 state:State.PASSED
@@ -651,9 +769,9 @@ describe('SpecReporter', () => {
         it('should add console logs to report for failing test', () => {
             tmpReporter = new SpecReporter(options)
             tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
             tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue({ uid: 'foo1' } as any)
+            process.stdout.write('Printing to console spec')
             tmpReporter.onTestFail({
                 title:'test1',
                 state:State.FAILED
@@ -666,9 +784,9 @@ describe('SpecReporter', () => {
         it('should add console logs to report for skipping test', () => {
             tmpReporter = new SpecReporter(options)
             tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
             tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue({ uid: 'foo1' } as any)
+            process.stdout.write('Printing to console spec')
             tmpReporter.onTestSkip({
                 title:'test1',
                 state:State.SKIPPED
@@ -680,27 +798,102 @@ describe('SpecReporter', () => {
 
         it('should add pending reason to report for skipped tests', () => {
             tmpReporter = new SpecReporter(options)
-            tmpReporter.onSuiteStart(Object.values(SUITES)[2] as any)
-            tmpReporter.onTestStart()
-            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter.onTestSkip({
-                title:'test1',
-                state:State.SKIPPED,
-                pendingReason:'some random Reasons'
-            } as any)
-            expect(tmpReporter.getResultDisplay().toString()).toContain('Pending Reasons')
+            const suite = Object.values(SUITES)[2] as any
+            tmpReporter.onSuiteStart(suite)
+            const skipped = { ...suite.tests[1], pendingReason: 'some random Reasons' }
+            tmpReporter['_orderedSuites'] = [{ ...suite, tests: [suite.tests[0], skipped], hooksAndTests: [suite.tests[0], skipped] }] as any
+            tmpReporter.onTestSkip(skipped)
+            const result = tmpReporter.getResultDisplay().join('\n')
+            // under its own test, not under the first printed test
+            expect(result).toMatch(/foo bar baz\n.*a skipped test\n\n.*Pending Reasons.*\n\s+some random Reasons/)
             tmpReporter.onSuiteEnd()
             tmpReporter.onRunnerEnd(runnerEnd())
         })
 
-        it('should not add webdriver logs to report', () => {
+        it('omits webdriver logs and keeps other console output', () => {
             tmpReporter = new SpecReporter(options)
             tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
             tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='mwebdriver test log'
-            expect(tmpReporter.getResultDisplay().toString()).not.toContain('mwebdriver test log')
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue({ uid: 'foo1' } as any)
+            process.stdout.write('Printing to console spec\n')
+            process.stdout.write('mwebdriver test log\n')
+            tmpReporter.onTestPass({
+                title: 'test1',
+                state: State.PASSED
+            } as any)
+            const result = tmpReporter.getResultDisplay('').toString()
+            expect(result).toContain('Printing to console spec')
+            expect(result).not.toContain('mwebdriver test log')
             tmpReporter.onSuiteEnd()
-            tmpReporter.onRunnerEnd(runnerEnd())
+        })
+
+        it('keeps console logs of overlapping tests apart', () => {
+            tmpReporter = new SpecReporter(options)
+            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
+            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
+            let contextUid: string | undefined
+            vi.spyOn(tmpReporter, 'getContextTest').mockImplementation(() => contextUid ? { uid: contextUid } as any : undefined)
+            const write = (uid: string | undefined, text: string) => {
+                contextUid = uid
+                process.stdout.write(text)
+            }
+            // foo1 = A, bar1 = B (order in the suite fixture)
+            write('foo1', 'A-one\n')
+            write('bar1', 'B-one\n')
+            write(undefined, 'orphan\n')
+            write('foo1', 'A-two\n')
+            write('bar1', 'B-two\n')
+            tmpReporter.onTestPass({ uid: 'bar1', title: 'bar', state: State.PASSED } as any)
+            tmpReporter.onTestPass({ uid: 'foo1', title: 'foo', state: State.PASSED } as any)
+
+            const text = tmpReporter.getResultDisplay('').join('\n')
+            const fooAt = text.search(/ foo$/m)
+            const barAt = text.search(/ bar$/m)
+            expect(fooAt).toBeGreaterThan(-1)
+            expect(barAt).toBeGreaterThan(fooAt)
+            const fooBlock = text.slice(fooAt, barAt)
+            const barBlock = text.slice(barAt)
+            expect(fooBlock).toContain('A-one')
+            expect(fooBlock).toContain('A-two')
+            expect(fooBlock).not.toContain('B-')
+            expect(barBlock).toContain('B-one')
+            expect(barBlock).toContain('B-two')
+            expect(barBlock).not.toContain('A-')
+            expect(text).not.toContain('orphan')
+            tmpReporter.onSuiteEnd()
+        })
+
+        it('drops console logs written after the test ended', () => {
+            tmpReporter = new SpecReporter(options)
+            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
+            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
+            const test = { uid: 'foo1' } as any
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue(test)
+            process.stdout.write('during\n')
+            test.end = new Date()
+            process.stdout.write('afterEach\n')
+            tmpReporter.onTestPass({ uid: 'foo1', title: 'foo', state: State.PASSED } as any)
+
+            const text = tmpReporter.getResultDisplay('').join('\n')
+            expect(text).toContain('during')
+            expect(text).not.toContain('afterEach')
+            tmpReporter.onSuiteEnd()
+        })
+
+        it('prints only the last attempt\'s console logs of a retried test', () => {
+            tmpReporter = new SpecReporter(options)
+            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
+            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
+            vi.spyOn(tmpReporter, 'getContextTest').mockReturnValue({ uid: 'foo1' } as any)
+            process.stdout.write('attempt-1\n')
+            tmpReporter.onTestStart({ uid: 'foo1' } as any)
+            process.stdout.write('attempt-2\n')
+            tmpReporter.onTestPass({ uid: 'foo1', title: 'foo', state: State.PASSED } as any)
+
+            const text = tmpReporter.getResultDisplay('').join('\n')
+            expect(text).toContain('attempt-2')
+            expect(text).not.toContain('attempt-1')
+            tmpReporter.onSuiteEnd()
         })
     })
 
@@ -720,7 +913,6 @@ describe('SpecReporter', () => {
                 runner.failures = 1
                 printReporter.printReport(runner)
 
-                expect(printReporter['_onlyFailures']).toBe(false)
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
 
@@ -728,7 +920,6 @@ describe('SpecReporter', () => {
                 runner.failures = 0
                 printReporter.printReport(runner)
 
-                expect(printReporter['_onlyFailures']).toBe(false)
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
         })
@@ -745,7 +936,6 @@ describe('SpecReporter', () => {
                 runner.failures = 1
                 printReporter.printReport(runner)
 
-                expect(printReporter['_onlyFailures']).toBe(true)
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
 
@@ -753,7 +943,6 @@ describe('SpecReporter', () => {
                 runner.failures = 0
                 printReporter.printReport(runner)
 
-                expect(printReporter['_onlyFailures']).toBe(true)
                 expect(printReporter.write.mock.calls).toMatchSnapshot()
             })
         })
@@ -790,57 +979,28 @@ describe('SpecReporter', () => {
 
         it('should group retried test suites', () => {
             runner.failures = 0
-            printReporter.onTestPass({})
-            printReporter.onTestPass({})
-            printReporter.onTestFail({})
+            printReporter.onTestPass({ uid: 'first-run-foo' })
+            printReporter.onTestPass({ uid: 'first-run-bar' })
+            printReporter.onTestFail({ uid: 'first-run-failure' })
             printReporter.onSuiteRetry()
-            printReporter.onTestPass({})
-            printReporter.onTestPass({})
+            printReporter.onTestPass({ uid: 'retry-foo' })
+            printReporter.onTestPass({ uid: 'retry-bar' })
             printReporter.printReport(runner)
             expect(printReporter.write.mock.calls).toMatchSnapshot()
         })
+
     })
 
     describe('showPreface', () => {
-        let printReporter: SpecReporter = null as any
-        const runner = getRunnerConfig({ hostname: 'localhost' })
-        it('false', () => {
-            printReporter = new SpecReporter({ showPreface: false })
+        it('omits the browser preface when showPreface is false', () => {
+            const printReporter = new SpecReporter({ showPreface: false })
             printReporter.write = vi.fn()
             printReporter['_suiteUids'] = SUITE_UIDS
-            printReporter.printReport(runner)
-
-            expect(printReporter['_showPreface']).toBe(false)
-            expect(vi.mocked(printReporter.write).mock.calls).toMatchSnapshot()
-        })
-
-        it('true', () => {
-            printReporter = new SpecReporter({ showPreface: true })
-            printReporter.write = vi.fn()
-            printReporter['_suiteUids'] = SUITE_UIDS
-            printReporter.printReport(runner)
-
-            expect(printReporter['_showPreface']).toBe(true)
-            expect(vi.mocked(printReporter.write).mock.calls).toMatchSnapshot()
-        })
-    })
-
-    describe('getColor', () => {
-        it('should get green', () => {
-            expect(tmpReporter.getColor(State.PASSED)).toBe('green')
-        })
-
-        it('should get red', () => {
-            expect(tmpReporter.getColor(State.FAILED)).toBe('red')
-        })
-
-        it('should get cyan', () => {
-            expect(tmpReporter.getColor(State.SKIPPED)).toBe('cyan')
-            expect(tmpReporter.getColor(State.PENDING)).toBe('cyan')
-        })
-
-        it('should get null', () => {
-            expect(tmpReporter.getColor()).toBe('gray')
+            printReporter.suites = SUITES
+            printReporter.printReport(getRunnerConfig({ hostname: 'localhost' }))
+            const output = vi.mocked(printReporter.write).mock.calls.map((call) => String(call[0])).join('\n')
+            expect(output).toContain('Running: loremipsum (v50) on Windows 10')
+            expect(output).not.toContain('[loremipsum 50 Windows 10 #0-0]')
         })
     })
 
@@ -850,6 +1010,7 @@ describe('SpecReporter', () => {
             expect(tmpReporter.setMessageColor('test', State.PASSED)).toEqual('green test')
             expect(tmpReporter.setMessageColor('test', State.FAILED)).toEqual('red test')
             expect(tmpReporter.setMessageColor('test', State.SKIPPED)).toEqual('cyan test')
+            expect(tmpReporter.setMessageColor('test', State.PENDING)).toEqual('cyan test')
         })
 
         it('should not give any color', () => {
@@ -861,13 +1022,22 @@ describe('SpecReporter', () => {
     })
 
     describe('getEnviromentCombo', () => {
-        it('should return Multibrowser as capability if multiremote is used', () => {
+        it('should return Multibrowser as capability if multi-remote is used', () => {
             expect(tmpReporter.getEnviromentCombo({
                 myBrowser: {
                     browserName: 'chrome',
                     platform: 'Windows 8.1'
                 }
-            } as any, true, true)).toBe('MultiremoteBrowser on chrome')
+            } as any, true, true)).toBe('MultiRemoteBrowser on chrome')
+        })
+
+        it('names a remote app URL by its file name, without credentials and token', () => {
+            const app = 'https://user:secret@storage.example.com/apps/my.apk?token=abc123'
+            expect(tmpReporter.getEnviromentCombo({
+                a: { platformName: 'Android', 'appium:app': app },
+                b: { browserName: 'chrome' }
+            } as any, true, true)).toBe('MultiRemoteBrowser on my.apk and chrome')
+            expect(tmpReporter.getEnviromentCombo({ platformName: 'Android', 'appium:app': app } as any)).toBe('my.apk on Android')
         })
 
         it('should not throw if mutliremote name is "app"', () => {
@@ -876,7 +1046,20 @@ describe('SpecReporter', () => {
                     browserName: 'chrome',
                     platform: 'Windows 8.1'
                 }
-            } as any, true, true)).toBe('MultiremoteBrowser on chrome')
+            } as any, true, true)).toBe('MultiRemoteBrowser on chrome')
+        })
+
+        it('names an Appium device of a multi-remote run, and a session that did not start', () => {
+            // Appium returns its capabilities without the `appium:` prefix
+            expect(tmpReporter.getEnviromentCombo({
+                myPhone: { platformName: 'iOS', deviceName: 'iPhone 17' },
+                myBrowser: { browserName: 'chrome' }
+            } as any, true, true)).toBe('MultiRemoteBrowser on iPhone 17 and chrome')
+            expect(tmpReporter.getEnviromentCombo({
+                myBrowser: { capabilities: { browserName: 'chrome' } },
+                myOther: { capabilities: { browserName: 'firefox' } }
+            } as any, false, true)).toBe('MultiRemoteBrowser on chrome and firefox')
+            expect(tmpReporter.getEnviromentCombo({ a: { platformName: 'linux' } } as any, true, true)).toBe('MultiRemoteBrowser')
         })
 
         it('should return verbose desktop combo', () => {
@@ -926,15 +1109,6 @@ describe('SpecReporter', () => {
                 ['appium:platformName']: 'iOS',
                 ['appium:app']: 'sauce-storage:myApp.app'
             })).toBe('iPhone 6 Plus on iOS 9.2 executing myApp.app')
-        })
-
-        it('should return preface mobile combo executing an app', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                ['appium:deviceName']: 'iPhone 6 Plus',
-                ['appium:platformVersion']: '9.2',
-                ['appium:platformName']: 'iOS',
-                ['appium:app']: 'sauce-storage:myApp.app'
-            }, true)).toBe('iPhone 6 Plus on iOS 9.2 executing myApp.app')
         })
 
         it('should return verbose mobile combo executing a browser', () => {
@@ -1071,83 +1245,90 @@ describe('SpecReporter', () => {
         })
     })
 
-    describe('add real time report', () => {
-        const options = { realtimeReporting: true }
+    describe('realtime reporting', () => {
+        function withRunnerSend(run: (sent: { name?: string, content?: string }[]) => void) {
+            const sent: { name?: string, content?: string }[] = []
+            const originalSend = process.send
+            const originalUnitTests = process.env.WDIO_UNIT_TESTS
+            delete process.env.WDIO_UNIT_TESTS
+            process.send = ((message: { name?: string, content?: string }) => {
+                sent.push(message)
+                return true
+            }) as typeof process.send
+            try {
+                run(sent)
+            } finally {
+                process.send = originalSend
+                if (originalUnitTests === undefined) {
+                    delete process.env.WDIO_UNIT_TESTS
+                } else {
+                    process.env.WDIO_UNIT_TESTS = originalUnitTests
+                }
+            }
+        }
 
-        it('should call printCurrentStats for passing test', () => {
-            tmpReporter = new SpecReporter(options)
-            vi.spyOn(tmpReporter, 'printCurrentStats')
-            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
-            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
-            tmpReporter.onTestPass({
-                title:'test1',
-                state:State.PASSED
-            } as any)
-            expect(tmpReporter.printCurrentStats).toBeCalledWith({
-                title:'test1',
-                state:State.PASSED
+        it('sends suite, test, and hook lines to the runner', () => {
+            withRunnerSend((sent) => {
+                const realtime = new SpecReporter({ realtimeReporting: true })
+                realtime.onRunnerStart(getRunnerConfig() as any)
+                realtime.onSuiteStart({
+                    uid: 'suite-1',
+                    title: 'Login',
+                    type: 'suite',
+                    file: `${process.cwd()}/specs/login.spec.js`
+                } as any)
+                realtime.onTestPass({
+                    type: 'test',
+                    title: 'accepts a valid password',
+                    state: State.PASSED,
+                    uid: 'test-1'
+                } as any)
+                realtime.onHookEnd({
+                    type: 'hook',
+                    title: '"after each" hook',
+                    state: State.PASSED
+                } as any)
+
+                const contents = sent.map((message) => message.content)
+                expect(sent.every((message) => message.name === 'reporterRealTime')).toBe(true)
+                expect(contents.some((line) => line?.includes('Suite started:') && line.includes('login.spec.js'))).toBe(true)
+                expect(contents.some((line) => line?.includes('✓') && line.includes('accepts a valid password'))).toBe(true)
+                expect(contents.some((line) => line?.includes('Hook executed: "after each" hook'))).toBe(true)
+
+                const beforeEmptyHook = sent.length
+                realtime.onHookEnd({ type: 'hook', title: '' } as any)
+                expect(sent.length).toBe(beforeEmptyHook)
             })
-            tmpReporter.onSuiteEnd()
-            tmpReporter.onRunnerEnd(runnerEnd())
         })
 
-        it('should call printCurrentStats for falling test', () => {
-            tmpReporter = new SpecReporter(options)
-            vi.spyOn(tmpReporter, 'printCurrentStats')
-            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
-            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
-            tmpReporter.onTestPass({
-                title:'test1',
-                state:State.FAILED
-            } as any)
-            expect(tmpReporter.printCurrentStats).toBeCalledWith({
-                title:'test1',
-                state:State.FAILED
+        // a Cucumber step that fails in an attempt that Cucumber retries, a Mocha test that runs again
+        it('sends a line with the retry symbol for a retried test', () => {
+            withRunnerSend((sent) => {
+                const realtime = new SpecReporter({ realtimeReporting: true })
+                realtime.onRunnerStart(getRunnerConfig() as any)
+                realtime.onTestRetry({ type: 'test', title: 'Then I fail once', state: State.FAILED, uid: 'step-2' } as any)
+
+                expect(sent.map((message) => message.content).some((line) => line?.includes('↻') && line.includes('Then I fail once'))).toBe(true)
             })
-            tmpReporter.onSuiteEnd()
-            tmpReporter.onRunnerEnd(runnerEnd())
         })
 
-        it('should call printCurrentStats skipped test', () => {
-            tmpReporter = new SpecReporter(options)
-            vi.spyOn(tmpReporter, 'printCurrentStats')
-            tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-            tmpReporter.onTestStart()
-            tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-            tmpReporter['_consoleOutput']='Printing to console spec'
-            tmpReporter.onTestPass({
-                title:'test1',
-                state:State.SKIPPED
-            } as any)
-            expect(tmpReporter.printCurrentStats).toBeCalledWith({
-                title:'test1',
-                state:State.SKIPPED
+        it('does not send when realtime reporting is off', () => {
+            withRunnerSend((sent) => {
+                const realtime = new SpecReporter({ realtimeReporting: false })
+                realtime.onRunnerStart(getRunnerConfig() as any)
+                realtime.onSuiteStart({
+                    uid: 'suite-1',
+                    title: 'Login',
+                    type: 'suite',
+                    file: `${process.cwd()}/specs/login.spec.js`
+                } as any)
+                realtime.onTestPass({
+                    type: 'test',
+                    title: 'hidden',
+                    state: State.PASSED
+                } as any)
+                expect(sent).toEqual([])
             })
-            tmpReporter.onSuiteEnd()
-            tmpReporter.onRunnerEnd(runnerEnd())
         })
-    })
-
-    it('should call printCurrentStats on Hook complete', () => {
-        tmpReporter = new SpecReporter({ realtimeReporting : false })
-        vi.spyOn(tmpReporter, 'printCurrentStats')
-        tmpReporter.onSuiteStart(Object.values(SUITES)[0] as any)
-        tmpReporter.onTestStart()
-        tmpReporter['_orderedSuites'] = Object.values(SUITES) as any
-        tmpReporter['_consoleOutput']='Printing to console spec'
-        tmpReporter.onHookEnd({
-            title:'test1',
-            state:State.FAILED
-        } as any)
-        expect(tmpReporter.printCurrentStats).toBeCalledWith({
-            title:'test1',
-            state:State.FAILED
-        })
-        tmpReporter.onSuiteEnd()
-        tmpReporter.onRunnerEnd(runnerEnd())
     })
 })

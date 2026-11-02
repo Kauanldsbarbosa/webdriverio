@@ -1,5 +1,16 @@
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import url from 'node:url'
+
 import { browser, expect } from '@wdio/globals'
 import type { local, remote } from 'webdriver'
+
+const extensionFixture = path.resolve(
+    path.dirname(url.fileURLToPath(import.meta.url)),
+    '__fixtures__',
+    'web-extension'
+)
 
 describe('bidi e2e test', () => {
     describe('execute', () => {
@@ -13,6 +24,18 @@ describe('bidi e2e test', () => {
                 return this.skip()
             }
 
+            /**
+             * The gutter number is the call site in this file, read from the
+             * stack frame. A literal line number fails as soon as a line is
+             * inserted above this test.
+             */
+            const expectAnnotatedThrow = (stack: string, snippet: string) => {
+                const escaped = snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                expect(stack).toMatch(new RegExp(`\\d+ │ ${escaped}`))
+                const line = stack.match(new RegExp(`(\\d+) │ ${escaped}`))?.[1]
+                expect(stack).toContain(`bidi.e2e.ts:${line}:`)
+            }
+
             const result = await browser.execute(async () => {
                 const a: number = 1
                 console.log('Hello Bidi')
@@ -22,7 +45,7 @@ describe('bidi e2e test', () => {
                     }
                 }
             }).catch(err => err)
-            expect(result.stack).toContain('16 │ if(a){if(a){throw new Error("Hello Bidi")}}}')
+            expectAnnotatedThrow(result.stack, 'if(a){if(a){throw new Error("Hello Bidi")}}}')
 
             const result2 = await browser.execute(async () => {
                 const a: number = 1
@@ -33,8 +56,26 @@ describe('bidi e2e test', () => {
                     }
                 }
             }).catch(err => err)
-            expect(result2.stack).toContain('27 │ if(a){if(a){await Promise.reject(new Error("Hello Bidi"))}}}')
+            expectAnnotatedThrow(result2.stack, 'if(a){if(a){await Promise.reject(new Error("Hello Bidi"))}}}')
         })
+    })
+
+    it('prints a PDF with browsingContext.print', async function () {
+        if (!browser.isBidi) {
+            return this.skip()
+        }
+
+        await browser.url('https://guinea-pig.webdriver.io/')
+        const file = path.join(os.tmpdir(), `bidi-save-pdf-${browser.capabilities.browserName}-${Date.now()}.pdf`)
+        const pdf = await browser.savePDF(file, {
+            orientation: 'landscape',
+            left: 2
+        })
+
+        expect(browser.isBidi).toBe(true)
+        expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
+        expect((await fs.readFile(file)).subarray(0, 5).toString()).toBe('%PDF-')
+        await fs.rm(file, { force: true })
     })
 
     it('can send bidi commands', async function () {
@@ -207,42 +248,27 @@ describe('bidi e2e test', () => {
 
     it('supports execute with bidi on element scope', async () => {
         await browser.url('https://guinea-pig.webdriver.io')
-        const result = await browser.$('.findme').execute(function (elem, a, b, c, d) {
+        const result = await browser.$$('.findme')[0].execute(function (elem, a, b, c, d) {
             return (elem as unknown as HTMLElement).innerText.length + a + b + c + d
         }, 1, 2, 3, 4)
         expect(result).toBe(29)
     })
 
-    describe('executeAsync', () => {
-        it('allows to pass in a string', async () => {
-            const script = `
-                const callback = arguments[arguments.length - 1]
-                Promise.resolve(...arguments)
-                    .then(() => { return 2 * arguments[0] })
-                    .then(callback)
-            `
-            const res = await browser.executeAsync(script, 2)
-            expect(res).toBe(4)
-        })
-
+    describe('execute async function', () => {
         it('works in browser scope', async () => {
-            const result = await browser.executeAsync(function (a, b, c, d, done) {
-                // browser context - you may not access client or console
-                setTimeout(() => {
-                    done(a + b + c + d)
-                }, 3000)
+            const result = await browser.execute(async (a, b, c, d) => {
+                await new Promise((resolve) => setTimeout(resolve, 10))
+                return a + b + c + d
             }, 1, 2, 3, 4)
             expect(result).toBe(10)
         })
 
         it('works on element scope', async () => {
             await browser.url('https://guinea-pig.webdriver.io')
-            const result = await browser.$('.findme').executeAsync(function (elem, a, b, c, d, done) {
-                // browser context - you may not access client or console
-                setTimeout(() => {
-                    // "Test CSS Attributes" = 19 + 1 + 2 + 3 + 4 = 29
-                    done((elem as unknown as HTMLElement).innerText.length + a + b + c + d)
-                }, 3000)
+            const result = await browser.$$('.findme')[0].execute(async (elem, a, b, c, d) => {
+                await new Promise((resolve) => setTimeout(resolve, 10))
+                // "Test CSS Attributes" = 19 + 1 + 2 + 3 + 4 = 29
+                return (elem as unknown as HTMLElement).innerText.length + a + b + c + d
             }, 1, 2, 3, 4)
             expect(result).toBe(29)
         })
@@ -337,7 +363,6 @@ describe('bidi e2e test', () => {
         describe('Browser ClientWindowState', () => {
 
             it('can get window state', async () => {
-                console.log('Getting window state')
                 await browser.url('https://guinea-pig.webdriver.io')
 
                 const windowState = await browser.browserGetClientWindows({})
@@ -382,7 +407,7 @@ describe('bidi e2e test', () => {
 
         describe('Scripts', () => {
 
-            it('can return a ScriptEvaluateResultSuccess', async () => {
+            it('can return a ScriptEvaluationResultSuccess', async () => {
                 await browser.url('https://guinea-pig.webdriver.io')
                 const context = await browser.getWindowHandle()
 
@@ -395,7 +420,7 @@ describe('bidi e2e test', () => {
                 }
                 const result = await browser.scriptCallFunction(params)
 
-                const expectedSuccessResult: remote.ScriptEvaluateResultSuccess = {
+                const expectedSuccessResult: remote.ScriptEvaluationResultSuccess = {
                     realm: 'expect.any(String)',
                     type: 'success',
                     result: {
@@ -409,7 +434,7 @@ describe('bidi e2e test', () => {
                 })
             })
 
-            it('can return a ScriptEvaluateResultException', async () => {
+            it('can return a ScriptEvaluationResultException', async () => {
                 await browser.url('https://guinea-pig.webdriver.io')
                 const context = await browser.getWindowHandle()
 
@@ -422,7 +447,7 @@ describe('bidi e2e test', () => {
                 }
                 const result = await browser.scriptCallFunction(params)
 
-                const expectedExceptionResult: remote.ScriptEvaluateResultException = {
+                const expectedExceptionResult: remote.ScriptEvaluationResultException = {
                     exceptionDetails: {
                         columnNumber: 20,
                         exception: {
@@ -466,7 +491,7 @@ describe('bidi e2e test', () => {
                 await browser.setPermissions({ name: 'geolocation' }, 'granted')
 
                 return browser.execute(() => {
-                // You must wrap callback-based APIs in a Promise even in an async function
+                    // You must wrap callback-based APIs in a Promise even in an async function
                     return new Promise((resolve, reject) => {
                         if (!navigator.geolocation) {
                             return reject(new Error('Geolocation not supported'))
@@ -526,6 +551,205 @@ describe('bidi e2e test', () => {
                 // TODO fix one day we should be able to assert 'positionUnavailable' somehow
                 await expect(geolocation).rejects.toThrow()
             })
+        })
+
+        describe('emulate', () => {
+            const unsupported = (err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err)
+                return /unsupported operation|unknown command/i.test(message)
+            }
+
+            /**
+             * A browser that has not implemented the command rejects it. Chrome
+             * reports `unknown command`; another browser may report
+             * `unsupported operation`. That is the `emulate` contract, so skip
+             * the page assertion. `invalid argument` still fails the test.
+             */
+            async function run (this: Mocha.Context, fn: () => Promise<void>) {
+                try {
+                    await fn()
+                } catch (err) {
+                    if (unsupported(err)) {
+                        return this.skip()
+                    }
+                    throw err
+                }
+            }
+
+            it('emulates geolocation without a reload', async function () {
+                await browser.url('https://guinea-pig.webdriver.io')
+                await run.call(this, async () => {
+                    const restore = await browser.emulate('geolocation', {
+                        latitude: 52.52,
+                        longitude: 13.405,
+                        accuracy: 1
+                    })
+                    try {
+                        await browser.setPermissions({ name: 'geolocation' }, 'granted')
+                        const geolocation = await browser.execute(() => {
+                            return new Promise((resolve, reject) => {
+                                navigator.geolocation.getCurrentPosition(
+                                    (position) => resolve({
+                                        latitude: position.coords.latitude,
+                                        longitude: position.coords.longitude,
+                                        accuracy: position.coords.accuracy
+                                    }),
+                                    (error) => reject(error),
+                                    { timeout: 10000 }
+                                )
+                            })
+                        })
+                        expect(geolocation).toEqual({
+                            latitude: 52.52,
+                            longitude: 13.405,
+                            accuracy: 1
+                        })
+                    } finally {
+                        await restore()
+                    }
+                })
+            })
+
+            it('emulates the user agent without a reload', async function () {
+                await browser.url('https://guinea-pig.webdriver.io')
+                await run.call(this, async () => {
+                    const restore = await browser.emulate('userAgent', 'WebdriverIO-Emulate-UA')
+                    try {
+                        expect(await browser.execute(() => navigator.userAgent)).toBe('WebdriverIO-Emulate-UA')
+                    } finally {
+                        await restore()
+                    }
+                })
+            })
+
+            it('emulates the color scheme for matchMedia and CSS without a reload', async function () {
+                await browser.url('https://guinea-pig.webdriver.io')
+                await run.call(this, async () => {
+                    const restore = await browser.emulate('colorScheme', 'dark')
+                    try {
+                        const observed = await browser.execute(() => {
+                            const style = document.createElement('style')
+                            style.textContent = '#wdio-scheme { color: rgb(0, 128, 0) } @media (prefers-color-scheme: dark) { #wdio-scheme { color: rgb(0, 0, 128) } }'
+                            document.head.appendChild(style)
+                            const el = document.createElement('div')
+                            el.id = 'wdio-scheme'
+                            document.body.appendChild(el)
+                            return {
+                                matches: matchMedia('(prefers-color-scheme: dark)').matches,
+                                color: getComputedStyle(el).color
+                            }
+                        })
+                        expect(observed).toEqual({ matches: true, color: 'rgb(0, 0, 128)' })
+                    } finally {
+                        await restore()
+                    }
+                })
+            })
+
+            it('takes the browsing context offline without a reload', async function () {
+                await browser.url('https://guinea-pig.webdriver.io')
+                await run.call(this, async () => {
+                    const restore = await browser.emulate('onLine', false)
+                    try {
+                        const observed = await browser.execute(async () => {
+                            let fetched = 'ok'
+                            try {
+                                await fetch(`${location.href}?r=${Math.random()}`, { cache: 'no-store' })
+                            } catch {
+                                fetched = 'rejected'
+                            }
+                            return { online: navigator.onLine, fetched }
+                        })
+                        expect(observed).toEqual({ online: false, fetched: 'rejected' })
+                    } finally {
+                        await restore()
+                    }
+                })
+            })
+
+            it('emulates the timezone without a reload', async function () {
+                await browser.url('https://guinea-pig.webdriver.io')
+                await run.call(this, async () => {
+                    const restore = await browser.emulate('timezone', 'Pacific/Honolulu')
+                    try {
+                        expect(await browser.execute(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('Pacific/Honolulu')
+                    } finally {
+                        await restore()
+                    }
+                })
+            })
+        })
+
+        describe('web extension', () => {
+            it('installs and uninstalls an extension', async () => {
+                const browserName = browser.capabilities.browserName ?? 'unknown'
+                /**
+                 * Chrome, Edge, and Chromium are started with the flags that
+                 * enable webExtension.install. A missing command there is a
+                 * regression. Other BiDi browsers may report `unsupported
+                 * operation` or `unknown command`; that result is asserted.
+                 */
+                const requiresExtensionCommands = /chrome|chromium|edge/i.test(browserName)
+                let id: string
+                try {
+                    id = await browser.installExtension(extensionFixture)
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err)
+                    if (!requiresExtensionCommands && /unsupported operation|unknown command/i.test(message)) {
+                        expect(message).toMatch(/unsupported operation|unknown command/i)
+                        console.log(`webExtension.install is not implemented in ${browserName}: ${message}`)
+                        return
+                    }
+                    throw err
+                }
+
+                expect(id).toEqual(expect.any(String))
+                expect(id.length).toBeGreaterThan(0)
+                await browser.uninstallExtension(id)
+                await expect(browser.uninstallExtension(id)).rejects.toThrow()
+            })
+        })
+    })
+
+    describe('history', () => {
+        it('goes back and forward between two pages', async function () {
+            if (!browser.isBidi) {
+                return this.skip()
+            }
+
+            /**
+             * Both pages are free of iframes. Chrome keeps a child frame of a
+             * page restored from the back/forward cache after it is gone, and
+             * a later `input.setFiles` rejects with `no such frame`.
+             */
+            const firstUrl = 'https://guinea-pig.webdriver.io/'
+            const secondUrl = 'https://guinea-pig.webdriver.io/reloadCounter.html'
+            await browser.url(firstUrl)
+            await browser.url(secondUrl)
+
+            await browser.back()
+            const afterBack = await browser.getUrl()
+            expect(afterBack).not.toContain('reloadCounter.html')
+            expect(new URL(afterBack).hostname).toBe('guinea-pig.webdriver.io')
+
+            await browser.forward()
+            expect(await browser.getUrl()).toContain('reloadCounter.html')
+        })
+
+        it('rejects back when the browsing context has no history entry', async function () {
+            if (!browser.isBidi) {
+                return this.skip()
+            }
+
+            const original = await browser.getWindowHandle()
+            const { context } = await browser.browsingContextCreate({ type: 'tab' })
+            await browser.switchToWindow(context)
+            try {
+                await expect(browser.back()).rejects.toThrow(/no such history entry/)
+            } finally {
+                await browser.closeWindow()
+                await browser.switchToWindow(original)
+            }
         })
     })
 })

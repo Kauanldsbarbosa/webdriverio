@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { describe, expect, it, vi, test, afterEach } from 'vitest'
+import { describe, expect, it, vi, test, afterEach, onTestFinished } from 'vitest'
 
 import BaseReporter from '../src/reporter.js'
 
@@ -35,6 +35,17 @@ describe('BaseReporter', () => {
         await reporter.initReporters()
 
         expect(reporter['_reporters']).toHaveLength(2)
+    })
+
+    it('should forward the context id resolver to reporters that support it', () => {
+        const reporter = new BaseReporter({ reporters: [] } as unknown as WebdriverIO.Config, '0-0', capability)
+        const withMethod = { setContextIdResolver: vi.fn() }
+        const withoutMethod = {}
+        reporter['_reporters'] = [withMethod, withoutMethod] as any
+        const resolver = () => 'ctx-a'
+
+        expect(() => reporter.setContextIdResolver(resolver)).not.toThrow()
+        expect(withMethod.setContextIdResolver).toHaveBeenCalledWith(resolver)
     })
 
     it('should make "dot" reporter default', async () => {
@@ -167,6 +178,14 @@ describe('BaseReporter', () => {
         expect(process.send).not.toBeCalled()
     })
 
+    it('keeps the time of the last event', async () => {
+        const reporter = new BaseReporter({ reporters: [] } as unknown as WebdriverIO.Config, '0-0', capability)
+        expect(reporter.lastEventTime).toBe(0)
+        const before = Date.now()
+        reporter.emit('client:beforeCommand', {})
+        expect(reporter.lastEventTime).toBeGreaterThanOrEqual(before)
+    })
+
     it('should send printFailureMessage on `test:fail`', async () => {
         const reporter = new BaseReporter({
             outputDir: '/foo/bar',
@@ -284,22 +303,35 @@ describe('BaseReporter', () => {
     })
 
     it('should have a waitForSync method to allow reporters to sync stuff', async () => {
-        expect.hasAssertions()
-
-        const start = Date.now()
         const reporter = new BaseReporter({
             outputDir: '/foo/bar',
             reporters: [CustomReporter, CustomReporter] as any,
+            reporterSyncInterval: 10,
+            reporterSyncTimeout: 1000,
             capabilities: [capability]
         } as WebdriverIO.Config, '0-0', capability)
         await reporter.initReporters()
+
+        vi.useFakeTimers()
+        onTestFinished(() => {
+            vi.clearAllTimers()
+            vi.useRealTimers()
+        })
 
         // @ts-ignore test reporter param
         setTimeout(() => (reporter['_reporters'][0].inSync = true), 100)
         // @ts-ignore test reporter param
         setTimeout(() => (reporter['_reporters'][1].inSync = true), 200)
-        await reporter.waitForSync()
-        expect(Date.now() - start).toBeGreaterThanOrEqual(199)
+        const onSynced = vi.fn()
+        const syncing = reporter.waitForSync().then(onSynced)
+
+        await vi.advanceTimersByTimeAsync(100)
+        expect(onSynced).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(99)
+        expect(onSynced).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(1)
+        await syncing
+        expect(onSynced).toHaveBeenCalledWith(true)
     })
 
     it('it should fail if waitForSync times out', async () => {
@@ -315,7 +347,7 @@ describe('BaseReporter', () => {
         await reporter.initReporters()
 
         // @ts-ignore test reporter param
-        setTimeout(() => (reporter['_reporters'][0].inSync = true), 112)
+        setTimeout(() => (reporter['_reporters'][0].inSync = true), 500)
         await expect(reporter.waitForSync())
             .rejects.toEqual(new Error('Some reporters are still unsynced: CustomReporter'))
     })

@@ -6,6 +6,7 @@ import type * as WdioUtils from '@wdio/utils'
  * Mock dependencies before importing the module under test
  */
 const mockGetShadowElementsByContextId = vi.fn()
+const mockForgetNode = vi.fn()
 const mockGetCurrentContext = vi.fn()
 
 vi.mock('@wdio/utils', async (importOriginal) => {
@@ -20,6 +21,7 @@ vi.mock('../../src/session/shadowRoot.js', () => ({
     getShadowRootManager: vi.fn(() => ({
         getShadowElementsByContextId: mockGetShadowElementsByContextId,
         deleteShadowRoot: vi.fn(),
+        forgetNode: mockForgetNode,
     })),
 }))
 
@@ -27,6 +29,7 @@ vi.mock('../../src/session/context.js', () => ({
     getContextManager: vi.fn(() => ({
         getCurrentContext: mockGetCurrentContext,
     })),
+    getParallelContextStore: () => ({ getStore: () => undefined }),
 }))
 
 vi.mock('is-plain-obj', () => ({
@@ -41,7 +44,6 @@ import { findDeepElement, findDeepElements } from '../../src/utils/index.js'
  */
 function createMockBrowser(overrides: Record<string, any> = {}) {
     const browser: any = {
-        isW3C: true,
         isMobile: false,
         browsingContextLocateNodes: vi.fn(),
         execute: vi.fn(),
@@ -73,10 +75,9 @@ describe('findDeepElement - isConnected validation', () => {
                 { sharedId: 'node-detached-2' },
             ],
         })
-        // First node: detached, second: connected, third: never reached
+        // isConnected (batched): first detached, second connected, third detached
         browser.execute
-            .mockResolvedValueOnce(false)  // node-detached-1 → not connected
-            .mockResolvedValueOnce(true)   // node-connected → connected
+            .mockResolvedValueOnce([false, true, false])
 
         const result = await findDeepElement.call(browser, '[data-qa="my-btn"]')
 
@@ -84,10 +85,46 @@ describe('findDeepElement - isConnected validation', () => {
             [ELEMENT_KEY]: 'node-connected',
             locator: expect.objectContaining({ type: 'css', value: '[data-qa="my-btn"]' }),
         })
-        // Should have called execute twice (stopped at first connected)
-        expect(browser.execute).toHaveBeenCalledTimes(2)
+        // a single batched isConnected round trip covers all nodes
+        expect(browser.execute).toHaveBeenCalledTimes(1)
         // Should NOT fall back to Classic
         expect(browser.findElement).not.toHaveBeenCalled()
+    })
+
+    it('searches the current document when a tracked shadow root is gone', async () => {
+        /**
+         * e.g. Firefox restored a page from its back-forward cache, so the
+         * roots tracked for the context belong to the page it left.
+         */
+        mockGetShadowElementsByContextId
+            .mockReturnValueOnce(['shadow-of-old-page'])
+            .mockReturnValueOnce([])
+
+        const browser = createMockBrowser()
+        browser.browsingContextLocateNodes
+            .mockRejectedValueOnce(new Error('WebDriver Bidi command "browsingContext.locateNodes" failed with error: no such node - The node with the reference shadow-of-old-page is not known'))
+            .mockResolvedValueOnce({ nodes: [{ sharedId: 'node-1' }] })
+
+        const result = await findDeepElement.call(browser, '#where')
+
+        expect(result).toEqual(expect.objectContaining({ [ELEMENT_KEY]: 'node-1' }))
+        expect(mockForgetNode).toHaveBeenCalledWith('ctx-1', 'shadow-of-old-page')
+        expect(browser.browsingContextLocateNodes).toHaveBeenLastCalledWith(expect.objectContaining({ startNodes: undefined }))
+        expect(browser.execute).not.toHaveBeenCalled()
+        expect(browser.findElement).not.toHaveBeenCalled()
+    })
+
+    it('keeps the tracked shadow roots when the missing node is not one of them', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
+
+        const browser = createMockBrowser()
+        browser.browsingContextLocateNodes.mockRejectedValue(new Error('WebDriver Bidi command "browsingContext.locateNodes" failed with error: no such node - The node with the reference scope-element is not known'))
+        browser.findElement.mockResolvedValue({ [ELEMENT_KEY]: 'classic' })
+
+        await findDeepElement.call(browser, '#where')
+
+        expect(mockForgetNode).not.toHaveBeenCalled()
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledTimes(1)
     })
 
     it('should fall back to Classic findElement when all BiDi nodes are detached (unscoped)', async () => {
@@ -101,8 +138,7 @@ describe('findDeepElement - isConnected validation', () => {
             ],
         })
         browser.execute
-            .mockResolvedValueOnce(false)  // node-stale-1 → not connected
-            .mockResolvedValueOnce(false)  // node-stale-2 → not connected
+            .mockResolvedValueOnce([false, false])  // batched isConnected: both detached
 
         const classicResult = { [ELEMENT_KEY]: 'classic-element' }
         browser.findElement.mockResolvedValue(classicResult)
@@ -125,8 +161,9 @@ describe('findDeepElement - isConnected validation', () => {
             ],
         })
         browser.execute
-            .mockRejectedValueOnce(new Error('no such element'))  // node-gc → stale/GC'd
-            .mockResolvedValueOnce(true)  // node-ok → connected
+            .mockRejectedValueOnce(new Error('no such element'))  // batched isConnected fails (stale node poisons it)
+            .mockRejectedValueOnce(new Error('no such element'))  // per-element fallback: node-gc → stale/GC'd
+            .mockResolvedValueOnce(true)                          // per-element fallback: node-ok → connected
 
         const result = await findDeepElement.call(browser, '.my-class')
 
@@ -159,7 +196,6 @@ describe('findDeepElement - isConnected validation', () => {
 
         const browser = createMockBrowser()
         const element: any = {
-            isW3C: true,
             isMobile: false,
             elementId: 'parent-elem-id',
             __browser: browser,
@@ -173,13 +209,11 @@ describe('findDeepElement - isConnected validation', () => {
             ],
         })
 
-        // elementContains calls: both nodes are "in" the parent
+        // containment check (batched): both nodes are "in" the parent
         // isConnected calls: both nodes are detached
         browser.execute
-            .mockResolvedValueOnce(true)   // elementContains for scoped-node-1
-            .mockResolvedValueOnce(true)   // elementContains for scoped-node-2
-            .mockResolvedValueOnce(false)  // isConnected for scoped-node-1
-            .mockResolvedValueOnce(false)  // isConnected for scoped-node-2
+            .mockResolvedValueOnce([true, true])    // batched containment for both nodes
+            .mockResolvedValueOnce([false, false])  // batched isConnected: both detached
 
         const classicResult = { [ELEMENT_KEY]: 'fallback-element' }
         element.findElementFromElement.mockResolvedValue(classicResult)
@@ -190,12 +224,72 @@ describe('findDeepElement - isConnected validation', () => {
         expect(result).toBeUndefined()
     })
 
+    it('should return scoped nodes directly when no shadow roots, without isConnected check (e.g. select>option)', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue([])  // no shadow roots — regular DOM element like <select>
+
+        const browser = createMockBrowser()
+        const element: any = {
+            isMobile: false,
+            elementId: 'select-elem-id',
+            __browser: browser,
+            findElementFromElement: vi.fn(),
+        }
+
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [
+                { sharedId: 'option-1' },
+                { sharedId: 'option-2' },
+            ],
+        })
+
+        // containment check (batched): option-1 is in select, option-2 is not (to test scoping)
+        browser.execute
+            .mockResolvedValueOnce([true, false])
+
+        const result = await findDeepElement.call(element, 'option')
+
+        // Should return the first scoped node without any isConnected check
+        expect(result).toEqual({
+            [ELEMENT_KEY]: 'option-1',
+            locator: expect.objectContaining({ type: 'css', value: 'option' }),
+        })
+        // Only the single batched containment call, no isConnected calls
+        expect(browser.execute).toHaveBeenCalledTimes(1)
+        expect(element.findElementFromElement).not.toHaveBeenCalled()
+    })
+
+    it('should include both the scope element and its shadow roots as startNodes (scoped/element context)', async () => {
+        // regression test: a scope that contains a shadow host must still search
+        // its own plain light-DOM descendants alongside the shadow root(s)
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
+
+        const browser = createMockBrowser()
+        const element: any = {
+            isMobile: false,
+            elementId: 'wrapper-elem-id',
+            __browser: browser,
+            findElementFromElement: vi.fn(),
+        }
+
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+
+        await findDeepElement.call(element, '.child-selector')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({
+                startNodes: [
+                    { sharedId: 'wrapper-elem-id' },
+                    { sharedId: 'shadow-1' },
+                ],
+            })
+        )
+    })
+
     it('should return first connected scoped node (scoped/element context)', async () => {
         mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
 
         const browser = createMockBrowser()
         const element: any = {
-            isW3C: true,
             isMobile: false,
             elementId: 'parent-elem-id',
             __browser: browser,
@@ -209,13 +303,11 @@ describe('findDeepElement - isConnected validation', () => {
             ],
         })
 
-        // elementContains: both are in parent
+        // containment check (batched): both are in parent
         // isConnected: first detached, second connected
         browser.execute
-            .mockResolvedValueOnce(true)   // elementContains for scoped-detached
-            .mockResolvedValueOnce(true)   // elementContains for scoped-connected
-            .mockResolvedValueOnce(false)  // isConnected for scoped-detached
-            .mockResolvedValueOnce(true)   // isConnected for scoped-connected
+            .mockResolvedValueOnce([true, true])   // batched containment for both nodes
+            .mockResolvedValueOnce([false, true])  // batched isConnected: first detached, second connected
 
         const result = await findDeepElement.call(element, '.child-selector')
 
@@ -225,6 +317,40 @@ describe('findDeepElement - isConnected validation', () => {
         })
         // Should NOT fall back to Classic since we found a connected node
         expect(element.findElementFromElement).not.toHaveBeenCalled()
+    })
+
+    it('should fall back to per-element containment checks when the batched check fails (scoped/element context)', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue([])
+
+        const browser = createMockBrowser()
+        const element: any = {
+            isMobile: false,
+            elementId: 'parent-elem-id',
+            __browser: browser,
+            findElementFromElement: vi.fn(),
+        }
+
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [
+                { sharedId: 'node-in-scope' },
+                { sharedId: 'node-stale' },
+            ],
+        })
+
+        // batched containment throws, per-element fallback: first in scope, second stale
+        browser.execute
+            .mockRejectedValueOnce(new Error('stale element reference'))
+            .mockResolvedValueOnce(true)                                  // per-element check node-in-scope
+            .mockRejectedValueOnce(new Error('stale element reference'))  // per-element check node-stale
+
+        const result = await findDeepElement.call(element, '.child-selector')
+
+        expect(result).toEqual({
+            [ELEMENT_KEY]: 'node-in-scope',
+            locator: expect.objectContaining({ type: 'css', value: '.child-selector' }),
+        })
+        // 1 failed batched call + 2 per-element fallback calls
+        expect(browser.execute).toHaveBeenCalledTimes(3)
     })
 })
 
@@ -246,9 +372,7 @@ describe('findDeepElements - isConnected validation', () => {
             ],
         })
         browser.execute
-            .mockResolvedValueOnce(true)   // node-a → connected
-            .mockResolvedValueOnce(false)  // node-b → detached
-            .mockResolvedValueOnce(true)   // node-c → connected
+            .mockResolvedValueOnce([true, false, true])  // batched isConnected: node-b detached
 
         const result = await findDeepElements.call(browser, '[data-qa="items"]')
 
@@ -256,6 +380,8 @@ describe('findDeepElements - isConnected validation', () => {
             { [ELEMENT_KEY]: 'node-a', locator: expect.objectContaining({ type: 'css', value: '[data-qa="items"]' }) },
             { [ELEMENT_KEY]: 'node-c', locator: expect.objectContaining({ type: 'css', value: '[data-qa="items"]' }) },
         ])
+        // all nodes checked in a single batched isConnected round trip
+        expect(browser.execute).toHaveBeenCalledTimes(1)
         expect(browser.findElements).not.toHaveBeenCalled()
     })
 
@@ -270,8 +396,7 @@ describe('findDeepElements - isConnected validation', () => {
             ],
         })
         browser.execute
-            .mockResolvedValueOnce(false)
-            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce([false, false])  // batched isConnected: both detached
 
         const classicResults = [
             { [ELEMENT_KEY]: 'classic-1' },
@@ -296,8 +421,9 @@ describe('findDeepElements - isConnected validation', () => {
             ],
         })
         browser.execute
-            .mockRejectedValueOnce(new Error('no such element'))
-            .mockResolvedValueOnce(true)
+            .mockRejectedValueOnce(new Error('no such element'))  // batched isConnected fails (stale node poisons it)
+            .mockRejectedValueOnce(new Error('no such element'))  // per-element fallback: gc-node stale
+            .mockResolvedValueOnce(true)                          // per-element fallback: ok-node connected
 
         const result = await findDeepElements.call(browser, '.item')
 
@@ -331,7 +457,6 @@ describe('findDeepElements - isConnected validation', () => {
 
         const browser = createMockBrowser()
         const element: any = {
-            isW3C: true,
             isMobile: false,
             elementId: 'parent-elem',
             __browser: browser,
@@ -345,12 +470,10 @@ describe('findDeepElements - isConnected validation', () => {
             ],
         })
 
-        // elementContains: both in parent; isConnected: both detached
+        // containment check (batched): both in parent; isConnected (batched): both detached
         browser.execute
-            .mockResolvedValueOnce(true)   // elementContains child-1
-            .mockResolvedValueOnce(true)   // elementContains child-2
-            .mockResolvedValueOnce(false)  // isConnected child-1
-            .mockResolvedValueOnce(false)  // isConnected child-2
+            .mockResolvedValueOnce([true, true])    // batched containment for both nodes
+            .mockResolvedValueOnce([false, false])  // batched isConnected: both detached
 
         const classicResults = [{ [ELEMENT_KEY]: 'classic-child' }]
         element.findElementsFromElement.mockResolvedValue(classicResults)
@@ -362,12 +485,78 @@ describe('findDeepElements - isConnected validation', () => {
         expect(element.findElementsFromElement).not.toHaveBeenCalled()
     })
 
+    it('should return all scoped nodes directly when no shadow roots, without isConnected check (e.g. select>option)', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue([])  // no shadow roots — regular DOM element like <select>
+
+        const browser = createMockBrowser()
+        const element: any = {
+            isMobile: false,
+            elementId: 'select-elem-id',
+            __browser: browser,
+            findElementsFromElement: vi.fn(),
+        }
+
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [
+                { sharedId: 'option-1' },
+                { sharedId: 'option-2' },
+                { sharedId: 'option-3' },
+            ],
+        })
+
+        // containment check (batched): all options are within the select
+        browser.execute
+            .mockResolvedValueOnce([true, true, true])
+
+        const result = await findDeepElements.call(element, 'option')
+
+        // Should return all scoped nodes without any isConnected check
+        expect(result).toHaveLength(3)
+        expect(result).toEqual([
+            { [ELEMENT_KEY]: 'option-1', locator: expect.objectContaining({ type: 'css', value: 'option' }) },
+            { [ELEMENT_KEY]: 'option-2', locator: expect.objectContaining({ type: 'css', value: 'option' }) },
+            { [ELEMENT_KEY]: 'option-3', locator: expect.objectContaining({ type: 'css', value: 'option' }) },
+        ])
+        // Only the single batched containment call, no isConnected calls
+        expect(browser.execute).toHaveBeenCalledTimes(1)
+        expect(element.findElementsFromElement).not.toHaveBeenCalled()
+    })
+
+    it('should keep only the nodes the batched containment check marks as contained (index alignment)', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue([])
+
+        const browser = createMockBrowser()
+        const element: any = {
+            isMobile: false,
+            elementId: 'select-elem-id',
+            __browser: browser,
+            findElementsFromElement: vi.fn(),
+        }
+
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [
+                { sharedId: 'option-1' },
+                { sharedId: 'option-2' },
+                { sharedId: 'option-3' },
+            ],
+        })
+
+        // only the middle node is contained in the scope — a misaligned
+        // batch result would keep the wrong node(s)
+        browser.execute.mockResolvedValueOnce([false, true, false])
+
+        const result = await findDeepElements.call(element, 'option')
+
+        expect(result).toEqual([
+            { [ELEMENT_KEY]: 'option-2', locator: expect.objectContaining({ type: 'css', value: 'option' }) },
+        ])
+    })
+
     it('should return connected scoped nodes only (scoped/element context)', async () => {
         mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
 
         const browser = createMockBrowser()
         const element: any = {
-            isW3C: true,
             isMobile: false,
             elementId: 'parent-elem',
             __browser: browser,
@@ -381,17 +570,362 @@ describe('findDeepElements - isConnected validation', () => {
             ],
         })
 
-        // elementContains: both in parent; isConnected: first connected, second detached
+        // containment check (batched): both in parent; isConnected (batched): first connected, second detached
         browser.execute
-            .mockResolvedValueOnce(true)   // elementContains child-ok
-            .mockResolvedValueOnce(true)   // elementContains child-stale
-            .mockResolvedValueOnce(true)   // isConnected child-ok
-            .mockResolvedValueOnce(false)  // isConnected child-stale
+            .mockResolvedValueOnce([true, true])   // batched containment for both nodes
+            .mockResolvedValueOnce([true, false])  // batched isConnected: child-ok connected, child-stale detached
 
         const result = await findDeepElements.call(element, '.child')
 
         // Should contain only the connected node
         expect(result).toHaveLength(1)
         expect(element.findElementsFromElement).not.toHaveBeenCalled()
+    })
+})
+
+describe('findDeepElement - aria accessibility locator', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mockGetCurrentContext.mockResolvedValue('ctx-1')
+        mockGetShadowElementsByContextId.mockReturnValue([])
+    })
+
+    it('should use BiDi accessibility locator for aria selectors', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [{ sharedId: 'aria-node' }],
+        })
+
+        const result = await findDeepElement.call(browser, 'aria/Submit')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({
+                locator: { type: 'accessibility', value: { name: 'Submit' } },
+            })
+        )
+        expect(result).toEqual({
+            [ELEMENT_KEY]: 'aria-node',
+            locator: { type: 'accessibility', value: { name: 'Submit' } },
+        })
+    })
+
+    it('should fall back to xpath when BiDi accessibility locator fails', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockRejectedValue(new Error('unsupported locator'))
+        browser.findElement.mockResolvedValue({ [ELEMENT_KEY]: 'xpath-node' })
+
+        const result = await findDeepElement.call(browser, 'aria/Submit')
+
+        expect(browser.findElement).toHaveBeenCalledWith(
+            'xpath',
+            expect.stringContaining('@aria-label = "Submit"')
+        )
+        expect(result).toEqual({ [ELEMENT_KEY]: 'xpath-node' })
+    })
+
+    it('should fall back to xpath when BiDi accessibility locator returns no nodes', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+        browser.findElement.mockResolvedValue({ [ELEMENT_KEY]: 'xpath-node' })
+
+        const result = await findDeepElement.call(browser, 'aria/Submit')
+
+        expect(browser.findElement).toHaveBeenCalledWith(
+            'xpath',
+            expect.stringContaining('@aria-label = "Submit"')
+        )
+        expect(result).toEqual({ [ELEMENT_KEY]: 'xpath-node' })
+    })
+
+    it('should retry aria xpath via BiDi using known shadow roots as startNodes', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes
+            .mockResolvedValueOnce({ nodes: [] })
+            .mockResolvedValueOnce({ nodes: [{ sharedId: 'shadow-aria-node' }] })
+
+        const result = await findDeepElement.call(browser, 'aria/Submit')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                locator: expect.objectContaining({
+                    type: 'xpath',
+                    value: expect.stringContaining('@aria-label = "Submit"'),
+                }),
+                startNodes: [{ sharedId: 'shadow-1' }],
+            })
+        )
+        expect(result).toEqual({
+            [ELEMENT_KEY]: 'shadow-aria-node',
+            locator: expect.objectContaining({ type: 'xpath' }),
+        })
+        expect(browser.findElement).not.toHaveBeenCalled()
+        expect(browser.findElementFromElement).not.toHaveBeenCalled()
+    })
+
+    it('should search known shadow roots via Classic when BiDi aria xpath fallback is empty', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1', 'shadow-2'])
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+        browser.findElement.mockResolvedValue({})
+        browser.findElementFromElement
+            .mockResolvedValueOnce({})
+            .mockResolvedValueOnce({ [ELEMENT_KEY]: 'shadow-xpath-node' })
+
+        const result = await findDeepElement.call(browser, 'aria/Described')
+
+        expect(browser.findElementFromElement).toHaveBeenCalledWith(
+            'shadow-1',
+            'xpath',
+            expect.stringContaining('@aria-describedby')
+        )
+        expect(browser.findElementFromElement).toHaveBeenCalledWith(
+            'shadow-2',
+            'xpath',
+            expect.stringContaining('@aria-describedby')
+        )
+        expect(result).toEqual({ [ELEMENT_KEY]: 'shadow-xpath-node' })
+    })
+
+    it('should search known shadow roots via Classic for aria collections', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+        browser.findElements.mockResolvedValue([])
+        browser.findElementsFromElement.mockResolvedValue([
+            { [ELEMENT_KEY]: 'shadow-collection-node' },
+        ])
+
+        const result = await findDeepElements.call(browser, 'aria/Find me')
+
+        expect(browser.findElementsFromElement).toHaveBeenCalledWith(
+            'shadow-1',
+            'xpath',
+            expect.stringContaining('normalize-space(text()) = "Find me"')
+        )
+        expect(result).toEqual([{ [ELEMENT_KEY]: 'shadow-collection-node' }])
+    })
+
+    it('should propagate Classic collection errors when no shadow-root match is found', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockRejectedValue(new Error('unsupported locator'))
+        browser.findElements.mockRejectedValue(new Error('invalid selector: ['))
+
+        await expect(findDeepElements.call(browser, '[')).rejects.toThrow('invalid selector: [')
+    })
+
+    it('should keep Classic collection errors when shadow-root fallback also finds nothing', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-1'])
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockRejectedValue(new Error('unsupported locator'))
+        browser.findElements.mockRejectedValue(new Error('stale element reference'))
+        browser.findElementsFromElement.mockRejectedValue(new Error('detached shadow root'))
+
+        await expect(findDeepElements.call(browser, '.child')).rejects.toThrow('stale element reference')
+    })
+})
+
+// Firefox < 150 BiDi root selector workaround (issue #15233)
+describe.each([
+    {
+        name: 'findDeepElement',
+        fn: findDeepElement,
+        scopedElementStub: (browser: any) => ({
+            isMobile: false, isFirefox: true,
+            elementId: 'parent-id', __browser: browser,
+            findElementFromElement: vi.fn().mockResolvedValue({ [ELEMENT_KEY]: 'found' }),
+        }),
+        otherSelector: 'body',
+    },
+    {
+        name: 'findDeepElements',
+        fn: findDeepElements,
+        scopedElementStub: (browser: any) => ({
+            isMobile: false, isFirefox: true,
+            elementId: 'parent-id', __browser: browser,
+            findElementsFromElement: vi.fn().mockResolvedValue([]),
+        }),
+        otherSelector: 'div',
+    },
+])('$name - Firefox root selector workaround', ({ fn, scopedElementStub, otherSelector }) => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mockGetCurrentContext.mockResolvedValue('ctx-1')
+        mockGetShadowElementsByContextId.mockReturnValue([])
+    })
+
+    it('should convert "html" CSS selector to XPath for Firefox < 150 (unscoped)', async () => {
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '149.0.2' } })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'html-node' }] })
+
+        await fn.call(browser, 'html')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'xpath', value: '/html' }) })
+        )
+    })
+
+    it('should convert ":root" CSS selector to XPath for Firefox < 150 (unscoped)', async () => {
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '149.0.2' } })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'html-node' }] })
+
+        await fn.call(browser, ':root')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'xpath', value: '/html' }) })
+        )
+    })
+
+    it('should NOT convert for Firefox >= 150', async () => {
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '150.0' } })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'html-node' }] })
+
+        await fn.call(browser, 'html')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'css', value: 'html' }) })
+        )
+    })
+
+    it('should NOT convert in element-scoped context (Firefox < 150)', async () => {
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '149.0.2' } })
+        const element: any = scopedElementStub(browser)
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'html-node' }] })
+
+        await fn.call(element, 'html')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'css', value: 'html' }) })
+        )
+    })
+
+    it('should NOT convert in shadow-root scoped context (Firefox < 150)', async () => {
+        mockGetShadowElementsByContextId.mockReturnValue(['shadow-root-id'])
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '149.0.2' } })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+
+        await fn.call(browser, 'html')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'css', value: 'html' }) })
+        )
+    })
+
+    it('should NOT convert other CSS selectors', async () => {
+        const browser = createMockBrowser({ isFirefox: true, capabilities: { browserVersion: '149.0.2' } })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'other-node' }] })
+
+        await fn.call(browser, otherSelector)
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(
+            expect.objectContaining({ locator: expect.objectContaining({ type: 'css', value: otherSelector }) })
+        )
+    })
+})
+
+describe('findDeepElement / findDeepElements - role selector', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mockGetCurrentContext.mockResolvedValue('ctx-1')
+        mockGetShadowElementsByContextId.mockReturnValue([])
+    })
+
+    it('uses the BiDi accessibility locator with role and name', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'add-to-cart' }] })
+
+        const result = await findDeepElement.call(browser, 'role/button[name="Add to cart"]')
+
+        const locator = { type: 'accessibility', value: { role: 'button', name: 'Add to cart' } }
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(expect.objectContaining({ locator, context: 'ctx-1' }))
+        expect(result).toEqual({ [ELEMENT_KEY]: 'add-to-cart', locator })
+    })
+
+    it('returns every match for a role-only selector', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'row-1' }, { sharedId: 'row-2' }] })
+
+        const result = await findDeepElements.call(browser, 'role/row')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(expect.objectContaining({
+            locator: { type: 'accessibility', value: { role: 'row' } }
+        }))
+        expect(result.map((node) => node[ELEMENT_KEY])).toEqual(['row-1', 'row-2'])
+    })
+
+    it('does not fall back to a heuristic when the browser finds nothing', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [] })
+
+        expect(await findDeepElement.call(browser, 'role/button[name="Missing"]')).toBeUndefined()
+        expect(await findDeepElements.call(browser, 'role/button[name="Missing"]')).toEqual([])
+        expect(browser.execute).not.toHaveBeenCalled()
+        expect(browser.findElement).not.toHaveBeenCalled()
+        expect(browser.findElements).not.toHaveBeenCalled()
+    })
+
+    it('computes role and name in the page when the browser rejects the locator', async () => {
+        const browser = createMockBrowser({ isBidi: true })
+        browser.browsingContextLocateNodes.mockRejectedValue(new Error('unsupported locator'))
+        browser.execute.mockResolvedValue([{ [ELEMENT_KEY]: 'script-1' }, { [ELEMENT_KEY]: 'script-2' }])
+
+        expect(await findDeepElement.call(browser, 'role/button[name="Pay now"]')).toEqual({ [ELEMENT_KEY]: 'script-1' })
+        expect(await findDeepElements.call(browser, 'role/button[name="Pay now"]')).toEqual([
+            { [ELEMENT_KEY]: 'script-1' },
+            { [ELEMENT_KEY]: 'script-2' }
+        ])
+        expect(browser.execute).toHaveBeenCalledWith(expect.any(Function), 'button', 'Pay now', -1, null)
+        expect(browser.findElement).not.toHaveBeenCalled()
+    })
+})
+
+describe('findDeepElement(s) - link text', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        mockGetCurrentContext.mockResolvedValue('ctx-1')
+        mockGetShadowElementsByContextId.mockReturnValue([])
+    })
+
+    it('should only return links whose text matches (link text)', async () => {
+        const browser = createMockBrowser()
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [{ sharedId: 'link-other' }, { sharedId: 'link-match' }],
+        })
+        browser.execute.mockResolvedValueOnce([false, true])
+
+        const result = await findDeepElement.call(browser, '=Click me')
+
+        expect(browser.browsingContextLocateNodes).toHaveBeenCalledWith(expect.objectContaining({
+            locator: { type: 'css', value: 'a' }
+        }))
+        const [, links, partial, value] = browser.execute.mock.calls[0]
+        expect(links).toEqual([{ [ELEMENT_KEY]: 'link-other' }, { [ELEMENT_KEY]: 'link-match' }])
+        expect(partial).toBe(false)
+        expect(value).toBe('Click me')
+        expect(result).toEqual(expect.objectContaining({ [ELEMENT_KEY]: 'link-match' }))
+    })
+
+    it('should only return links whose text matches (partial link text)', async () => {
+        const browser = createMockBrowser()
+        browser.browsingContextLocateNodes.mockResolvedValue({
+            nodes: [{ sharedId: 'a-1' }, { sharedId: 'a-2' }, { sharedId: 'a-3' }],
+        })
+        browser.execute.mockResolvedValueOnce([true, false, true])
+
+        const result = await findDeepElements.call(browser, '*=Click')
+
+        expect(browser.execute.mock.calls[0][2]).toBe(true)
+        expect(result.map((node) => node[ELEMENT_KEY])).toEqual(['a-1', 'a-3'])
+    })
+
+    it('should not run the text check for other strategies', async () => {
+        const browser = createMockBrowser()
+        browser.browsingContextLocateNodes.mockResolvedValue({ nodes: [{ sharedId: 'n-1' }] })
+
+        const result = await findDeepElements.call(browser, '.foo')
+
+        expect(browser.execute).not.toHaveBeenCalled()
+        expect(result.map((node) => node[ELEMENT_KEY])).toEqual(['n-1'])
     })
 })

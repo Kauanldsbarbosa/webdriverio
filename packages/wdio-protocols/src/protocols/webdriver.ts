@@ -133,9 +133,11 @@ export default {
         POST: {
             command: 'back',
             description:
-                'The Back command causes the browser to traverse one step backward in the joint session history of the current top-level browsing context. This is equivalent to pressing the back button in the browser chrome or calling `window.history.back`.',
+                'The Back command causes the browser to traverse one step backward in the joint session history of the current top-level browsing context. This is equivalent to pressing the back button in the browser chrome or calling `window.history.back`. ' +
+                'WebdriverIO\'s `browser.back()` uses this endpoint for a classic session. On a WebDriver BiDi session it calls `browsingContext.traverseHistory` with `{ context, delta: -1 }` on the top-level browsing context (a frame selected with `switchFrame` is not the target), then waits for the document readiness mapped from `pageLoadStrategy`: `none` does not wait, `eager` waits for `browsingContext.domContentLoaded`, and `normal` waits for `browsingContext.load`. The wait uses the session page-load timeout. A missing previous entry rejects with `no such history entry`.',
             ref: 'https://w3c.github.io/webdriver/#dfn-back',
             parameters: [],
+            alternativeCommands: ['browser/back'],
             exampleReferences: ['https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/api/webdriver/examples.js#L55-L59'],
         },
     },
@@ -143,9 +145,11 @@ export default {
         POST: {
             command: 'forward',
             description:
-                'The Forward command causes the browser to traverse one step forwards in the joint session history of the current top-level browsing context.',
+                'The Forward command causes the browser to traverse one step forwards in the joint session history of the current top-level browsing context. ' +
+                'WebdriverIO\'s `browser.forward()` uses this endpoint for a classic session. On a WebDriver BiDi session it calls `browsingContext.traverseHistory` with `{ context, delta: 1 }` on the top-level browsing context (a frame selected with `switchFrame` is not the target), then waits for the document readiness mapped from `pageLoadStrategy`: `none` does not wait, `eager` waits for `browsingContext.domContentLoaded`, and `normal` waits for `browsingContext.load`. The wait uses the session page-load timeout. A missing next entry rejects with `no such history entry`.',
             ref: 'https://w3c.github.io/webdriver/#dfn-forward',
             parameters: [],
+            alternativeCommands: ['browser/forward'],
             exampleReferences: ['https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/api/webdriver/examples.js#L63-L69']
         },
     },
@@ -258,13 +262,13 @@ export default {
         POST: {
             command: 'printPage',
             description:
-                'The Print Page command renders the document to a paginated PDF document. __Note:__ Chrome currently only supports this in [headless mode](https://webdriver.io/docs/capabilities/#run-browser-headless), see [`crbug753118`](https://bugs.chromium.org/p/chromium/issues/detail?id=753118)).',
+                'The Print Page command renders the current browsing context to a paginated PDF. This is the WebDriver Classic endpoint. `browser.savePDF` calls it when the session is not using WebDriver BiDi. __Note:__ Chrome\'s Classic print endpoint was limited to [headless mode](https://webdriver.io/docs/capabilities/#run-browser-headless) ([crbug 753118](https://bugs.chromium.org/p/chromium/issues/detail?id=753118)). That limit is specific to this Classic command. Headed and headless Chrome, Edge, and Firefox print through WebDriver BiDi [`browsingContext.print`](https://w3c.github.io/webdriver-bidi/#command-browsingContext-print), which `browser.savePDF` uses on a BiDi session. Current Chrome can also complete this Classic command from a headed session; older Chrome may still require headless.',
             ref: 'https://w3c.github.io/webdriver/#print-page',
             parameters: [
                 {
                     name: 'orientation',
                     type: 'string',
-                    description: 'page orientation. Default: `portrait`',
+                    description: 'page orientation, `portrait` or `landscape`. Default: `portrait`',
                     required: false,
                 },
                 {
@@ -345,7 +349,7 @@ export default {
     '/session/:sessionId/frame': {
         POST: {
             command: 'switchToFrame',
-            deprecated: 'This command is deprecated and we encourage everyone to use `switchFrame` instead for switching into frames. Read more about this command at https://webdriver.io/docs/api/browser/switchFrame.',
+            internal: true,
             description:
                 'The Switch To Frame command is used to select the current top-level browsing context or a child browsing context of the current browsing context to use as the current browsing context for subsequent commands.',
             ref: 'https://w3c.github.io/webdriver/#dfn-switch-to-frame',
@@ -1087,7 +1091,7 @@ export default {
                 description:
                     "Either the return value of your script, the fulfillment of the Promise returned by your script, or the error which was the reason for your script's returned Promise's rejection.",
             },
-            alternativeCommands: ['browser/executeAsync'],
+            alternativeCommands: ['browser/execute'],
             exampleReferences: ['https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/api/webdriver/examples.js#L430-L434']
         },
     },
@@ -1171,7 +1175,7 @@ export default {
         POST: {
             command: 'performActions',
             description:
-                'The Perform Actions command is used to execute complex user actions. See [spec](https://github.com/jlipps/simple-wd-spec#perform-actions) for more details.',
+                'The Perform Actions command is used to execute complex user actions. Most users should prefer the higher-level [`browser.action()`](https://webdriver.io/docs/api/browser/action) API. See [spec](https://github.com/jlipps/simple-wd-spec#perform-actions) for more details.',
             ref: 'https://w3c.github.io/webdriver/#dfn-perform-actions',
             parameters: [
                 {

@@ -5,12 +5,21 @@ import path from 'node:path'
 import type { Options, Services } from '@wdio/types'
 
 import { SUPPORTED_BROWSERNAMES, DEFAULT_PROTOCOL, DEFAULT_HOSTNAME, DEFAULT_PATH } from './constants.js'
+import { getWdioKind } from './kind.js'
 
 const SCREENSHOT_REPLACEMENT = '"<Screenshot[base64]>"'
 const SCRIPT_PLACEHOLDER = '"<Script[base64]>"'
 const REGEX_SCRIPT_NAME = /return \((async )?function (\w+)/
 export const SLASH = '/'
 export const REG_EXP_WINDOWS_ABS_PATH = /^[A-Za-z]:\\/
+
+/**
+ * the path of a spec file: the runner gives the specs as file:// URLs, and some frameworks
+ * name a file as one (Jasmine with ESM specs); throws for a URL that names no path
+ */
+export function specFilePath (file: string): string {
+    return file.startsWith('file://') ? url.fileURLToPath(file) : file
+}
 
 function assertPath(path?: unknown) {
     if (typeof path !== 'string') {
@@ -342,17 +351,11 @@ export function isAppiumCapability(caps: WebdriverIO.Capabilities): boolean {
     return Boolean(
         caps &&
         (
-            // @ts-expect-error outdated jsonwp cap
-            caps.automationName ||
             caps['appium:automationName'] ||
             ('appium:options' in caps && caps['appium:options']?.automationName) ||
-            // @ts-expect-error outdated jsonwp cap
-            caps.deviceName ||
             caps['appium:deviceName'] ||
             ('appium:options' in caps && caps['appium:options']?.deviceName) ||
             ('lt:options' in caps && caps['lt:options']?.deviceName) ||
-            // @ts-expect-error outdated jsonwp cap
-            caps.appiumVersion ||
             caps['appium:appiumVersion'] ||
             ('appium:options' in caps && caps['appium:options']?.appiumVersion) ||
             ('lt:options' in caps && caps['lt:options']?.appiumVersion)
@@ -394,20 +397,30 @@ export function isEdge (browserName?: string) {
 /**
  * traverse up the scope chain until browser element was reached
  */
-export function getBrowserObject (elem: WebdriverIO.Element | WebdriverIO.Browser | WebdriverIO.ElementArray): WebdriverIO.Browser {
+export function getBrowserObject (elem: WebdriverIO.Element | WebdriverIO.Browser | WebdriverIO.ElementArray | WebdriverIO.BrowsingContext): WebdriverIO.Browser {
+    if (getWdioKind(elem) === 'browsing-context') {
+        return (elem as WebdriverIO.BrowsingContext).browser
+    }
     const elemObject = elem as WebdriverIO.Element
-    return (elemObject as WebdriverIO.Element).parent ? getBrowserObject(elemObject.parent) : elem as WebdriverIO.Browser
+    return elemObject.parent ? getBrowserObject(elemObject.parent) : elem as WebdriverIO.Browser
 }
 
 /**
  * Enables logging to a file in a specified directory.
  * @param  {string} outputDir  Directory containing the log file
+ * @param  {object} options
+ * @param  {boolean} options.keepLogPath  keep a log file that is already set: a
+ *                                        `@wdio/local-runner` worker has its own log
+ *                                        file, also when it calls `remote()`
  */
-export async function enableFileLogging (outputDir?: string): Promise<void> {
+export async function enableFileLogging (outputDir?: string, { keepLogPath = false }: { keepLogPath?: boolean } = {}): Promise<void> {
     if (!outputDir) {
         return
     }
 
     await fs.mkdir(path.join(outputDir), { recursive: true })
+    if (keepLogPath && process.env.WDIO_LOG_PATH) {
+        return
+    }
     process.env.WDIO_LOG_PATH = path.join(outputDir, 'wdio.log')
 }

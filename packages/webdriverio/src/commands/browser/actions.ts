@@ -1,8 +1,13 @@
+import { toBidiActions } from '../../utils/actions/base.js'
 import type { KeyAction, PointerAction, WheelAction } from '../../utils/actions/index.js'
 
+import { isBrowsingContext } from '../../session/browsingContext.js'
+import { getParallelContextStore } from '../../session/context.js'
+
 /**
- * Allows to run multiple action interaction at once, e.g. to simulate a pinch zoom.
- * For more information on the `action` command, check out the [docs](/docs/api/browser/action).
+ * Allows to run multiple action interactions at once, e.g. to simulate a pinch zoom or hold a modifier key while
+ * clicking. Build each action chain with [`browser.action()`](/docs/api/browser/action), then pass the chains to this
+ * command.
  *
  * <example>
     :action.js
@@ -27,9 +32,27 @@ import type { KeyAction, PointerAction, WheelAction } from '../../utils/actions/
  *
  */
 export async function actions (
-    this: WebdriverIO.Browser,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
     actions: (KeyAction | PointerAction | WheelAction)[],
 ): Promise<void> {
-    await this.performActions(actions.map((action) => action.toJSON()))
+    const payload = actions.map((action) => action.toJSON())
+    if (isBrowsingContext(this)) {
+        await this.browser.inputPerformActions({
+            context: this.contextId,
+            actions: toBidiActions(payload)
+        })
+        await this.browser.inputReleaseActions({ context: this.contextId })
+        return
+    }
+    const parallelContext = getParallelContextStore().getStore()
+    if (parallelContext) {
+        await this.inputPerformActions({
+            context: parallelContext,
+            actions: toBidiActions(payload)
+        })
+        await this.inputReleaseActions({ context: parallelContext })
+        return
+    }
+    await this.performActions(payload)
     await this.releaseActions()
 }

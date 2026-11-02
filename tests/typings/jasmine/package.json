@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@types/jasmine": "^5.1.4",
+    "@types/jasmine": "^6.0.0",
     "@wdio/globals": "workspace:*",
     "@wdio/utils": "workspace:*",
     "@wdio/types": "workspace:*",
@@ -13,7 +13,6 @@
     "@wdio/reporter": "workspace:*",
     "@wdio/allure-reporter": "workspace:*",
     "@wdio/appium-service": "workspace:*",
-    "@wdio/browserstack-service": "workspace:*",
     "@wdio/cucumber-framework": "workspace:*",
     "@wdio/lighthouse-service": "workspace:*",
     "@wdio/firefox-profile-service": "workspace:*",
@@ -25,7 +24,7 @@
     "@wdio/static-server-service": "workspace:*",
     "@wdio/sumologic-reporter": "workspace:*",
     "@wdio/testingbot-service": "workspace:*",
-    "expect-webdriverio": "^5.6.5",
+    "expect-webdriverio": "^8.0.0",
     "webdriver": "workspace:*",
     "webdriverio": "workspace:*"
   }

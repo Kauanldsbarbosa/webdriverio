@@ -1,10 +1,15 @@
-import type { BackendChoice, RegionOptions, ElectronBuildToolChoice, DesktopFrameworkChoice, TauriDriverProviderChoice } from './constants.js'
+import type { BackendChoice, RegionOptions, ElectronBuildToolChoice, DesktopFrameworkChoice, TauriDriverProviderChoice, DioxusDriverProviderChoice } from './constants.js'
 import type { PackageJson as typeFestPackageJson } from 'type-fest'
 import type { Package as normalizePackage } from 'normalize-package-data'
 export type NormalizedPackageJson = PackageJson & normalizePackage
 export type PackageJson = typeFestPackageJson
 
-export interface ProgramOpts {
+/**
+ * Wizard answers passed as flags, see `ANSWER_FLAGS`
+ */
+export type AnswerFlagArguments = Record<string, string | string[] | boolean | number | undefined>
+
+export interface ProgramOpts extends AnswerFlagArguments {
     info: boolean
     dev: boolean
     yes: boolean
@@ -22,6 +27,8 @@ export interface Questionnair {
     tauriDriverProvider?: TauriDriverProviderChoice
     tauriUseFrontendPlugin?: boolean
     tauriAppBinaryPath?: string
+    dioxusDriverProvider?: DioxusDriverProviderChoice
+    dioxusAppBinaryPath?: string
     backend?: BackendChoice
     hostname?: string
     port?: string
@@ -46,6 +53,10 @@ export interface Questionnair {
     reporters: string[]
     services: string[]
     serenityLibPath?: string
+    /**
+     * Write AGENTS.md rules, the wdio-session skill and a gitignore entry.
+     */
+    agentSupport?: boolean
     plugins: string[]
     outputDir?: string
     includeVisualTesting: boolean
@@ -86,7 +97,7 @@ export interface ParsedAnswers extends Omit<Questionnair, 'runner' | 'framework'
     wdioConfigPath: string
 }
 
-export interface ConfigCommandArguments {
+export interface ConfigCommandArguments extends AnswerFlagArguments {
     yarn: boolean
     yes: boolean
     npmTag: string

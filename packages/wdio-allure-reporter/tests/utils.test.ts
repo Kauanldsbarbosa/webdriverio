@@ -1,33 +1,19 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { CommandArgs } from '@wdio/type'
-import process from 'node:process'
+import { describe, expect, it } from 'vitest'
+import type { CommandArgs } from '@wdio/types'
 import { Status } from 'allure-js-commons'
 import CompoundError from '../src/compoundError.js'
+import path from 'node:path'
 import {
     convertSuiteTagsToLabels,
     findLast,
     getErrorFromFailedTest,
-    getLinkByTemplate,
     getTestStatus,
-    isAllTypeHooks,
-    isBeforeEachTypeHook,
-    isEachTypeHooks,
-    isEmpty,
     isScreenshotCommand,
+    toPackageLabel,
+    normalizeCapabilityName,
 } from '../src/utils.js'
-import { linkPlaceholder } from '../src/constants.js'
 
 describe('utils', () => {
-    let processEmit: any
-    beforeAll(() => {
-        processEmit = process.emit.bind(process)
-        process.emit = vi.fn() as any
-    })
-
-    afterEach(() => {
-        process.emit = processEmit
-    })
-
     describe('isScreenshotCommand', () => {
         it('isScreenshotCommand', () => {
             expect(isScreenshotCommand({ endpoint: '/session/id/screenshot' } as CommandArgs)).toEqual(true)
@@ -37,12 +23,22 @@ describe('utils', () => {
             expect(isScreenshotCommand({ command: 'elementClick' } as CommandArgs)).toEqual(false)
             expect(isScreenshotCommand({ endpoint: '/session/id/element/id/screenshot' } as CommandArgs)).toEqual(true)
         })
+
+        // a WebDriver BiDi override (the v10 default for Chrome and Firefox) sends no endpoint
+        it('finds an element screenshot by its command name', () => {
+            expect(isScreenshotCommand({ command: 'takeElementScreenshot' } as CommandArgs)).toEqual(true)
+        })
     })
 
     describe('getTestStatus', () => {
         it('return  status for jasmine', () => {
             const config: any = { framework: 'jasmine' }
             expect(getTestStatus({} as any, config)).toEqual(Status.FAILED)
+        })
+
+        // every name that initializePlugin loads (wdio-utils initializePlugin.ts)
+        it.each(['jasmine', 'Jasmine', '@wdio/jasmine-framework'])('return the jasmine status for framework %s', (framework) => {
+            expect(getTestStatus({} as any, { framework } as any)).toEqual(Status.FAILED)
         })
 
         it('broken for test with no error', () => {
@@ -62,6 +58,24 @@ describe('utils', () => {
             expect(getTestStatus(test as any, config)).toEqual(Status.FAILED)
         })
 
+        it('failed for AssertionError with custom message via error name', () => {
+            const config: any = { framework: 'mocha' }
+            const test = { error: { name: 'AssertionError', message: 'Login failed' } }
+            expect(getTestStatus(test as any, config)).toEqual(Status.FAILED)
+        })
+
+        it('failed for error name containing assert (e.g. AssertionError [ERR_ASSERTION])', () => {
+            const config: any = { framework: 'mocha' }
+            const test = { error: { name: 'AssertionError [ERR_ASSERTION]', message: 'Custom message' } }
+            expect(getTestStatus(test as any, config)).toEqual(Status.FAILED)
+        })
+
+        it('failed for error with only name AssertionError and no message or stack', () => {
+            const config: any = { framework: 'mocha' }
+            const test = { error: { name: 'AssertionError' } }
+            expect(getTestStatus(test as any, config)).toEqual(Status.FAILED)
+        })
+
         it('broken for not AssertionError', () => {
             const config: any = { framework: 'mocha' }
             const test = { error: { name: 'MyError' } }
@@ -78,44 +92,6 @@ describe('utils', () => {
             const config: any = { framework: 'mocha' }
             const test = { error: { stack: 'MyError stack trace' } }
             expect(getTestStatus(test as any, config)).toEqual(Status.BROKEN)
-        })
-    })
-
-    it('isMochaEachHooks filter hook by title', () => {
-        expect(isEachTypeHooks('"before all" hook')).toEqual(false)
-        expect(isEachTypeHooks('"after all" hook')).toEqual(false)
-        expect(isEachTypeHooks('"before each" hook')).toEqual(true)
-        expect(isEachTypeHooks('"after each" hook')).toEqual(true)
-    })
-
-    it('isMochaBeforeEachHook filter hook by title', () => {
-        expect(isBeforeEachTypeHook('"before all" hook')).toEqual(false)
-        expect(isBeforeEachTypeHook('"after all" hook')).toEqual(false)
-        expect(isBeforeEachTypeHook('"before each" hook')).toEqual(true)
-        expect(isBeforeEachTypeHook('"after each" hook')).toEqual(false)
-    })
-
-    describe('isEmpty', () => {
-        it('should filter empty objects', () => {
-            expect(isEmpty({})).toEqual(true)
-            expect(isEmpty([])).toEqual(true)
-            expect(isEmpty(undefined)).toEqual(true)
-            expect(isEmpty(null)).toEqual(true)
-            expect(isEmpty('')).toEqual(true)
-        })
-    })
-
-    describe('isMochaHooks', () => {
-        it('should filter hook by title', () => {
-            expect(isEachTypeHooks('"before all" hook')).toEqual(false)
-            expect(isEachTypeHooks('"after all" hook')).toEqual(false)
-            expect(isEachTypeHooks('"before each" hook')).toEqual(true)
-            expect(isEachTypeHooks('"after each" hook')).toEqual(true)
-
-            expect(isAllTypeHooks('"before all" hook')).toEqual(true)
-            expect(isAllTypeHooks('"after all" hook')).toEqual(true)
-            expect(isAllTypeHooks('"before each" hook')).toEqual(false)
-            expect(isAllTypeHooks('"after each" hook')).toEqual(false)
         })
     })
 
@@ -158,29 +134,6 @@ describe('utils', () => {
             ) as CompoundError
             expect(error instanceof CompoundError).toBe(true)
             expect(error.innerErrors).toEqual(testStat.errors)
-        })
-    })
-
-    describe('getLinkByTemplate', () => {
-        const template = 'https://youtrack.jetbrains.com/issue/{}'
-        const id = 'JIRA-42'
-        it('should return link with task id', () => {
-            const link = getLinkByTemplate(template, id)
-            expect(link).toEqual(
-                'https://youtrack.jetbrains.com/issue/JIRA-42'
-            )
-        })
-
-        it('should return id if template is not a string', () => {
-            expect(getLinkByTemplate(undefined, id)).toEqual(id)
-            expect(getLinkByTemplate({} as any, id)).toEqual(id)
-        })
-
-        it('should throw error if template is invalid', () => {
-            const template = 'foo'
-            expect(() => getLinkByTemplate(template, id)).toThrow(
-                `The link template "${template}" must contain ${linkPlaceholder} substring.`
-            )
         })
     })
 
@@ -239,6 +192,51 @@ describe('utils', () => {
                     []
                 )
             })
+        })
+    })
+
+    describe('toPackageLabel', () => {
+        it('should not collapse a Windows absolute path into just the drive letter (#15496)', () => {
+            const file = path.join(process.cwd(), 'test', 'specs', 'mySuite.e2e.js')
+
+            const pkg = toPackageLabel(file)
+
+            expect(pkg).not.toEqual('C')
+            expect(pkg).toEqual('test.specs.mySuite.e2e.js')
+        })
+
+        it('should still strip a trailing :line:column position suffix', () => {
+            const file = `${path.join(process.cwd(), 'test', 'specs', 'mySuite.e2e.js')}:10:5`
+
+            const pkg = toPackageLabel(file)
+
+            expect(pkg).toEqual('test.specs.mySuite.e2e.js')
+        })
+
+        it('should return an empty string for an empty path', () => {
+            expect(toPackageLabel()).toEqual('')
+            expect(toPackageLabel('')).toEqual('')
+        })
+    })
+
+    describe('normalizeCapabilityName', () => {
+        it('collapses Google Chrome aliases including space-separated names', () => {
+            expect(normalizeCapabilityName('chrome')).toEqual('chrome')
+            expect(normalizeCapabilityName('googlechrome')).toEqual('chrome')
+            expect(normalizeCapabilityName('Google Chrome')).toEqual('chrome')
+            expect(normalizeCapabilityName('  Google   Chrome  ')).toEqual('chrome')
+        })
+
+        it('collapses Microsoft Edge aliases including space-separated names', () => {
+            expect(normalizeCapabilityName('edge')).toEqual('edge')
+            expect(normalizeCapabilityName('msedge')).toEqual('edge')
+            expect(normalizeCapabilityName('microsoftedge')).toEqual('edge')
+            expect(normalizeCapabilityName('Microsoft Edge')).toEqual('edge')
+        })
+
+        it('lowercases and collapses spaces for other names without aliasing them', () => {
+            expect(normalizeCapabilityName('iPhone 12')).toEqual('iphone 12')
+            expect(normalizeCapabilityName('Firefox')).toEqual('firefox')
         })
     })
 })

@@ -7,7 +7,7 @@ import camelCase from 'camelcase'
 import { type Plugin } from 'esbuild'
 
 import { paramTypeMap, returnTypeMap } from './constants.js'
-import { PROTOCOLS } from '../../../../scripts/protocols.js'
+import { PROTOCOLS } from '@wdio/repo-utils/protocols'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const TYPINGS_PATH = path.join(__dirname, '..', '..', '..', '..', 'packages', 'wdio-protocols', 'src', 'commands')
@@ -54,7 +54,10 @@ function generate () {
 
         for (const methods of Object.values(definition)) {
             for (const description of Object.values(methods)) {
-                const { command, parameters = [], variables = [], returns, ref, deprecated, examples } = description
+                const { command, parameters = [], variables = [], returns, ref, deprecated, examples, internal } = description
+                if (internal) {
+                    continue
+                }
                 if (!ref) {
                     throw new Error(`missing ref for command ${command} in ${protocolName}`)
                 }

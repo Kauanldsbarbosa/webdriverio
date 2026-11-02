@@ -3,7 +3,7 @@ WebDriver
 
 > A lightweight, non-opinionated implementation of the [WebDriver](https://w3c.github.io/webdriver/webdriver-spec.html) and [WebDriver BiDi](https://w3c.github.io/webdriver-bidi/) specification including mobile commands supported by [Appium](http://appium.io/)
 
-There are [tons](https://github.com/christian-bromann/awesome-selenium#javascript) of Selenium and WebDriver binding implementations in the Node.js world. Every one of them has an opinionated API and recommended way to use it. This binding is the most non-opinionated you will find as it just represents the [WebDriver specification](https://w3c.github.io/webdriver/webdriver-spec.html) and doesn't come with any extra or higher-level abstraction. It is lightweight and comes with support for the [WebDriver specification](https://w3c.github.io/webdriver/webdriver-spec.html) and Appium's [Mobile JSONWire Protocol](https://github.com/appium/appium-base-driver/blob/master/docs/mjsonwp/protocol-methods.md).
+There are [tons](https://github.com/christian-bromann/awesome-selenium#javascript) of Selenium and WebDriver binding implementations in the Node.js world. Every one of them has an opinionated API and recommended way to use it. This binding is the most non-opinionated you will find as it just represents the [WebDriver specification](https://w3c.github.io/webdriver/webdriver-spec.html) and doesn't come with any extra or higher-level abstraction. It is lightweight and comes with support for the [WebDriver specification](https://w3c.github.io/webdriver/webdriver-spec.html) and [Appium](https://appium.io/).
 
 The package supports the following protocols:
 
@@ -13,8 +13,6 @@ The package supports the following protocols:
 - [Chromium](http://chromedriver.chromium.org/) (additional Chromedriver specific commands)
 - [Selenium](https://www.selenium.dev/) (additional Selenium WebDriver specific commands)
 - [Sauce Labs](https://saucelabs.com/) (Sauce Labs specific WebDriver extensions)
-- [JSONWireProtocol](https://github.com/SeleniumHQ/selenium/wiki/JsonWireProtocol) (deprecated)
-- [Mobile JSONWireProtocol](https://github.com/SeleniumHQ/mobile-spec/blob/master/spec-draft.md) (deprecated)
 
 Commands are added to the client's protocol based on assumptions of provided capabilities. You can find more details about the commands by checking out the [`@wdio/protocols`](https://www.npmjs.com/package/@wdio/protocols) package. All commands come with TypeScript support.
 
@@ -88,83 +86,120 @@ const client = await WebDriver.newSession(options)
 The following options are available:
 
 ### capabilities
+
+<Option type="Object">
+
 Defines the [capabilities](https://w3c.github.io/webdriver/webdriver-spec.html#capabilities) you want to run in your WebDriver session. Note: by default, it will automatically set the `webSocketUrl` to establish a [WebDriver Bidi](https://w3c.github.io/webdriver-bidi/) session, if you don't want this, make sure to set `'wdio:enforceWebDriverClassic': true` in your capabilities.
 
-Type: `Object`<br />
+</Option>
 Required: `true`
 
 ### logLevel
+
+<Option type="String" default="info" values="trace | debug | info | warn | error | silent">
+
 Level of logging verbosity.
 
-Type: `String`<br />
-Default: *info*<br />
-Options: *trace* | *debug* | *info* | *warn* | *error* | *silent*
+</Option>
 
 ### protocol
+
+<Option type="String" default="http" values="http | https">
+
 Protocol to use when communicating with the Selenium standalone server (or driver).
 
-Type: `String`<br />
-Default: *http*
-Options: *http* | *https*
+</Option>
 
 ### hostname
+
+<Option type="String" default="localhost">
+
 Host of your WebDriver server.
 
-Type: `String`<br />
-Default: *localhost*
+</Option>
 
 ### port
+
+<Option type="Number" default="undefined">
+
 Port your WebDriver server is on.
 
-Type: `Number`<br />
-Default: `undefined`
+</Option>
 
 ### path
+
+<Option type="String" default="/">
+
 Path to WebDriver endpoint or grid server.
 
-Type: `String`<br />
-Default: */*
+</Option>
 
 ### queryParams
+
+<Option type="Object" default="undefined">
+
 Query parameters that are propagated to the driver server.
 
-Type: `Object`
-Default: `undefined`
+</Option>
 
 ### connectionRetryTimeout
+
+<Option type="Number" default="120000">
+
 Timeout for any WebDriver request to a driver or grid.
 
-Type: `Number`<br />
-Default: *120000*
+</Option>
 
 ### connectionRetryCount
+
+<Option type="Number" default="3">
+
 Count of request retries to the Selenium server.
 
-Type: `Number`<br />
-Default: *3*
+</Option>
+
+### bidiResponseTimeout
+
+<Option type="Number" default="180000">
+
+Timeout (in ms) for a WebDriver Bidi command to receive a response from the browser. Increase this if you run commands, e.g. `execute`, that legitimately take longer than the default to resolve.
+
+</Option>
+
+### bidiConnectTimeout
+
+<Option type="Number" default="10000">
+
+Timeout (in ms) for the browser to accept the WebDriver Bidi connection. After it, the session continues with WebDriver Classic and Bidi-only commands fail. Increase it if a browser that is busy at startup, e.g. several browsers that start at the same time on a CI runner, accepts the connection late.
+
+This option applies to sessions in Node.js. In a browser, for example with the [browser runner](https://webdriver.io/docs/runner#browser-runner), the connection waits until it opens or fails.
+
+</Option>
 
 ### agent
 
-Allows you to use a custom` http`/`https`/`http2` [agent](https://www.npmjs.com/package/got#agent) to make requests.
-
-Type: `Object`<br />
-Default:
-
-```js
-{
+<Option type="Object" default={`{
     http: new http.Agent({ keepAlive: true }),
     https: new https.Agent({ keepAlive: true })
-}
-```
+}`}>
+
+Allows you to use a custom` http`/`https`/`http2` [agent](https://www.npmjs.com/package/got#agent) to make requests.
+
+</Option>
 
 ### transformRequest
+
+<Option type="(RequestOptions) => RequestOptions" default="none">
+
 Function intercepting [HTTP request options](https://github.com/sindresorhus/got#options) before a WebDriver request is made to a driver.
 
-Type: `(RequestOptions) => RequestOptions`<br />
-Default: *none*
+</Option>
 
 ### transformResponse
+
+<Option type="(Response, RequestOptions) => Response" default="none">
+
 Function intercepting HTTP response objects after a WebDriver response has arrived.
 
-Type: `(Response, RequestOptions) => Response`<br />
-Default: *none*
+</Option>
+

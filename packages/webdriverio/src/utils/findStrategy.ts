@@ -2,7 +2,8 @@ import type { ARIARoleDefinitionKey, ARIARoleRelationConcept, ARIARoleRelationCo
 import { roleElements } from 'aria-query'
 
 import { environment } from '../environment.js'
-import { DEEP_SELECTOR, ARIA_SELECTOR } from '../constants.js'
+import { DEEP_SELECTOR, ARIA_SELECTOR, ROLE_SELECTOR } from '../constants.js'
+import { knownRoles, ROLE_SYNONYMS, toXPathStringLiteral } from '@wdio/utils'
 
 const DEFAULT_STRATEGY = 'css selector'
 const DIRECT_SELECTOR_REGEXP = /^(id|css selector|xpath|link text|partial link text|name|tag name|class name|-android uiautomator|-android datamatcher|-android viewmatcher|-android viewtag|-ios uiautomation|-ios predicate string|-ios class chain|accessibility id):(.+)/
@@ -78,6 +79,10 @@ const defineStrategy = function (selector: SelectorStrategy) {
     if (stringSelector.startsWith(ARIA_SELECTOR)) {
         return 'aria'
     }
+    // use role selector, e.g. role/button[name="Add to cart"]
+    if (stringSelector.startsWith(ROLE_SELECTOR)) {
+        return 'role selector'
+    }
     // Recursive element search using the UiAutomator library (Android only)
     if (stringSelector.startsWith('android=')) {
         return '-android uiautomator'
@@ -101,8 +106,8 @@ const defineStrategy = function (selector: SelectorStrategy) {
     if (stringSelector.search(/<[0-9a-zA-Z-]+( \/)*>/g) >= 0) {
         return 'tag name'
     }
-    // Use name strategy if selector queries elements with name attributes for JSONWP
-    // or if isMobile is used even when w3c is used
+    // Mobile sessions use the name strategy for [name="..."] selectors.
+    // Desktop sessions keep them on the css strategy.
     // e.g. "[name='myName']" or '[name="myName"]'
     if (stringSelector.search(/^\[name=(?:"(.[^"]*)"|'(.[^']*)')]$/) >= 0) {
         return 'name'
@@ -120,7 +125,116 @@ const defineStrategy = function (selector: SelectorStrategy) {
         return 'role'
     }
 }
-export const findStrategy = function (selector: SelectorStrategy, isW3C?: boolean, isMobile?: boolean) {
+
+const LOWER_CASE_TRANSLATION = '"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"'
+
+/**
+ * XPath approximation of an accessible name lookup.
+ * Used for WebDriver Classic sessions and as a fallback when BiDi
+ * accessibility locators are unavailable.
+ */
+export function getAriaXPathSelector(label: string) {
+    const escaped = toXPathStringLiteral(label)
+    /**
+     * A path inside a predicate that starts at the document root is evaluated
+     * again for every node the outer path visits, so `.//*[@a = (//*[…]/@id)]`
+     * scans the document once per element: minutes on a large page, during
+     * which the page can't run anything else. `id()` looks the referenced
+     * elements up instead, and the attribute test first keeps the outer set small.
+     */
+    const conditions = [
+        // aria label is recevied by other element with aria-labelledBy
+        // https://www.w3.org/TR/accname-1.1/#step2B
+        `.//*[@aria-labelledby][id(@aria-labelledby)[normalize-space(text()) = ${escaped}]]`,
+        // aria label is recevied by other element with aria-labelledBy
+        // https://www.w3.org/TR/accname-1.1/#step2B
+        `.//*[@aria-describedby][id(@aria-describedby)[normalize-space(text()) = ${escaped}]]`,
+        // element has direct aria label
+        // https://www.w3.org/TR/accname-1.1/#step2C
+        `.//*[@aria-label = ${escaped}]`,
+        // input and textarea with a label
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//input[@id][@id = (//label[normalize-space() = ${escaped}]/@for)]`,
+        `.//textarea[@id][@id = (//label[normalize-space() = ${escaped}]/@for)]`,
+        // input and textarea with a label as parent
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//input[ancestor::label[normalize-space(text()) = ${escaped}]]`,
+        `.//textarea[ancestor::label[normalize-space(text()) = ${escaped}]]`,
+        // aria label is received by a placeholder
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//input[@placeholder=${escaped}]`,
+        `.//textarea[@placeholder=${escaped}]`,
+        // aria label is received by a aria-placeholder
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//input[@aria-placeholder=${escaped}]`,
+        `.//textarea[@aria-placeholder=${escaped}]`,
+        // aria label is received by a title
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//*[not(self::label)][@title=${escaped}]`,
+        // images with an alt tag
+        // https://www.w3.org/TR/accname-1.1/#step2D
+        `.//img[@alt=${escaped}]`,
+        // aria label is received from element text content
+        // https://www.w3.org/TR/accname-1.1/#step2G
+        `.//*[not(self::label)][normalize-space(text()) = ${escaped}]`
+    ]
+    return conditions.join(' | ')
+}
+
+export interface RoleSelector {
+    role: string
+    name?: string
+}
+
+const ROLE_SELECTOR_REGEXP = /^role\/([a-zA-Z]+)(?:\[name=(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\])?$/
+
+function editDistance (a: string, b: string) {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i)
+    for (let i = 1; i <= a.length; i++) {
+        let previous = row[0]
+        row[0] = i
+        for (let j = 1; j <= b.length; j++) {
+            const current = row[j]
+            row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1))
+            previous = current
+        }
+    }
+    return row[b.length]
+}
+
+/**
+ * Parse `role/<role>` or `role/<role>[name="<accessible name>"]`. Quotes
+ * inside the name are escaped with a backslash.
+ */
+export function parseRoleSelector (selector: string): RoleSelector {
+    const match = selector.match(ROLE_SELECTOR_REGEXP)
+    if (!match) {
+        throw new Error(
+            `InvalidSelectorMatch. Strategy 'role' has failed to match '${selector}'. ` +
+            'Expected `role/<role>` or `role/<role>[name="<accessible name>"]`.'
+        )
+    }
+    const role = match[1]
+    const roles = knownRoles()
+    if (!roles.includes(role)) {
+        const closest = roles.reduce((best, candidate) => editDistance(role, candidate) < editDistance(role, best) ? candidate : best)
+        throw new Error(
+            `InvalidSelectorMatch. Strategy 'role' has failed to match '${selector}': ` +
+            `"${role}" is not an ARIA role. Did you mean "${closest}"?`
+        )
+    }
+    const canonicalRole = ROLE_SYNONYMS[role] || role
+    const rawName = match[2] ?? match[3]
+    return rawName === undefined
+        ? { role: canonicalRole }
+        : { role: canonicalRole, name: rawName.replace(/\\(.)/g, '$1') }
+}
+
+export const findStrategy = function (
+    selector: SelectorStrategy,
+    isMobile?: boolean,
+    isBidi?: boolean
+) {
     const stringSelector = selector as string
     let using: string = DEFAULT_STRATEGY
     let value = selector as string
@@ -159,46 +273,25 @@ export const findStrategy = function (selector: SelectorStrategy, isW3C?: boolea
         using = 'shadow'
         value = stringSelector.slice(DEEP_SELECTOR.length)
         break
+    case 'role selector': {
+        using = 'role'
+        value = JSON.stringify(parseRoleSelector(stringSelector))
+        break
+    }
     case 'aria': {
         const label = stringSelector.slice(ARIA_SELECTOR.length)
-        const conditions = [
-            // aria label is recevied by other element with aria-labelledBy
-            // https://www.w3.org/TR/accname-1.1/#step2B
-            `.//*[@aria-labelledby=(//*[normalize-space(text()) = "${label}"]/@id)]`,
-            // aria label is recevied by other element with aria-labelledBy
-            // https://www.w3.org/TR/accname-1.1/#step2B
-            `.//*[@aria-describedby=(//*[normalize-space(text()) = "${label}"]/@id)]`,
-            // element has direct aria label
-            // https://www.w3.org/TR/accname-1.1/#step2C
-            `.//*[@aria-label = "${label}"]`,
-            // input and textarea with a label
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//input[@id = (//label[normalize-space() = "${label}"]/@for)]`,
-            `.//textarea[@id = (//label[normalize-space() = "${label}"]/@for)]`,
-            // input and textarea with a label as parent
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//input[ancestor::label[normalize-space(text()) = "${label}"]]`,
-            `.//textarea[ancestor::label[normalize-space(text()) = "${label}"]]`,
-            // aria label is received by a placeholder
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//input[@placeholder="${label}"]`,
-            `.//textarea[@placeholder="${label}"]`,
-            // aria label is received by a aria-placeholder
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//input[@aria-placeholder="${label}"]`,
-            `.//textarea[@aria-placeholder="${label}"]`,
-            // aria label is received by a title
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//*[not(self::label)][@title="${label}"]`,
-            // images with an alt tag
-            // https://www.w3.org/TR/accname-1.1/#step2D
-            `.//img[@alt="${label}"]`,
-            // aria label is received from element text content
-            // https://www.w3.org/TR/accname-1.1/#step2G
-            `.//*[not(self::label)][normalize-space(text()) = "${label}"]`
-        ]
-        using = 'xpath'
-        value = conditions.join(' | ')
+        if (isBidi) {
+            /**
+             * Use the native BiDi accessibility locator. This queries the
+             * browser accessibility tree by accessible name and avoids the
+             * expensive XPath union that WebDriver Classic has to run.
+             */
+            using = 'aria'
+            value = label
+        } else {
+            using = 'xpath'
+            value = getAriaXPathSelector(label)
+        }
         break
     }
     case '-android uiautomator': {
@@ -236,7 +329,7 @@ export const findStrategy = function (selector: SelectorStrategy, isW3C?: boolea
         break
     }
     case 'name': {
-        if (isMobile || !isW3C) {
+        if (isMobile) {
             const match = stringSelector.match(/^\[name=(?:"(.[^"]*)"|'(.[^']*)')]$/)
             if (!match) {
                 throw new Error(`InvalidSelectorMatch. Strategy 'name' has failed to match '${stringSelector}'`)
@@ -278,13 +371,14 @@ export const findStrategy = function (selector: SelectorStrategy, isW3C?: boolea
             )
         }
         const partialNot = ` and not(${`.//${tag || '*'}${conditions.length ? `[${conditions.join(' and ')}]` : ''}`})`
+        const literal = toXPathStringLiteral(insensitive ? query.toLowerCase() : query)
         if (insensitive) {
             conditions.push(
                 partial
-                    ? `contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "${query.toLowerCase()}")${partialNot}`
-                    : `normalize-space(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")) = "${query.toLowerCase()}"`)
+                    ? `contains(translate(., ${LOWER_CASE_TRANSLATION}), ${literal})${partialNot}`
+                    : `normalize-space(translate(text(), ${LOWER_CASE_TRANSLATION})) = ${literal}`)
         } else {
-            conditions.push(partial ? `contains(., "${query}")${partialNot}` : `normalize-space(text()) = "${query}"`)
+            conditions.push(partial ? `contains(., ${literal})${partialNot}` : `normalize-space(text()) = ${literal}`)
         }
         const getValue = () => `.//${tag || '*'}[${conditions.join(' and ')}]`
         value = getValue()
@@ -292,7 +386,7 @@ export const findStrategy = function (selector: SelectorStrategy, isW3C?: boolea
             conditions.pop()
             conditions.push(
                 `not(${value})`,
-                `normalize-space() = "${insensitive? query.toLowerCase() : query}"`
+                insensitive ? `normalize-space(translate(., ${LOWER_CASE_TRANSLATION})) = ${literal}` : `normalize-space() = ${literal}`
             )
             value = value + ' | ' + getValue()
         }

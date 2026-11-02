@@ -76,21 +76,26 @@ describe('setupDriver', () => {
             browserVersion: '5'
         }, {
             browserName: 'firefox',
-            browserVersion: '6'
+            browserVersion: '6',
+            'wdio:geckodriverOptions': {
+                geckoDriverVersion: '0.36.0'
+            }
         }])
         expect(setupChromedriver).toBeCalledTimes(2)
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1')
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2')
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1', undefined)
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2', undefined)
         expect(setupEdgedriver).toBeCalledTimes(3)
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', undefined)
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '3')
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '4')
+        // the Firefox browser version must never be used as the Geckodriver version;
+        // the driver version is only set when `geckoDriverVersion` is provided explicitly
         expect(setupGeckodriver).toBeCalledTimes(2)
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '5')
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '6')
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', undefined)
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '0.36.0')
     })
 
-    test('with multiremote capabilities', async () => {
+    test('with multi-remote capabilities', async () => {
         await setupDriver({}, {
             browserA: {
                 capabilities: {
@@ -170,22 +175,25 @@ describe('setupDriver', () => {
             browserF: {
                 capabilities: {
                     browserName: 'firefox',
-                    browserVersion: '7'
+                    browserVersion: '7',
+                    'wdio:geckodriverOptions': {
+                        geckoDriverVersion: '0.36.0'
+                    }
                 }
             }
         })
         expect(setupChromedriver).toBeCalledTimes(2)
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1')
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2')
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1', undefined)
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2', undefined)
         expect(setupEdgedriver).toBeCalledTimes(2)
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '3')
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '4')
         expect(setupGeckodriver).toBeCalledTimes(2)
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '5')
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '7')
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', undefined)
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '0.36.0')
     })
 
-    test('with multiremote capabilities series', async () => {
+    test('with multi-remote capabilities series', async () => {
         await setupDriver({}, [{
             browserA: {
                 capabilities: {
@@ -252,7 +260,10 @@ describe('setupDriver', () => {
             browserF: {
                 capabilities: {
                     browserName: 'firefox',
-                    browserVersion: '6'
+                    browserVersion: '6',
+                    'wdio:geckodriverOptions': {
+                        geckoDriverVersion: '0.36.0'
+                    }
                 }
             },
             browserFWithDriverBinary: {
@@ -266,14 +277,14 @@ describe('setupDriver', () => {
             }
         }])
         expect(setupChromedriver).toBeCalledTimes(2)
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1')
-        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2')
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '1', undefined)
+        expect(setupChromedriver).toBeCalledWith('/foo/bar', '2', undefined)
         expect(setupEdgedriver).toBeCalledTimes(2)
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '3')
         expect(setupEdgedriver).toBeCalledWith('/foo/bar', '4')
         expect(setupGeckodriver).toBeCalledTimes(2)
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '5')
-        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '6')
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', undefined)
+        expect(setupGeckodriver).toBeCalledWith('/foo/bar', '0.36.0')
     })
 })
 
@@ -321,7 +332,7 @@ describe('setupBrowser', () => {
         })
     })
 
-    test('with multiremote capabilities', async () => {
+    test('with multi-remote capabilities', async () => {
         await setupBrowser({}, {
             browserA: {
                 capabilities: {
@@ -417,7 +428,7 @@ describe('setupBrowser', () => {
         })
     })
 
-    test('with multiremote capabilities series', async () => {
+    test('with multi-remote capabilities series', async () => {
         await setupBrowser({}, [{
             browserA: {
                 capabilities: {

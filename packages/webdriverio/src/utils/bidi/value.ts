@@ -1,4 +1,4 @@
-import { ELEMENT_KEY, type remote } from 'webdriver'
+import { ELEMENT_KEY, SHADOW_ELEMENT_KEY, type remote } from 'webdriver'
 import type { ElementReference } from '@wdio/protocols'
 
 import { PrimitiveType, NonPrimitiveType } from './constants.js'
@@ -241,7 +241,11 @@ export class LocalValue {
             }
             if (argument instanceof Array) {
                 const arr: (ReferenceValue | LocalValue)[] = []
-                argument.forEach((value) => {
+                /**
+                 * the `forEach` of an element list (`$$()`) is async: it would push the items
+                 * after the array is sent, and the script would get an empty array
+                 */
+                Array.prototype.forEach.call(argument, (value: unknown) => {
                     arr.push(LocalValue.getArgument(value))
                 })
                 return LocalValue.createArrayValue(arr)
@@ -256,6 +260,12 @@ export class LocalValue {
                 return LocalValue.createReferenceValue(
                     RemoteReferenceType.SharedId,
                     (argument as ElementReference)[ELEMENT_KEY]
+                )
+            }
+            if (argument && SHADOW_ELEMENT_KEY in (argument as object)) {
+                return LocalValue.createReferenceValue(
+                    RemoteReferenceType.SharedId,
+                    (argument as Record<typeof SHADOW_ELEMENT_KEY, string>)[SHADOW_ELEMENT_KEY]
                 )
             }
 

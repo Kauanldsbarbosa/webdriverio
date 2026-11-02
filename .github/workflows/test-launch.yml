@@ -7,17 +7,33 @@ on:
 
 jobs:
   launch_check:
-    name: E2E Launch Test (${{ matrix.os }}
+    name: E2E Launch Test (${{ matrix.os }}, ${{ matrix.browser }})
     permissions:
       contents: read
+    timeout-minutes: 20
     strategy:
       fail-fast: false
+      # One browser per job. A hosted runner cannot run every browser of
+      # `wdio.local.conf.ts` at the same time within the timeout, macOS least
+      # of all. Keep this list in sync with the capabilities in that file.
       matrix:
-        os: ['ubuntu-latest', 'windows-latest', 'macos-15']
+        include:
+          - { os: ubuntu-latest, browser: chrome }
+          - { os: ubuntu-latest, browser: firefox }
+          - { os: ubuntu-latest, browser: edge }
+          - { os: ubuntu-latest, browser: chromium }
+          - { os: windows-latest, browser: chrome }
+          - { os: windows-latest, browser: firefox }
+          - { os: windows-latest, browser: edge }
+          - { os: macos-15, browser: chrome }
+          - { os: macos-15, browser: firefox }
+          - { os: macos-15, browser: edge }
+          - { os: macos-15, browser: chromium }
+          - { os: macos-15, browser: safari }
     runs-on: ${{ matrix.os }}
     steps:
       - name: ⬇️ Checkout Code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🧑‍🔧 Get Core Dependencies
         uses: ./.github/workflows/actions/get-core-dependencies
@@ -29,14 +45,22 @@ jobs:
           path: .
           filename: webdriverio-build.zip
 
+      # Once per OS: the browser selection does not depend on the browser.
+      - name: Browser Selection Tests
+        if: matrix.browser == 'chrome'
+        run: pnpm vitest --config ./e2e/vitest.config.ts --run e2e/wdio/
+        shell: bash
+
       - name: E2E Launch Tests
         run: pnpm run test:e2e:webdriver
         shell: bash
+        env:
+          WDIO_E2E_BROWSERS: ${{ matrix.browser }}
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: e2e-launch-tests-logs
+          name: e2e-launch-tests-logs-${{ matrix.os }}-${{ matrix.browser }}
           path: e2e/wdio/*.log
 
       - name: Check Git Context

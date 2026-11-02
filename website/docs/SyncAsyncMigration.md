@@ -1,6 +1,7 @@
 ---
 id: async-migration
 title: From Sync to Async
+description: "Migrate WebdriverIO tests from synchronous to asynchronous command execution step by step, including forEach loops, assertions and sync page objects."
 ---
 
 Due to changes in V8 the WebdriverIO team [announced](https://webdriver.io/blog/2021/07/28/sync-api-deprecation) to deprecate synchronous command execution by April 2023. The team has been working hard to make the transition as easy as possible. In this guide we explain how you can slowly migrate your test suite from sync to async. As an example project we use the [Cucumber Boilerplate](https://github.com/webdriverio/cucumber-boilerplate) but the approach is the same with all other projects as well.
@@ -100,18 +101,28 @@ for (const elem of elems) {
 }
 ```
 
+`$$` returns an [`ElementArray`](/docs/api/browser/$$). You can also iterate it before awaiting the list:
+
+```js
+for await (const elem of $$('div')) {
+    await elem.click()
+}
+```
+
+`for (const elem of $$('div'))` throws until the list has resolved, because a synchronous loop cannot wait for the query. Await the list first, as in the example above, or use `for await`.
+
 ### WebdriverIO Assertions
 
 If you use the WebdriverIO assertion helper [`expect-webdriverio`](https://webdriver.io/docs/api/expect-webdriverio) make sure to set an `await` in front of every `expect` call, e.g.:
 
 ```ts
-expect($('input')).toHaveAttributeContaining('class', 'form')
+expect($('input')).toHaveAttribute('class', expect.stringContaining('form'))
 ```
 
 needs to be transformed to:
 
 ```ts
-await expect($('input')).toHaveAttributeContaining('class', 'form')
+await expect($('input')).toHaveAttribute('class', expect.stringContaining('form'))
 ```
 
 ### Sync PageObject Methods and Async Tests

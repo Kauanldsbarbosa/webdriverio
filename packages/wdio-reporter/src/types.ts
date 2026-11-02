@@ -1,3 +1,5 @@
+import type { Frameworks } from '@wdio/types'
+
 export interface Tag {
     name: string;
     line: number;
@@ -14,6 +16,7 @@ export interface CommandArgs {
     retries?: number
     command?: string
     params?: unknown
+    contextId?: string
 }
 
 export interface BeforeCommandArgs extends CommandArgs {
@@ -22,13 +25,18 @@ export interface BeforeCommandArgs extends CommandArgs {
 
 export interface AfterCommandArgs extends CommandArgs {
     result: unknown
+}
 
-    /**
-     * @deprecated Use `command` instead, moreover since the `onAfterCommand` was never called in the case of custom commands, it was breaking reports, and we do not emit this one in the fix!
-     *
-     * custom commands also send along the command name
-     */
-    name?: string
+/**
+ * Payload of `context:end`: the context of a parallel test sends no more events
+ * @experimental sent in Mocha and Cucumber `parallelMode` and for Vitest concurrent tests; the name and the fields may change
+ */
+export interface ContextEnd {
+    cid: string
+    specs?: string[]
+    /** uid of the last test of the context (Cucumber: of its scenario, when the scenario has no step) */
+    uid: string
+    contextId: string
 }
 
 export interface Argument {
@@ -36,3 +44,8 @@ export interface Argument {
         cells: string[]
     }[]
 }
+
+/** The kind of a hook, sent by the framework adapter. @experimental */
+export type HookKind = Frameworks.HookKind
+
+export type { ReporterUnit } from './units.js'

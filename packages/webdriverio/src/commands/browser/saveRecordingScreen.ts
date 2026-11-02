@@ -13,10 +13,10 @@ import { environment } from '../../environment.js'
  * <example>
     :saveRecordingScreen.js
     it('should save a video', async () => {
-        await browser.startRecordingScreen();
-        await $('~BUTTON').click();
-        await browser.saveRecordingScreen('./some/path/video.mp4');
-    });
+        await browser.startRecordingScreen()
+        await $('~BUTTON').click()
+        await browser.saveRecordingScreen('./some/path/video.mp4')
+    })
  * </example>
  *
  * @alias browser.saveRecordingScreen

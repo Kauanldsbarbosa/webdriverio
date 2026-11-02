@@ -1,5 +1,3 @@
-import { ELEMENT_KEY } from 'webdriver'
-
 import { getBrowserObject } from '@wdio/utils'
 import isFocusedScript from '../../scripts/isFocused.js'
 
@@ -31,8 +29,5 @@ import isFocusedScript from '../../scripts/isFocused.js'
  */
 export async function isFocused (this: WebdriverIO.Element) {
     const browser = await getBrowserObject(this)
-    return browser.execute(isFocusedScript, {
-        [ELEMENT_KEY]: this.elementId, // w3c compatible
-        ELEMENT: this.elementId // jsonwp compatible
-    } as unknown as HTMLElement)
+    return browser.execute(isFocusedScript, this as unknown as HTMLElement)
 }

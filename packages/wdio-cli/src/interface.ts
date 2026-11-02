@@ -9,7 +9,7 @@ import { HookError } from './utils.js'
 import { getRunnerName } from './utils.js'
 
 const log = logger('@wdio/cli')
-const EVENT_FILTER = ['sessionStarted', 'sessionEnded', 'finishedCommand', 'ready', 'workerResponse', 'workerEvent']
+const EVENT_FILTER = ['sessionStarted', 'sessionEnded', 'finishedCommand', 'ready', 'workerResponse', 'workerEvent', 'workerTimings']
 
 interface TestError {
     type: string
@@ -41,6 +41,16 @@ export default class WDIOCLInterface extends EventEmitter {
         retries: 0,
         failed: 0
     }
+    /**
+     * Worker wall-clock timings (seconds) aggregated from workerTimings messages.
+     */
+    public workerTimings: Array<{
+        cid?: string
+        setup?: number
+        execution?: number
+        teardown?: number
+        total?: number
+    }> = []
 
     private _jobs: Map<string, Workers.Job> = new Map()
     private _specFileRetries: number
@@ -98,6 +108,7 @@ export default class WDIOCLInterface extends EventEmitter {
             retries: 0,
             failed: 0
         }
+        this.workerTimings = []
 
         this._messages = {
             reporter: {},
@@ -178,7 +189,7 @@ export default class WDIOCLInterface extends EventEmitter {
 
     getFilenames(specs: string[] = []) {
         if (specs.length > 0) {
-            return '- ' + specs.join(', ').replace(new RegExp(`${process.cwd()}`, 'g'), '')
+            return '- ' + specs.join(', ')
         }
         return ''
     }
@@ -259,6 +270,14 @@ export default class WDIOCLInterface extends EventEmitter {
             return this._inDebugMode
         }
 
+        if (event.origin === 'debugger' && event.name === 'agent') {
+            const session = event.params?.session
+            const spec = event.params?.spec
+            const test = event.params?.test
+            console.error(`Paused in ${spec} › ${test}. Inspect with \`wdio session -s ${session} snapshot\`, continue with \`wdio session -s ${session} resume\`.`)
+            return
+        }
+
         if (event.name === 'testFrameworkInit') {
             return this.emit('job:start', event.content)
         }
@@ -268,6 +287,14 @@ export default class WDIOCLInterface extends EventEmitter {
             return snapshotResults.forEach((snapshotResult) => {
                 this.#snapshotManager.add(snapshotResult)
             })
+        }
+
+        if (event.name === 'workerTimings') {
+            this.workerTimings.push({
+                cid: event.cid,
+                ...(event.content || {})
+            })
+            return
         }
 
         if (event.name === 'error') {

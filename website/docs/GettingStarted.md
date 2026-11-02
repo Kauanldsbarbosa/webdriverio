@@ -1,30 +1,22 @@
 ---
 id: gettingstarted
 title: Getting Started
+description: Create a WebdriverIO project with npm init wdio@latest, run your first test and find the next guide for your platform.
 ---
 
-Welcome to the WebdriverIO documentation. It will help you to get started fast. If you run into problems, you can find help and answers on our [Discord Support Server](https://discord.webdriver.io) or you can hit us on [𝕏](https://x.com/webdriverio).
+Set up WebdriverIO in an existing or new project with one command, then run your first test. The configuration wizard asks what you want to test (web, mobile, desktop or VS Code extensions), which framework and reporters to use, and installs everything for you.
 
 :::info
-These are the docs for the latest version (__>=9.x__) of WebdriverIO. If you are still using an older version, please visit the [old documentation websites](/versions)!
+These are the docs for WebdriverIO __v10__. Still on v9? Use the [v9 documentation](https://v9.webdriver.io) or follow the [v10 migration guide](/docs/v10-migration).
 :::
 
-<LiteYouTubeEmbed
-    id="rA4IFNyW54c"
-    title="Getting Started with WebdriverIO"
-/>
-
-:::tip Official YouTube Channel 🎥
-
-You can find more videos around WebdriverIO on the [official YouTube channel](https://youtube.com/@webdriverio). Make sure you subscribe!
-
+:::tip Using a coding agent?
+Point it at [`https://webdriver.io/llms.txt`](https://webdriver.io/llms.txt) or connect the docs MCP server at `https://webdriver.io/mcp`. See [WebdriverIO for Coding Agents](/docs/ai-agents).
 :::
 
 ## Initiate a WebdriverIO Setup
 
-To add a full WebdriverIO setup to an existing or new project using the [WebdriverIO Starter Toolkit](https://www.npmjs.com/package/create-wdio), run:
-
-If you're in the root directory of an existing project, run:
+The [WebdriverIO Starter Toolkit](https://www.npmjs.com/package/create-wdio) adds a complete WebdriverIO setup to an existing or new project. In the root directory of an existing project, run:
 
 <Tabs
   defaultValue="npm"
@@ -134,6 +126,53 @@ bun create wdio@latest . --yes
 </TabItem>
 </Tabs>
 
+### Answer the wizard with flags
+
+Every question in the wizard has a command line flag. A flag answers its question and the wizard asks only the rest. Together with `--yes`, the wizard uses the defaults for the rest and never prompts, which is what a coding agent or a CI job needs:
+
+```sh
+# Cucumber in JavaScript, with the spec and JUnit reporters
+npm init wdio@latest . -- --yes --framework cucumber --no-typescript --reporters spec,junit
+
+# Firefox and Edge instead of Chrome
+npm init wdio@latest . -- --yes --browsers firefox,edge
+
+# An Android app with Appium
+npm init wdio@latest . -- --yes --mobile-environment android
+
+# React component tests
+npm init wdio@latest . -- --yes --runner component --preset react
+
+# Write the config, but install the dependencies yourself
+npm init wdio@latest . -- --yes --no-npm-install
+```
+
+With Yarn, pnpm and bun, pass the flags without the `--` separator, e.g. `pnpm create wdio@latest . --yes --framework cucumber`.
+
+The most common flags:
+
+| Flag | Values |
+| --- | --- |
+| `--runner` | `e2e` (default), `component`, `desktop`, `vscode`, `roku` |
+| `--framework` | `mocha` (default), `jasmine`, `cucumber`, `serenity-mocha`, `serenity-jasmine`, `serenity-cucumber` |
+| `--typescript` / `--no-typescript` | TypeScript is the default when the project has a `tsconfig.json` |
+| `--browsers` | Comma-separated list of `chrome` (default), `firefox`, `safari`, `edge` |
+| `--mobile-environment` | `android`, `ios` |
+| `--backend` | `local` (default), `saucelabs`, `browserstack`, `experitest`, `grid`, `other` |
+| `--preset` | `lit`, `vue`, `svelte`, `solid`, `stencil`, `react`, `preact`, `other`, with `--runner component` |
+| `--desktop-framework` | `electron`, `tauri`, `dioxus`, `macos`, with `--runner desktop` |
+| `--reporters`, `--services`, `--plugins` | Comma-separated short names, e.g. `--reporters spec,junit --services visual` |
+| `--agent-support` / `--no-agent-support` | Write the `AGENTS.md` section and the `wdio-session` skill (on by default) |
+| `--npm-install` / `--no-npm-install` | Install the dependencies (on by default) |
+
+`npm init wdio@latest -- --help` lists every flag, the values it accepts and the question it answers. Boolean flags take a `--no-` prefix. The same flags work with `npx wdio config`.
+
+The wizard checks each flag against your setup. An unknown value, a flag for a question it would not ask, or a value it would not offer for your setup stops it with exit code 2 before it writes any file:
+
+```
+Error: --preset does not apply to this setup. UI framework of your components (with --runner component).
+```
+
 ## Install CLI Manually
 
 You can also add the CLI package to your project manually via:
@@ -184,7 +223,23 @@ WebdriverIO provides tools to help you get started by recording your test action
 
 You’ll need [Node.js](http://nodejs.org) installed.
 
-- Install at least v18.20.0 or higher as this is the oldest active LTS version
+- Install at least v22.23.4, v24.22.1 or v26.12.1 (or a later release of these lines). These are the first releases with the [updated CA store](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) for the eMudhra intermediate CA compromise
 - Only releases that are or will become an LTS release are officially supported
 
 If Node is not currently installed on your system, we suggest utilizing a tool such as [NVM](https://github.com/creationix/nvm) or [Volta](https://volta.sh/) to assist in managing multiple active Node.js versions. NVM is a popular choice, while Volta is also a good alternative.
+
+## Watch the Introduction
+
+<LiteYouTubeEmbed
+    id="rA4IFNyW54c"
+    title="Getting Started with WebdriverIO"
+/>
+
+More videos are on the [official YouTube channel](https://youtube.com/@webdriverio).
+
+## Next Steps
+
+- Pick your platform: [Web Browsers](/docs/platforms/web), [Mobile Apps](/docs/platforms/mobile), [Desktop Apps](/docs/platforms/desktop) or [Extensions & Editors](/docs/platforms/apps-and-extensions)
+- Learn how to [select elements](/docs/selectors) and write [assertions](/docs/assertion)
+- Configure the test runner in [`wdio.conf.ts`](/docs/configurationfile)
+- Get help on [Discord](https://discord.webdriver.io)

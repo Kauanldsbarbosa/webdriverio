@@ -1,14 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { EventEmitter } from 'node:events'
+import util from 'node:util'
 
 import logger from '@wdio/logger'
-import { initializeWorkerService, initializePlugin, executeHooksWithArgs } from '@wdio/utils'
+import { initializeWorkerService, initializePlugin, executeHooksWithArgs, sleep, specFilePath, TimingTracker } from '@wdio/utils'
 import { ConfigParser } from '@wdio/config/node'
 import { _setGlobal } from '@wdio/globals'
-import { expect, setOptions, getConfig, matchers, SnapshotService, SoftAssertionService } from 'expect-webdriverio'
-import { attach } from 'webdriverio'
+import { expect, setDefaultOptions, getDefaultOptions, wdioCustomMatchers, SnapshotService, SoftAssertionService } from 'expect-webdriverio'
+import { attach, PARALLEL_CONTEXT_STORE_KEY } from 'webdriverio'
 import type { Browser, Selector } from 'webdriverio'
-import type { Options, Capabilities } from '@wdio/types'
+import type { Options, Capabilities, CustomCommands } from '@wdio/types'
 
 import BrowserFramework from './browser.js'
 import BaseReporter from './reporter.js'
@@ -16,16 +17,63 @@ import { initializeInstance, getInstancesData } from './utils.js'
 import type {
     BeforeArgs, AfterArgs, BeforeSessionArgs, AfterSessionArgs, RunParams,
     TestFramework, SessionStartedMessage, SessionEndedMessage, SnapshotResultMessage,
-    CustomStubCommand
+    WorkerTimingsMessage, CustomStubCommand
 } from './types.js'
 
 const log = logger('@wdio/runner')
+
+function getContextIdPayload(browser: WebdriverIO.Browser) {
+    const store = (browser as unknown as Record<string, { getStore?: () => unknown } | undefined>)[PARALLEL_CONTEXT_STORE_KEY]
+    const contextId = store?.getStore?.()
+    return typeof contextId === 'string' ? { contextId } : {}
+}
+
+/**
+ * Jasmine and Cucumber keep no error listener after their run: without one, Node ends the worker
+ * on a late error (e.g. a command without await in the last hook) before the reports are written
+ */
+let lateErrorHandler: ((err: unknown, origin: NodeJS.UncaughtExceptionOrigin) => void) | undefined
+function onLateError (err: unknown, origin: NodeJS.UncaughtExceptionOrigin) {
+    if (hasFrameworkListener()) {
+        return
+    }
+    // without the parent, the report itself fails (`process.send`) and comes back here: end the worker, as without this listener (Node exits with code 7)
+    if (process.connected === false) {
+        throw err
+    }
+    lateErrorHandler?.(err, origin)
+}
+
+/**
+ * a listener other than this one handles the error (Node's domain module adds one that handles nothing)
+ */
+function hasFrameworkListener () {
+    return process.listeners('uncaughtException').some((listener) => (
+        listener !== onLateError && listener.name !== 'domainUncaughtExceptionClear'
+    ))
+}
+
+/**
+ * this runs in an error listener, so a URL that names no path must not throw
+ */
+function toPath (spec: string) {
+    try {
+        return specFilePath(spec)
+    } catch {
+        return spec
+    }
+}
+
+const LATE_REJECTION_TIMEOUT = 60_000
+// more messages add no information, and a report that fails again would feed a loop
+const LATE_ERROR_REPORT_LIMIT = 10
+const CLOSE_SESSION_TIMEOUT = 5_000
 
 export default class Runner extends EventEmitter {
     private _browser?: WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser
     private _configParser?: ConfigParser
     private _sigintWasCalled = false
-    private _isMultiremote = false
+    private _isMultiRemote = false
     private _specFileRetryAttempts = 0
 
     private _reporter?: BaseReporter
@@ -33,8 +81,110 @@ export default class Runner extends EventEmitter {
     private _config?: WebdriverIO.Config
     private _cid?: string
     private _specs?: string[]
-    private _caps?: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+    private _caps?: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
     private _sessionInitError?: Error
+    private _timingTracker?: TimingTracker
+    private _lateErrors = 0
+    private _lateRejectionSince = 0
+    private _lateRejectionTimer?: NodeJS.Timeout
+    private _shutdownStarted = false
+    private _endWorkerRun?: Promise<number>
+    private _frameworkFailures = 0
+    private _testsStarted = false
+    private _sessionStarting = false
+    private _runnerStarted = false
+    private _watch = false
+    private _sessionReported = false
+    private _closingSessions?: Promise<void>
+    private _retries = 0
+
+    private _onLateError = (err: unknown, origin: NodeJS.UncaughtExceptionOrigin) => {
+        const uncaught = origin !== 'unhandledRejection'
+        // before the tests there is no report to keep, and the run would go on (session, hooks): end as without this listener
+        if (uncaught && !this._testsStarted) {
+            throw err
+        }
+        this._lateErrors++
+        if (this._lateErrors <= LATE_ERROR_REPORT_LIMIT) {
+            const kind = uncaught
+                ? 'Uncaught error that no test reports, for example of a timer that throws in a hook'
+                : 'Unhandled promise rejection that no test reports, for example of a command without await in the last hook'
+            this.#reportLateError(`${kind} (${this.#lateErrorPlace()}): ${err instanceof Error ? err.stack || err.message : util.inspect(err)}`)
+        }
+        if (uncaught) {
+            // the state of the process can be broken after an uncaught exception, so do not go on with the run
+            void this.#startEndWorker()
+            return
+        }
+        this.#watchLateRejection()
+    }
+
+    /**
+     * the stack of a command has no test line, so name where the error comes from
+     */
+    #lateErrorPlace () {
+        const specs = (this._specs ?? []).map(toPath)
+        const last = this._reporter?.lastEndedTitle
+        return `spec file: ${specs.join(', ')}${last ? `, last test or hook: "${last}"` : ''}`
+    }
+
+    #reportLateError (message: string) {
+        log.error(message)
+        this.emit('error', new Error(message))
+    }
+
+    /**
+     * A hook can wait for the rejected promise and never end: end the worker when no framework
+     * runs user code and no reporter event came for a while
+     */
+    #watchLateRejection () {
+        if (this._lateRejectionTimer || this._shutdownStarted) {
+            return
+        }
+        this._lateRejectionSince = Date.now()
+        const check = () => {
+            const idle = Date.now() - Math.max(this._lateRejectionSince, this._reporter?.lastEventTime ?? 0)
+            if (hasFrameworkListener() || this._sessionStarting || idle < LATE_REJECTION_TIMEOUT) {
+                this._lateRejectionTimer = setTimeout(check, Math.max(LATE_REJECTION_TIMEOUT - idle, 1_000)).unref()
+                return
+            }
+            this.#reportLateError(
+                `The worker did not finish ${LATE_REJECTION_TIMEOUT / 1000}s after an unhandled rejection that no test reports: ` +
+                'a hook can wait for the rejected promise. The worker ends now.'
+            )
+            void this.#startEndWorker()
+        }
+        this._lateRejectionTimer = setTimeout(check, LATE_REJECTION_TIMEOUT).unref()
+    }
+
+    /**
+     * once per run; `run()` waits for it at its next step instead of going on
+     */
+    #startEndWorker () {
+        this._endWorkerRun ??= this.#endWorker()
+        return this._endWorkerRun
+    }
+
+    /**
+     * end the worker with its reports; closing the session can be what does not answer
+     */
+    async #endWorker () {
+        if (this._shutdownStarted) {
+            return 1
+        }
+        // watch mode keeps the session for the next run, as `run()` does, once the parent knows it
+        if (!(this._watch && this._sessionReported) && this.#hasSessions()) {
+            await Promise.race([this.#closeSessions(), sleep(CLOSE_SESSION_TIMEOUT)])
+        }
+        // no reporter yet (e.g. a service fails before the session): there is no report to write
+        if (!this._reporter) {
+            this._shutdownStarted = true
+            this.emit('exit', 1)
+            return 1
+        }
+        // before `runner:start` (e.g. in the `before` hook) the reporters need it to write `runner:end`
+        return this._shutdown(this._frameworkFailures, this._retries, !this._runnerStarted)
+    }
 
     /**
      * run test suite
@@ -47,6 +197,19 @@ export default class Runner extends EventEmitter {
      * @return {Promise}                  resolves in number of failures for testrun
      */
     async run({ cid, args, specs, caps, configFile, retries }: RunParams) {
+        this._lateErrors = 0
+        this._shutdownStarted = false
+        this._endWorkerRun = undefined
+        this._frameworkFailures = 0
+        this._testsStarted = false
+        this._runnerStarted = false
+        this._watch = Boolean(args.watch)
+        // a watch rerun attaches to the session that the parent already saved
+        this._sessionReported = Boolean((args as { sessionId?: string }).sessionId)
+        this._closingSessions = undefined
+        this._retries = retries
+        clearTimeout(this._lateRejectionTimer)
+        this._lateRejectionTimer = undefined
         this._configParser = new ConfigParser(configFile, args)
         this._cid = cid
         this._specs = specs
@@ -62,6 +225,23 @@ export default class Runner extends EventEmitter {
         }
 
         this._config = this._configParser.getConfig()
+        lateErrorHandler = this._onLateError
+        // the browser runner ends the worker itself on a failed state check, through an unhandled rejection
+        const runnerName = Array.isArray(this._config.runner) ? this._config.runner[0] : this._config.runner
+        if (runnerName !== 'browser' && !process.listeners('uncaughtException').includes(onLateError)) {
+            process.on('uncaughtException', onLateError)
+        }
+        if (args.debug === 'agent') {
+            const { applyDebugAgentTimeouts } = await import('@wdio/session')
+            applyDebugAgentTimeouts(this._config)
+        }
+
+        /**
+         * Track setup / execution / teardown wall-clock for the worker.
+         * CPU and Heap profiling is handled natively by Node.js via execArgv flags.
+         */
+        this._timingTracker = new TimingTracker()
+        this._timingTracker.markTiming('setupStart')
 
         logger.setLogLevelsConfig(this._config.logLevels, this._config.logLevel)
         if (this._config.maskingPatterns) {
@@ -69,15 +249,15 @@ export default class Runner extends EventEmitter {
         }
 
         const capabilities = this._configParser.getCapabilities()
-        const isMultiremote = this._isMultiremote = !Array.isArray(capabilities) ||
+        const isMultiRemote = this._isMultiRemote = !Array.isArray(capabilities) ||
             (Object.values(caps).length > 0 && Object.values(caps).every(c => typeof c === 'object' && c.capabilities))
 
         /**
          * add built-in services
          */
         const softAssertionService = new SoftAssertionService({
-            autoAssertOnTestEnd: this._config.autoAssertOnTestEnd || true
-        }, this._caps, this._config)
+            autoAssertOnTestEnd: this._config.autoAssertOnTestEnd ?? true
+        })
 
         const snapshotService = SnapshotService.initiate({
             updateState: this._config.updateSnapshots,
@@ -85,7 +265,7 @@ export default class Runner extends EventEmitter {
         })
         this._configParser.addService(softAssertionService)
         this._configParser.addService(snapshotService)
-        this._caps = this._isMultiremote
+        this._caps = this._isMultiRemote
             /**
              * Filter driver instances based on 'wdio:exclude' capability and allow
              * user to exclude them if not needed for given spec file
@@ -93,14 +273,14 @@ export default class Runner extends EventEmitter {
             ? Object.entries(caps).reduce((filteredCaps, [browserName, browserCaps]) => {
                 const ex = browserCaps.capabilities['wdio:exclude']
                 if (ex) {
-                    const sp = this._configParser?.getSpecs(specs, ex)
+                    const sp = this._configParser?.getInstanceSpecs(specs, ex)
                     if (sp && sp.length === 0) {
                         return filteredCaps
                     }
                 }
                 filteredCaps[browserName] = browserCaps
                 return filteredCaps
-            }, {} as Capabilities.RequestedMultiremoteCapabilities)
+            }, {} as Capabilities.RequestedMultiRemoteCapabilities)
             : caps
 
         /**
@@ -108,8 +288,6 @@ export default class Runner extends EventEmitter {
          */
         let browser = await this._startSession({
             ...this._config,
-            // @ts-ignore used in `/packages/webdriverio/src/protocol-stub.ts`
-            _automationProtocol: this._config.automationProtocol,
             automationProtocol: './protocol-stub.js'
         }, this._caps)
 
@@ -124,6 +302,10 @@ export default class Runner extends EventEmitter {
 
         const beforeSessionParams: BeforeSessionArgs = [this._config, this._caps, this._specs, this._cid]
         await executeHooksWithArgs('beforeSession', this._config.beforeSession, beforeSessionParams)
+        // the worker ends already (the watchdog, while this hook waited): do not start a session
+        if (this._endWorkerRun) {
+            return this._endWorkerRun
+        }
         this._specFileRetryAttempts = (this._config.specFileRetries || 0) - (retries || 0)
 
         this._reporter = new BaseReporter(this._config, this._cid, { ...this._caps })
@@ -133,12 +315,26 @@ export default class Runner extends EventEmitter {
          * initialize framework
          */
         this._framework = await this.#initFramework(cid, this._config, this._caps, this._reporter, specs)
-        process.send!({ name: 'testFrameworkInit', content: { cid, caps: this._caps, specs, hasTests: this._framework.hasTests() } })
+        /**
+         * `specFileRetries` is sent along so the worker can resolve its retry budget
+         * before the session is requested — it reflects `beforeSession` overrides as
+         * `this._specFileRetryAttempts` is computed after the hook ran. If only sent
+         * with `sessionStarted`, a failed session start would leave the budget
+         * unresolved and the spec file would never be retried.
+         */
+        process.send!({ name: 'testFrameworkInit', content: { cid, caps: this._caps, specs, hasTests: this._framework.hasTests() }, specFileRetries: this._specFileRetryAttempts })
         if (!this._framework.hasTests()) {
             return this._shutdown(0, retries, true)
         }
 
-        browser = await this._initSession(this._config, this._caps)
+        // a session start can wait long in a grid queue: the watchdog must not end the worker meanwhile, or the session leaks
+        this._sessionStarting = true
+        try {
+            browser = await this._initSession(this._config, this._caps)
+        } finally {
+            this._sessionStarting = false
+            this._lateRejectionSince = Date.now()
+        }
 
         /**
          * return if session initialization failed
@@ -150,10 +346,20 @@ export default class Runner extends EventEmitter {
             return this._shutdown(1, retries, true)
         }
 
+        if (args.debug === 'agent' && !isMultiRemote) {
+            const { enableDebugAgent } = await import('@wdio/session')
+            enableDebugAgent({ browser: browser as WebdriverIO.Browser, cid, specs })
+        }
+
         this._reporter.caps = browser.capabilities
+        this._reporter.setContextIdResolver(() => (getContextIdPayload(browser as WebdriverIO.Browser) as { contextId?: string }).contextId)
 
         const beforeArgs: BeforeArgs = [this._caps, this._specs, browser]
         await executeHooksWithArgs('before', this._config.before, beforeArgs)
+        // the watchdog ended the worker while this hook waited for a rejected promise: do not start the tests
+        if (this._endWorkerRun) {
+            return this._endWorkerRun
+        }
 
         /**
          * kill session of SIGINT signal showed up while trying to
@@ -173,8 +379,8 @@ export default class Runner extends EventEmitter {
             cid,
             specs,
             config: browser.options,
-            isMultiremote,
-            instanceOptions: isMultiremote
+            isMultiRemote,
+            instanceOptions: isMultiRemote
                 ? multiRemoteBrowser.instances.reduce((prev: any, browserName: string) => {
                     prev[multiRemoteBrowser.getInstance(browserName).sessionId] = multiRemoteBrowser.getInstance(browserName).options as Options.WebdriverIO
                     return prev
@@ -183,51 +389,73 @@ export default class Runner extends EventEmitter {
                     [browser.sessionId]: browser.options
                 },
             sessionId: browser.sessionId,
-            capabilities: isMultiremote
+            capabilities: isMultiRemote
                 ? multiRemoteBrowser.instances.reduce((caps: any, browserName: string) => {
                     caps[browserName] = multiRemoteBrowser.getInstance(browserName).capabilities
                     caps[browserName].sessionId = multiRemoteBrowser.getInstance(browserName).sessionId
                     return caps
-                }, {} as Capabilities.RequestedMultiremoteCapabilities)
+                }, {} as Capabilities.RequestedMultiRemoteCapabilities)
                 : { ...browser.capabilities, sessionId: browser.sessionId },
             retry: this._specFileRetryAttempts
         } as Options.RunnerStart)
+        this._runnerStarted = true
 
         /**
          * report sessionId and target connection information to worker
          */
         const { protocol, hostname, port, path, queryParams, automationProtocol, headers } = browser.options
-        const { isW3C, sessionId } = browser
-        const instances = getInstancesData(browser, isMultiremote)
+        const { sessionId } = browser
+        const instances = getInstancesData(browser, isMultiRemote)
         process.send!(<SessionStartedMessage>{
             origin: 'worker',
             name: 'sessionStarted',
             specFileRetries: this._specFileRetryAttempts,
             content: {
-                automationProtocol, sessionId, isW3C, protocol, hostname, port, path, queryParams, isMultiremote, instances,
+                automationProtocol, sessionId, protocol, hostname, port, path, queryParams, isMultiRemote, instances,
                 capabilities: browser.capabilities,
                 injectGlobals: this._config.injectGlobals,
                 headers
             }
         })
+        this._sessionReported = true
+
+        /**
+         * Mark setup phase complete, execution phase start
+         */
+        this._timingTracker?.markTiming('setupEnd')
+        this._timingTracker?.markTiming('executionStart')
 
         /**
          * kick off tests in framework
          */
         let failures = 0
         try {
+            if (!this._isMultiRemote) {
+                this._framework.setBrowser?.(browser as WebdriverIO.Browser)
+            }
+            this._testsStarted = true
             failures = await this._framework.run()
         } catch (err: any) {
             log.error(err)
             this.emit('error', err)
             failures = 1
         }
+        this._frameworkFailures = failures
+
+        /**
+         * Mark execution phase complete, teardown phase start
+         */
+        this._timingTracker?.markTiming('executionEnd')
+        this._timingTracker?.markTiming('teardownStart')
 
         /**
          * in watch mode we don't close the session and leave current page opened
          */
-        if (!args.watch) {
+        if (!args.watch && !this._endWorkerRun) {
             await this.endSession()
+        }
+        if (this._endWorkerRun) {
+            return this._endWorkerRun
         }
 
         /**
@@ -245,7 +473,7 @@ export default class Runner extends EventEmitter {
     async #initFramework (
         cid: string,
         config: WebdriverIO.Config,
-        capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities,
+        capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities,
         reporter: BaseReporter,
         specs: string[]
     ): Promise<TestFramework> {
@@ -258,7 +486,7 @@ export default class Runner extends EventEmitter {
             const framework = (await initializePlugin(config.framework as string, 'framework')).default as unknown as TestFramework
             const frameworkInstance = await framework.init(cid, config, specs, capabilities, reporter)
             if (frameworkInstance.setupExpect) {
-                await frameworkInstance.setupExpect(expect, matchers, getConfig)
+                await frameworkInstance.setupExpect(expect, wdioCustomMatchers, getDefaultOptions)
             }
             return frameworkInstance
         }
@@ -283,7 +511,7 @@ export default class Runner extends EventEmitter {
      */
     private async _initSession (
         config: WebdriverIO.Config,
-        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
     ) {
         const browser = await this._startSession(config, caps) as WebdriverIO.Browser
 
@@ -295,7 +523,7 @@ export default class Runner extends EventEmitter {
         /**
          * register global helper method to fetch elements
          */
-        _setGlobal('$', (selector: Selector) => browser.$(selector), config.injectGlobals)
+        _setGlobal('$', (...args: Parameters<WebdriverIO.Browser['$']>) => browser.$(...args), config.injectGlobals)
         _setGlobal('$$', (selector: Selector) => browser.$$(selector), config.injectGlobals)
 
         /**
@@ -303,7 +531,7 @@ export default class Runner extends EventEmitter {
          */
         browser.on('command', (command: any) => this._reporter?.emit(
             'client:beforeCommand',
-            Object.assign(command, { sessionId: browser.sessionId })
+            Object.assign(command, { sessionId: browser.sessionId }, getContextIdPayload(browser))
         ))
 
         /**
@@ -311,7 +539,7 @@ export default class Runner extends EventEmitter {
          */
         browser.on('result', (result: any) => this._reporter?.emit(
             'client:afterCommand',
-            Object.assign(result, { sessionId: browser.sessionId })
+            Object.assign(result, { sessionId: browser.sessionId }, getContextIdPayload(browser))
         ))
 
         return browser
@@ -325,7 +553,7 @@ export default class Runner extends EventEmitter {
      */
     private async _startSession (
         config: WebdriverIO.Config,
-        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
     ) {
         try {
             /**
@@ -333,9 +561,9 @@ export default class Runner extends EventEmitter {
              * test started, e.g. after all imports
              */
             const customStubCommands: CustomStubCommand[] = (this._browser as any | undefined)?.customCommands || []
-            const overwrittenCommands: [any, (...args: any[]) => any, boolean][] = (this._browser as any | undefined)?.overwrittenCommands || []
+            const overwrittenCommands: [any, (...args: any[]) => any, CustomCommands.CustomCommandOptions<boolean>][] = (this._browser as any | undefined)?.overwrittenCommands || []
 
-            const browser = await initializeInstance(config, caps, this._isMultiremote)
+            const browser = await initializeInstance(config, caps, this._isMultiRemote)
             this._browser = browser
             _setGlobal('browser', this._browser, config.injectGlobals)
             _setGlobal('driver', this._browser, config.injectGlobals)
@@ -353,14 +581,8 @@ export default class Runner extends EventEmitter {
              * Casting to Browser since union & generic types cause too much issues with type inference and overload resolution
              */
             const commandTarget: Browser = browser as unknown as Browser
-            for (const [name, func, thirdArg, proto, instances] of customStubCommands) {
-                if (typeof thirdArg === 'object' && thirdArg !== null) {
-                    commandTarget.addCommand(name, func, thirdArg)
-                } else if (typeof thirdArg === 'boolean') {
-                    commandTarget.addCommand(name, func, thirdArg, proto, instances)
-                } else {
-                    commandTarget.addCommand(name, func)
-                }
+            for (const [name, func, options] of customStubCommands) {
+                commandTarget.addCommand(name, func, options)
             }
             for (const params of overwrittenCommands) {
                 browser.overwriteCommand(...params)
@@ -370,7 +592,7 @@ export default class Runner extends EventEmitter {
              * import and set options for `expect-webdriverio` assertion lib once
              * the browser was initiated
              */
-            setOptions({
+            setDefaultOptions({
                 wait: config.waitforTimeout, // ms to wait for expectation to succeed
                 interval: config.waitforInterval, // interval between attempts
                 beforeAssertion: async (params) => {
@@ -388,10 +610,9 @@ export default class Runner extends EventEmitter {
             })
 
             /**
-             * attach browser to `multiremotebrowser` so user have better typing support
+             * attach browser to `multiRemoteBrowser` so user have better typing support
              */
-            if (this._isMultiremote) {
-                _setGlobal('multiremotebrowser', this._browser, config.injectGlobals)
+            if (this._isMultiRemote) {
                 _setGlobal('multiRemoteBrowser', this._browser, config.injectGlobals)
             }
         } catch (error: any) {
@@ -411,6 +632,44 @@ export default class Runner extends EventEmitter {
         retries: number,
         initiationFailed = false
     ) {
+        // Node reports an unhandled rejection after the current task: let the one of the last hook arrive
+        await new Promise((resolve) => setImmediate(resolve))
+        if (this._shutdownStarted) {
+            return failures
+        }
+        this._shutdownStarted = true
+        clearTimeout(this._lateRejectionTimer)
+        const hiddenLateErrors = this._lateErrors - LATE_ERROR_REPORT_LIMIT
+        if (hiddenLateErrors > 0) {
+            this.#reportLateError(`${hiddenLateErrors} more late errors that no test reports were not shown`)
+        }
+        const lateErrors = this._lateErrors
+        failures += lateErrors
+
+        /**
+         * Mark teardown phase complete and log timing metrics
+         * Note: CPU and Heap profiles are generated by Node.js automatically
+         * when the worker process exits (via --cpu-prof / --heap-prof flags)
+         */
+        this._timingTracker?.markTiming('teardownEnd')
+
+        if (this._timingTracker) {
+            const timings = this._timingTracker.getTimings()
+            process.send!(<WorkerTimingsMessage>{
+                origin: 'worker',
+                name: 'workerTimings',
+                cid: this._cid,
+                content: timings
+            })
+
+            if (this._config?.cpuProf || this._config?.heapProf) {
+                const output = this._timingTracker.formatTimingOutput()
+                if (output) {
+                    log.info(output)
+                }
+            }
+        }
+
         /**
          * In case of initialization failed, the sessionId is undefined and the runner:start is not triggered.
          * So, to be able to perform the runner:end into the reporters, we need to launch the runner:start just before the runner:end.
@@ -420,7 +679,7 @@ export default class Runner extends EventEmitter {
                 cid: this._cid,
                 specs: this._specs,
                 config: this._config,
-                isMultiremote: this._isMultiremote,
+                isMultiRemote: this._isMultiRemote,
                 instanceOptions: {},
                 capabilities: this._caps,
                 retry: this._specFileRetryAttempts
@@ -438,6 +697,8 @@ export default class Runner extends EventEmitter {
         } catch (err: any) {
             log.error(err)
         }
+        // a late error can also come while the reporters write
+        failures += this._lateErrors - lateErrors
         this.emit('exit', failures === 0 ? 0 : 1)
         return failures
     }
@@ -447,25 +708,7 @@ export default class Runner extends EventEmitter {
      * within a hook by the user
      */
     async endSession(payload?: any) {
-        /**
-         * make sure instance(s) exist and have `sessionId`
-         */
-        const multiRemoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
-        const browser = this._browser as WebdriverIO.Browser
-        const hasSessionId = Boolean(this._browser) && (this._isMultiremote
-            /**
-             * every multiremote instance should exist and should have `sessionId`
-             */
-            ? !multiRemoteBrowser.instances.some((browserName: string) => (
-                multiRemoteBrowser.getInstance(browserName) &&
-                !multiRemoteBrowser.getInstance(browserName).sessionId)
-            )
-
-            /**
-             * browser object should have `sessionId` in regular mode
-             */
-            : browser.sessionId
-        )
+        const hasSessionId = this.#hasSessions()
 
         /**
          * in watch mode we create a new child process to kill the
@@ -488,15 +731,51 @@ export default class Runner extends EventEmitter {
         /**
          * store updated capabilities for afterSession hook
          */
-        const capabilities = (this._browser?.capabilities as WebdriverIO.Capabilities) || ({} as Capabilities.RequestedMultiremoteCapabilities)
-        if (this._isMultiremote) {
+        const capabilities = (this._browser?.capabilities as WebdriverIO.Capabilities) || ({} as Capabilities.RequestedMultiRemoteCapabilities)
+        if (this._isMultiRemote) {
             const multiRemoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
             multiRemoteBrowser.instances.forEach((browserName: string) => {
-                (capabilities as Capabilities.RequestedMultiremoteCapabilities)[browserName] = multiRemoteBrowser.getInstance(browserName).capabilities as any
+                (capabilities as Capabilities.RequestedMultiRemoteCapabilities)[browserName] = multiRemoteBrowser.getInstance(browserName).capabilities as any
             })
         }
 
-        await this._browser?.deleteSession()
+        await this.#closeSessions()
+
+        const afterSessionArgs: AfterSessionArgs = [this._config!, capabilities, this._specs as string[]]
+        await executeHooksWithArgs('afterSession', this._config!.afterSession!, afterSessionArgs)
+    }
+
+    /**
+     * make sure instance(s) exist and have `sessionId`
+     */
+    #hasSessions () {
+        const multiRemoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
+        return Boolean(this._browser) && Boolean(this._isMultiRemote
+            /**
+             * every multi-remote instance should exist and should have `sessionId`
+             */
+            ? !multiRemoteBrowser.instances.some((browserName: string) => (
+                multiRemoteBrowser.getInstance(browserName) &&
+                !multiRemoteBrowser.getInstance(browserName).sessionId)
+            )
+
+            /**
+             * browser object should have `sessionId` in regular mode
+             */
+            : (this._browser as WebdriverIO.Browser).sessionId
+        )
+    }
+
+    /**
+     * once per run: `endSession` and the early end of a late error can both close the sessions
+     */
+    #closeSessions () {
+        this._closingSessions ??= this.#deleteAndForgetSessions()
+        return this._closingSessions
+    }
+
+    async #deleteAndForgetSessions () {
+        await this.#deleteSessions()
         process.send!(<SessionEndedMessage>{
             origin: 'worker',
             name: 'sessionEnded',
@@ -506,17 +785,45 @@ export default class Runner extends EventEmitter {
         /**
          * delete session(s)
          */
-        if (this._isMultiremote) {
+        if (this._isMultiRemote) {
+            const multiRemoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
             multiRemoteBrowser.instances.forEach((browserName: string) => {
                 // @ts-ignore sessionId is usually required
                 delete multiRemoteBrowser.getInstance(browserName).sessionId
             })
-        } else if (browser) {
-            browser.sessionId = undefined as unknown as string
+        } else if (this._browser) {
+            (this._browser as WebdriverIO.Browser).sessionId = undefined as unknown as string
         }
+    }
 
-        const afterSessionArgs: AfterSessionArgs = [this._config!, capabilities, this._specs as string[]]
-        await executeHooksWithArgs('afterSession', this._config!.afterSession!, afterSessionArgs)
+    /**
+     * Delete the session of every browser. A session can already be gone (a
+     * browser crash, a cloud timeout, a lost network): then `deleteSession`
+     * fails. Log it and go on, so the worker still sends `sessionEnded`, runs
+     * the `afterSession` hook and gives the reporters `runner:end`. Otherwise
+     * no report is written.
+     */
+    async #deleteSessions () {
+        const multiRemoteBrowser = this._browser as WebdriverIO.MultiRemoteBrowser
+        const sessions = this._isMultiRemote
+            ? multiRemoteBrowser.instances.map((browserName: string) => ({
+                browserName,
+                browser: multiRemoteBrowser.getInstance(browserName) as WebdriverIO.Browser
+            }))
+            : [{ browserName: undefined, browser: this._browser as WebdriverIO.Browser }]
+
+        const results = await Promise.allSettled(sessions.map(({ browser }) => browser?.deleteSession()))
+        results.forEach((result, i) => {
+            if (result.status === 'fulfilled') {
+                return
+            }
+            const { browserName } = sessions[i]
+            const reason = result.reason instanceof Error ? result.reason.message : String(result.reason)
+            log.error(
+                `Failed to end the session${browserName ? ` of "${browserName}"` : ''}: ${reason}\n` +
+                'The browser may still be running (for example on a cloud service). Close it manually if needed.'
+            )
+        })
     }
 }
 

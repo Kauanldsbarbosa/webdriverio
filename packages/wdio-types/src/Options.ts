@@ -97,6 +97,21 @@ export interface WebDriver extends Connection {
      */
     connectionRetryCount?: number
     /**
+     * Timeout (in ms) for a WebDriver Bidi command to receive a response from the browser.
+     *
+     * @default 180000
+     */
+    bidiResponseTimeout?: number
+    /**
+     * Timeout (in ms) for the browser to accept the WebDriver Bidi connection. After it,
+     * the session continues with WebDriver Classic, where Bidi-only commands fail.
+     * Node.js only: in a browser (for example the browser runner) the connection waits
+     * until it opens or fails.
+     *
+     * @default 10000
+     */
+    bidiConnectTimeout?: number
+    /**
      * Specify custom headers to pass into every request.
      */
     headers?: {
@@ -149,7 +164,7 @@ export interface WebDriver extends Connection {
     maskingPatterns?: string
 }
 
-export type SauceRegions = 'us' | 'eu' | 'us-west-1' | 'us-east-4' | 'eu-central-1' | 'staging'
+export type SauceRegions = 'us' | 'eu' | 'us-west-1' | 'us-east-4' | 'eu-central-1' | 'asia-south-2' | 'staging'
 
 export interface WebdriverIO extends WebDriver, Pick<Hooks, 'onReload' | 'beforeCommand' | 'afterCommand'> {
     /**
@@ -178,6 +193,13 @@ export interface WebdriverIO extends WebDriver, Pick<Hooks, 'onReload' | 'before
      * @default 500
      */
     waitforInterval?: number
+    /**
+     * If set to `true`, the `$` command throws a `StrictSelectorError` when the given
+     * selector resolves to more than one element. Use `$$` when you expect multiple
+     * matches or opt out per call via `$(selector, { strict: false })`.
+     * @default true
+     */
+    strictSelectors?: boolean
 
     /**
      * Maximum size of the response body (in bytes) that can be returned when using the `mock` command.
@@ -336,39 +358,60 @@ export interface Testrunner extends Hooks, WebdriverIO, WebdriverIO.HookFunction
      */
     shard?: ShardOptions
     /**
-     * Enable automatic Xvfb initialization in local runner for headless testing on Linux.
-     * When disabled, tests should manually call xvfb.init() if needed.
+     * Enable automatic display-server setup for headless testing on Linux.
      * @default true
      */
-    autoXvfb?: boolean
+    displayServerEnabled?: boolean
     /**
-     * Enable automatic installation of `xvfb-run` on Linux if missing.
-     * When false, the runner will warn and continue without installing.
+     * Enable automatic installation of display-server packages if missing.
      * @default false
      */
-    xvfbAutoInstall?: boolean
+    displayServerAutoInstall?: boolean
     /**
-     * Mode for automatic installation when xvfbAutoInstall is true.
+     * Mode for automatic installation.
      * - 'root': install only if running as root (no sudo)
      * - 'sudo': install if root or via non-interactive sudo (`sudo -n`) if available
-     * @default 'root'
+     * @default 'sudo'
      */
+    displayServerAutoInstallMode?: 'root' | 'sudo'
+    /**
+     * Custom install command, bypassing built-in package-manager detection.
+     */
+    displayServerAutoInstallCommand?: string | string[]
+    /**
+     * Which display server to use for headless testing on Linux.
+     * - 'auto': installed servers before auto-installing, Wayland before Xvfb, falling back when one fails to start
+     * - 'wayland': Force Wayland only
+     * - 'xvfb': Force Xvfb only (Enterprise Linux 10 has no Xvfb package)
+     * @default 'auto'
+     */
+    displayServer?: 'auto' | 'wayland' | 'xvfb'
+    /**
+     * Screen width in pixels.
+     * @default 1920
+     */
+    displayServerWidth?: number
+    /**
+     * Screen height in pixels.
+     * @default 1080
+     */
+    displayServerHeight?: number
+    /**
+     * Color depth — Xvfb only, ignored by Wayland.
+     * @default 24
+     */
+    displayServerDepth?: number
+    /** @deprecated Use `displayServerEnabled` instead. */
+    autoXvfb?: boolean
+    /** @deprecated Use `displayServerAutoInstall` instead. */
+    xvfbAutoInstall?: boolean
+    /** @deprecated Use `displayServerAutoInstallMode` instead. */
     xvfbAutoInstallMode?: 'root' | 'sudo'
-    /**
-     * Custom command to use for installation instead of built-in package manager detection.
-     * When provided, this command is executed as-is and overrides the built-in installation logic.
-     */
+    /** @deprecated Use `displayServerAutoInstallCommand` instead. */
     xvfbAutoInstallCommand?: string | string[]
-    /**
-     * Number of retry attempts for xvfb process failures.
-     * @default 3
-     */
+    /** @deprecated Has no effect: display-server startup is not retried. */
     xvfbMaxRetries?: number
-    /**
-     * Base delay between retries in milliseconds for xvfb process failures.
-     * Progressive delay will be: xvfbRetryDelay * attemptNumber
-     * @default 1000
-     */
+    /** @deprecated Has no effect: display-server startup is not retried. */
     xvfbRetryDelay?: number
     // framework options
     /**
@@ -383,6 +426,21 @@ export interface Testrunner extends Hooks, WebdriverIO, WebdriverIO.HookFunction
      * Cucumber specific options
      */
     cucumberOpts?: WebdriverIO.CucumberOpts
+    /**
+     * Enable Node.js CPU profiling for worker processes.
+     * Uses `--cpu-prof` and writes .cpuprofile files compatible with Chrome DevTools.
+     */
+    cpuProf?: boolean
+    /**
+     * Enable Node.js heap profiling for worker processes.
+     * Uses `--heap-prof` (sampling heap profiler) and writes .heapprofile files compatible with Chrome DevTools.
+     */
+    heapProf?: boolean
+    /**
+     * Directory to save profiling output.
+     * @default './profiles'
+     */
+    profileOutputDir?: string
     /**
      * TSX custom TSConfig path
      */
@@ -410,7 +468,7 @@ export interface RunnerStart {
     cid: string
     specs: string[]
     config: Testrunner
-    isMultiremote: boolean
+    isMultiRemote: boolean
     instanceOptions: Record<string, WebdriverIO>
     sessionId: string
     capabilities: WebdriverIO.Capabilities

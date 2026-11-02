@@ -1,14 +1,18 @@
 import path from 'node:path'
 // @ts-expect-error - mock
 import { logMock } from '@wdio/logger'
-import { attach, remote, multiremote } from 'webdriverio'
+import { attach, remote, multiRemote } from 'webdriverio'
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
+import { expect as wdioExpect } from 'expect-webdriverio'
 
-import type { ConfigWithSessionId
-} from '../src/utils.js'
+import type { ConfigWithSessionId } from '../src/utils.js'
 import {
-    initializeInstance, sanitizeCaps, getInstancesData
+    initializeInstance, sanitizeCaps, getInstancesData,
+    transformExpectArgs
 } from '../src/utils.js'
+
+// @ts-expect-error -- Simulate global expect object for testing transformExpectArgs
+global.expect = wdioExpect
 
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
 vi.mock('webdriverio', () => import(path.join(process.cwd(), '__mocks__', 'webdriverio')))
@@ -22,6 +26,18 @@ describe('utils', () => {
     })
 
     describe('initializeInstance', () => {
+        /**
+         * @wdio/local-runner gives each worker its own log file
+         */
+        it('keeps the log file of the worker', async () => {
+            const { enableFileLogging } = await import('@wdio/utils')
+            vi.mocked(enableFileLogging).mockClear()
+
+            await initializeInstance({ outputDir: '/logs' } as WebdriverIO.Config, { browserName: 'chrome' })
+
+            expect(enableFileLogging).toHaveBeenCalledWith('/logs', { keepLogPath: true })
+        })
+
         it('should attach to an existing session if sessionId is within config', async () => {
             const config: ConfigWithSessionId = {
                 sessionId: '123',
@@ -46,11 +62,11 @@ describe('utils', () => {
 
             expect(attach).toBeCalledWith({ ...attachParams, options: attachParams })
             expect(config.capabilities).toEqual({ browserName: 'chrome' })
-            expect(multiremote).toHaveBeenCalledTimes(0)
+            expect(multiRemote).toHaveBeenCalledTimes(0)
             expect(remote).toHaveBeenCalledTimes(0)
         })
 
-        it('should run multiremote tests if flag is given', async () => {
+        it('should run multi-remote tests if flag is given', async () => {
             const capabilities = { someBrowser: { browserName: 'chrome' } }
             await initializeInstance(
                 // @ts-ignore test invalid params
@@ -59,7 +75,7 @@ describe('utils', () => {
                 true
             )
             expect(attach).toHaveBeenCalledTimes(0)
-            expect(multiremote).toBeCalledWith({
+            expect(multiRemote).toBeCalledWith({
                 someBrowser: {
                     browserName: 'chrome',
                     foo: 'bar'
@@ -78,7 +94,7 @@ describe('utils', () => {
                 maxInstances: 123
             })
             expect(attach).toHaveBeenCalledTimes(0)
-            expect(multiremote).toHaveBeenCalledTimes(0)
+            expect(multiRemote).toHaveBeenCalledTimes(0)
             expect(remote).toBeCalledWith({
                 foo: 'bar',
                 maxInstances: 123,
@@ -108,7 +124,7 @@ describe('utils', () => {
 
         afterEach(() => {
             vi.mocked(attach).mockClear()
-            vi.mocked(multiremote).mockClear()
+            vi.mocked(multiRemote).mockClear()
             vi.mocked(remote).mockClear()
         })
     })
@@ -132,9 +148,8 @@ describe('utils', () => {
     })
 
     describe('getInstancesData', () => {
-        it('isMultiremote = true', () => {
-            const { sessionId, isW3C, protocol, hostname, port, path, queryParams } = {
-                isW3C: true,
+        it('isMultiRemote = true', () => {
+            const { sessionId, protocol, hostname, port, path, queryParams } = {
                 sessionId: 'bar',
                 protocol: 'http',
                 hostname: 'localhost',
@@ -146,18 +161,104 @@ describe('utils', () => {
             expect(getInstancesData({
                 instances: ['foo'],
                 getInstance: vi.fn().mockReturnValue({
-                    isW3C,
                     sessionId,
                     options: { protocol, hostname, port, path, queryParams }
                 })
             // @ts-expect-error
             } as unknown as WebdriverIO.MultiRemoteBrowserObject, true))
-                .toEqual({ foo: { sessionId, isW3C, protocol, hostname, port, path, queryParams } })
+                .toEqual({ foo: { sessionId, protocol, hostname, port, path, queryParams } })
         })
 
-        it('isMultiremote = false', () => {
+        it('isMultiRemote = false', () => {
             expect(getInstancesData({} as any, false))
                 .toEqual(undefined)
+        })
+    })
+
+    describe(transformExpectArgs, () => {
+        it('should return primitives as-is', () => {
+            expect(transformExpectArgs('hello')).toBe('hello')
+            expect(transformExpectArgs(42)).toBe(42)
+            expect(transformExpectArgs(null)).toBe(null)
+            expect(transformExpectArgs(undefined)).toBe(undefined)
+            expect(transformExpectArgs(true)).toBe(true)
+        })
+
+        it('should return a plain object that is not a serialized matcher as-is', () => {
+            const obj = { foo: 'bar' }
+            expect(transformExpectArgs(obj)).toBe(obj)
+        })
+
+        it('should recursively transform arrays', () => {
+            const result = transformExpectArgs([1, 'two', null]) as unknown[]
+            expect(result).toEqual([1, 'two', null])
+        })
+
+        it('should transform a serialized ArrayContaining matcher', () => {
+            const arg = { $$typeof: 'ArrayContaining', sample: [1, 2, 3] }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.arrayContaining([1, 2, 3]))
+        })
+
+        it('should transform a serialized ObjectContaining matcher', () => {
+            const arg = { $$typeof: 'ObjectContaining', sample: { key: 'value' } }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.objectContaining({ key: 'value' }))
+        })
+
+        it('should transform a serialized StringContaining matcher', () => {
+            const arg = { $$typeof: 'StringContaining', sample: 'foo' }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.stringContaining('foo'))
+        })
+
+        it('should transform a serialized StringMatching matcher', () => {
+            const arg = { $$typeof: 'StringMatching', sample: /foo/ }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.stringMatching(/foo/))
+        })
+
+        it('should transform a serialized CloseTo matcher', () => {
+            const arg = { $$typeof: 'CloseTo', sample: 1.5 }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.closeTo(1.5))
+        })
+
+        it('should transform a serialized OneOf matcher, spreading the sample array as arguments', () => {
+            const arg = { $$typeof: 'OneOf', sample: ['a', 'b', 'c'] }
+            const result = transformExpectArgs(arg)
+            // expect.oneOf spreads the sample entries as individual arguments
+            expect(result).toEqual(wdioExpect.oneOf('a', 'b', 'c'))
+        })
+
+        it('should apply inverse (expect.not) when inverse flag is set', () => {
+            const arg = { $$typeof: 'StringContaining', sample: 'foo', inverse: true }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.not.stringContaining('foo'))
+        })
+
+        it('should recursively transform nested matchers inside an array', () => {
+            const arg = [
+                { $$typeof: 'StringContaining', sample: 'hello' },
+                { $$typeof: 'ArrayContaining', sample: [1, 2] }
+            ]
+            const result = transformExpectArgs(arg) as unknown[]
+            expect(result[0]).toEqual(expect.stringContaining('hello'))
+            expect(result[1]).toEqual(expect.arrayContaining([1, 2]))
+        })
+
+        it('should recursively transform a nested matcher inside sample', () => {
+            const arg = {
+                $$typeof: 'ObjectContaining',
+                sample: { $$typeof: 'StringContaining', sample: 'nested' }
+            }
+            const result = transformExpectArgs(arg)
+            expect(result).toEqual(expect.objectContaining(expect.stringContaining('nested')))
+        })
+
+        it('should reject an inverse OneOf matcher because expect.not has no oneOf', () => {
+            const arg = { $$typeof: 'OneOf', sample: ['a', 'b'], inverse: true }
+            expect(() => transformExpectArgs(arg)).toThrow('Matcher "oneOf" is not supported by expect-webdriverio')
         })
     })
 })

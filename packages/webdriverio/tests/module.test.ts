@@ -1,14 +1,35 @@
 import { describe, it, beforeEach, expect, vi, afterEach } from 'vitest'
+import os from 'node:os'
 import path from 'node:path'
 import WebDriver from 'webdriver'
 import logger from '@wdio/logger'
 import { validateConfig } from '@wdio/config'
 
 import detectBackend from '../src/utils/detectBackend.js'
-import { remote, multiremote, attach, Key, SevereServiceError } from '../src/index.js'
+import { remote, multiRemote, attach, Key, SevereServiceError, deviceDescriptorsSource } from '../src/index.js'
 import { registerSessionManager } from '../src/session/index.js'
+import type * as DriverModule from '../src/utils/driver.js'
 
 vi.mock('../src/utils/detectBackend', () => ({ default: vi.fn() }))
+/**
+ * `getProtocolDriver` imports `webdriver` dynamically. When `multiRemote` starts
+ * several sessions at once, Vitest can hand the concurrent imports the real
+ * package instead of the mock (https://github.com/vitest-dev/vitest/issues/7040),
+ * so pin the driver to the mocked class.
+ */
+vi.mock('../src/utils/driver.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof DriverModule>()
+    const { default: WebDriverMock } = await import('webdriver')
+    return {
+        ...actual,
+        getProtocolDriver: async (options: Parameters<typeof actual.getProtocolDriver>[0]) => {
+            const result = await actual.getProtocolDriver(options)
+            return (options.automationProtocol ?? 'webdriver') === 'webdriver'
+                ? { ...result, Driver: WebDriverMock }
+                : result
+        }
+    }
+})
 vi.mock('../src/session/index.js', () => ({ registerSessionManager: vi.fn() }))
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
 vi.mock('webdriver', () => {
@@ -27,7 +48,7 @@ vi.mock('webdriver', () => {
     newSessionMock.mockImplementation((params, cb) => {
         const result = cb(client, params)
         // @ts-ignore mock feature
-        if (params.test_multiremote) {
+        if (params.test_multi_remote) {
             result.options = { logLevel: 'error' }
         }
         return result
@@ -76,9 +97,10 @@ describe('WebdriverIO module interface', () => {
     it('should provide all exports', () => {
         expect(typeof remote).toBe('function')
         expect(typeof attach).toBe('function')
-        expect(typeof multiremote).toBe('function')
+        expect(typeof multiRemote).toBe('function')
         expect(typeof Key).toBe('object')
         expect(typeof SevereServiceError).toBe('function')
+        expect(deviceDescriptorsSource['iPhone 15'].viewport).toEqual({ width: 393, height: 659 })
     })
 
     describe('remote function', () => {
@@ -91,6 +113,21 @@ describe('WebdriverIO module interface', () => {
             expect(browser.sessionId).toBe('foobar-123')
             expect(logger.setLogLevelsConfig).toBeCalledWith(undefined, 'trace')
             expect(registerSessionManager).toBeCalledTimes(1)
+        })
+
+        /**
+         * a spec that calls `remote()` in a worker: its logs stay in the worker's log file
+         */
+        it('keeps a log file that is already set', async () => {
+            const outputDir = path.join(os.tmpdir(), 'wdio-remote-log-path')
+            process.env.WDIO_LOG_PATH = path.join(outputDir, 'spec-0-0.log')
+
+            try {
+                await remote({ outputDir, capabilities: { browserName: 'chrome' } })
+                expect(process.env.WDIO_LOG_PATH).toBe(path.join(outputDir, 'spec-0-0.log'))
+            } finally {
+                delete process.env.WDIO_LOG_PATH
+            }
         })
 
         it('allows to propagate a modifier', async () => {
@@ -202,50 +239,171 @@ describe('WebdriverIO module interface', () => {
                 expect.any(Function),
                 expect.any(Object),
                 expect.any(Function),
-                expect.arrayContaining([
-                    'getElement',
-                    'getElements',
-                    'emit',
-                ])
+                expect.arrayContaining(['getElement', 'getElements'])
             )
+            // 'emit' is an event function, not an element command
+            expect(vi.mocked(WebDriver.newSession).mock.calls.every((call) => !(call[4] as string[]).includes('emit'))).toBe(true)
         })
     })
 
-    describe('multiremote', () => {
+    describe('multi-remote', () => {
+        it('deletes sessions that already started when another instance fails to start', async () => {
+            const started = {
+                sessionId: 'started-session',
+                options: { logLevel: 'error' },
+                capabilities: {},
+                addCommand: vi.fn(),
+                overwriteCommand: vi.fn(),
+                strategies: new Map(),
+                deleteSession: vi.fn().mockResolvedValue(undefined)
+            }
+            let calls = 0
+            let releaseStarted = () => {}
+            const startedGate = new Promise<void>((resolve) => {
+                releaseStarted = resolve
+            })
+            const original = vi.mocked(WebDriver.newSession).getMockImplementation()
+            vi.mocked(WebDriver.newSession).mockImplementation((params: any, cb: any) => {
+                calls += 1
+                if (params.capabilities?.browserName === 'firefox') {
+                    return Promise.reject(new Error('second session failed'))
+                }
+                return startedGate.then(() => {
+                    const result = cb(started, params)
+                    result.options = { logLevel: 'error' }
+                    return result
+                })
+            })
+
+            try {
+                const pending = multiRemote({
+                    browserA: {
+                        automationProtocol: 'webdriver',
+                        capabilities: { browserName: 'chrome' }
+                    },
+                    browserB: {
+                        automationProtocol: 'webdriver',
+                        capabilities: { browserName: 'firefox' }
+                    }
+                })
+                // Startup can reject before the assertion below is attached.
+                void pending.catch(() => {})
+                await vi.waitFor(() => {
+                    expect(calls).toBe(2)
+                })
+                expect(started.deleteSession).not.toHaveBeenCalled()
+                releaseStarted()
+                await expect(pending).rejects.toThrow('second session failed')
+                expect(started.deleteSession).toHaveBeenCalledTimes(1)
+            } finally {
+                vi.mocked(WebDriver.newSession).mockImplementation(original!)
+            }
+        })
+
+        it('closes a live session when another startup fails while a third is still connecting', async () => {
+            const live = {
+                sessionId: 'live-session',
+                options: { logLevel: 'error' },
+                capabilities: {},
+                addCommand: vi.fn(),
+                overwriteCommand: vi.fn(),
+                strategies: new Map(),
+                deleteSession: vi.fn().mockResolvedValue(undefined)
+            }
+            const slow = {
+                sessionId: 'slow-session',
+                options: { logLevel: 'error' },
+                capabilities: {},
+                addCommand: vi.fn(),
+                overwriteCommand: vi.fn(),
+                strategies: new Map(),
+                deleteSession: vi.fn().mockResolvedValue(undefined)
+            }
+            let releaseSlow = () => {}
+            const slowGate = new Promise<void>((resolve) => {
+                releaseSlow = resolve
+            })
+            const original = vi.mocked(WebDriver.newSession).getMockImplementation()
+            vi.mocked(WebDriver.newSession).mockImplementation((params: any, cb: any) => {
+                const browserName = params.capabilities?.browserName
+                if (browserName === 'safari') {
+                    return slowGate.then(() => {
+                        const result = cb(slow, params)
+                        result.options = { logLevel: 'error' }
+                        return result
+                    })
+                }
+                if (browserName === 'firefox') {
+                    return Promise.reject(new Error('second session failed'))
+                }
+                const result = cb(live, params)
+                result.options = { logLevel: 'error' }
+                return result
+            })
+
+            try {
+                const pending = multiRemote({
+                    browserA: {
+                        automationProtocol: 'webdriver',
+                        capabilities: { browserName: 'chrome' }
+                    },
+                    browserB: {
+                        automationProtocol: 'webdriver',
+                        capabilities: { browserName: 'firefox' }
+                    },
+                    browserC: {
+                        automationProtocol: 'webdriver',
+                        capabilities: { browserName: 'safari' }
+                    }
+                })
+                // Startup can reject before the assertion below is attached.
+                void pending.catch(() => {})
+                await vi.waitFor(() => {
+                    expect(live.deleteSession).toHaveBeenCalledTimes(1)
+                })
+                await expect(pending).rejects.toThrow('second session failed')
+                expect(slow.deleteSession).not.toHaveBeenCalled()
+                releaseSlow()
+                await vi.waitFor(() => {
+                    expect(slow.deleteSession).toHaveBeenCalledTimes(1)
+                })
+            } finally {
+                releaseSlow()
+                vi.mocked(WebDriver.newSession).mockImplementation(original!)
+            }
+        })
+
         it('register multiple clients', async () => {
-            await multiremote({
+            await multiRemote({
                 browserA: {
                     // @ts-ignore mock feature
-                    test_multiremote: true,
+                    test_multi_remote: true,
                     automationProtocol: 'webdriver',
                     capabilities: { browserName: 'chrome' }
                 },
                 browserB: {
                     // @ts-ignore mock feature
-                    test_multiremote: true,
+                    test_multi_remote: true,
                     automationProtocol: 'webdriver',
                     capabilities: { browserName: 'firefox' }
                 }
             })
             expect(WebDriver.attachToSession).toBeCalled()
-            /**
-             * started to be flaky in CI
-             */
-            // expect(vi.mocked(WebDriver.newSession).mock.calls).toHaveLength(2)
+            expect(WebDriver.newSession).toHaveBeenCalledTimes(2)
         })
 
         it('should attach custom locators to the strategies', async () => {
-            const driver = await multiremote({
+            const driver = await multiRemote({
                 browserA: {
                     automationProtocol: 'webdriver',
                     // @ts-ignore mock feature
-                    test_multiremote: true,
+                    test_multi_remote: true,
                     capabilities: { browserName: 'chrome' }
                 },
                 browserB: {
                     automationProtocol: 'webdriver',
                     // @ts-ignore mock feature
-                    test_multiremote: true,
+                    test_multi_remote: true,
                     capabilities: { browserName: 'firefox' }
                 }
             })
@@ -258,11 +416,11 @@ describe('WebdriverIO module interface', () => {
         it('throws error if trying to overwrite locator strategy', async () => {
             // @ts-ignore uses expect-webdriverio
             expect.assertions(1)
-            const driver = await multiremote({
+            const driver = await multiRemote({
                 // @ts-ignore mock feature
-                browserA: { automationProtocol: 'webdriver', test_multiremote: true, capabilities: { browserName: 'chrome' } },
+                browserA: { automationProtocol: 'webdriver', test_multi_remote: true, capabilities: { browserName: 'chrome' } },
                 // @ts-ignore mock feature
-                browserB: { automationProtocol: 'webdriver', test_multiremote: true, capabilities: { browserName: 'firefox' } }
+                browserB: { automationProtocol: 'webdriver', test_multi_remote: true, capabilities: { browserName: 'firefox' } }
             })
 
             try {
@@ -290,6 +448,34 @@ describe('WebdriverIO module interface', () => {
             await attach(browser)
             expect(WebDriver.attachToSession).toBeCalledTimes(1)
             expect(vi.mocked(WebDriver.attachToSession).mock.calls[0][0]).toMatchSnapshot()
+        })
+
+        /**
+         * the capabilities of `attach()` come from the user, e.g. the ones the
+         * session had when it was created
+         */
+        it('reads the script timeout of the attached session, not the one of its capabilities', async () => {
+            const { scriptTimeoutOf } = await import('../src/utils/scriptTimeout.js')
+            const getTimeouts = vi.fn(async () => ({ implicit: 0, pageLoad: 300_000, script: 2_000 }))
+            vi.mocked(WebDriver.attachToSession).mockReturnValueOnce({
+                sessionId: 'attached-1',
+                options: {},
+                addCommand: vi.fn(),
+                overwriteCommand: vi.fn(),
+                strategies: new Map(),
+                isWebDriver: true,
+                capabilities: { browserName: 'chrome', timeouts: { implicit: 0, pageLoad: 300_000, script: 30_000 } },
+                on: vi.fn(),
+                getTimeouts
+            } as any)
+
+            const driver = await attach({
+                sessionId: 'attached-1',
+                capabilities: { browserName: 'chrome', timeouts: { implicit: 0, pageLoad: 300_000, script: 30_000 } }
+            })
+
+            expect(await scriptTimeoutOf(driver)).toBe(2_000)
+            expect(getTimeouts).toHaveBeenCalledTimes(1)
         })
 
         it('should apply attach parameters with priority to Driver.attachToSession', async () => {
@@ -360,16 +546,16 @@ describe('WebdriverIO module interface', () => {
     })
 
     it('should use the element disable implicitWait exclusion list', async () => {
-        await multiremote({
+        await multiRemote({
             browserA: {
                 // @ts-ignore mock feature
-                test_multiremote: true,
+                test_multi_remote: true,
                 automationProtocol: 'webdriver',
                 capabilities: { browserName: 'chrome' }
             },
             browserB: {
                 // @ts-ignore mock feature
-                test_multiremote: true,
+                test_multi_remote: true,
                 automationProtocol: 'webdriver',
                 capabilities: { browserName: 'firefox' }
             }
@@ -380,13 +566,10 @@ describe('WebdriverIO module interface', () => {
             expect.any(Function),
             expect.any(Object),
             expect.any(Function),
-            expect.arrayContaining([
-                'getElement',
-                'getElements',
-                'emit',
-            ])
-
+            expect.arrayContaining(['getElement', 'getElements'])
         )
+        // 'emit' is an event function, not an element command
+        expect(vi.mocked(WebDriver.newSession).mock.calls.every((call) => !(call[4] as string[]).includes('emit'))).toBe(true)
         expect(WebDriver.newSession).toHaveBeenCalledTimes(2)
     })
 

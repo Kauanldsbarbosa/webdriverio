@@ -20,6 +20,17 @@ declare global {
     }
 }
 
+const configStrictSelectors: WebdriverIO.Config = {
+    capabilities: [],
+    strictSelectors: false
+}
+
+const configStrictSelectorsWrongType: WebdriverIO.Config = {
+    capabilities: [],
+    // @ts-expect-error strictSelectors needs to be a boolean
+    strictSelectors: 'yes'
+}
+
 const configA: WebdriverIO.Config = {
     // @ts-expect-error should not be available
     beforeFeature () {
@@ -37,6 +48,18 @@ const configA: WebdriverIO.Config = {
         name.toLowerCase()
         const title = await browser.getTitle()
         title.slice(0, 1)
+    },
+
+    beforeAssertion (params) {
+        expectType<string>(params.matcherName)
+    },
+
+    afterAssertion (params) {
+        expectType<string>(params.matcherName)
+        expectType<boolean>(params.result.pass)
+        expectType<string>(params.result.message())
+        // @ts-expect-error the boolean of the result is `pass`
+        params.result.result
     }
 }
 
@@ -58,15 +81,16 @@ const config: WebdriverIO.Config = {
             }
         }],
         // @ts-expect-error test wrong parameter
-        ['browserstack', {
-            browserstackLocal: true,
-            forcedStop: 'no'
-        }],
-        // @ts-expect-error test wrong parameter
         ['devtools', {
             coverageReporter: {
                 enable: true,
                 type: 'foo'
+            }
+        }],
+        ['lighthouse', {
+            coverageReporter: {
+                enable: true,
+                type: 'json'
             }
         }],
         ['firefox-profile', {

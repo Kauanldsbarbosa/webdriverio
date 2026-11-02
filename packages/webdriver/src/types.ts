@@ -9,14 +9,13 @@ import type { CommandResponse } from './bidi/localTypes.js'
 
 import type { RequestStartEvent, RequestEndEvent, RequestPerformanceEvent, RequestRetryEvent } from './request/types.js'
 
-export interface JSONWPCommandError extends Error {
+export interface SessionRequestError extends Error {
     code?: string
     statusCode?: string
     statusMessage?: string
 }
 
 export interface SessionFlags {
-    isW3C: boolean
     isChromium: boolean
     isFirefox: boolean
     isAndroid: boolean
@@ -56,7 +55,7 @@ export interface WebDriverResultEvent {
 type WebDriverClassicEvents = {
     command: WebDriverCommandEvent
     result: WebDriverResultEvent
-    bidiCommand: Omit<CommandData, 'id'>,
+    bidiCommand: CommandData,
     bidiResult: CommandResponse,
     'request.performance': RequestPerformanceEvent
     'request.retry': RequestRetryEvent
@@ -72,8 +71,8 @@ export type EventMap = {
     [Event in EventData['method']]: GetParam<EventData, Event>
 } & WebDriverClassicEvents
 interface BidiEventHandler {
-    on<K extends keyof EventMap>(event: K, listener: (this: Client, param: EventMap[K]) => void): this
-    once<K extends keyof EventMap>(event: K, listener: (this: Client, param: EventMap[K]) => void): this
+    on<K extends keyof EventMap>(event: K, listener: (this: Client, param: EventMap[K]) => unknown): this
+    once<K extends keyof EventMap>(event: K, listener: (this: Client, param: EventMap[K]) => unknown): this
 }
 
 export interface BaseClient extends EventEmitter, SessionFlags {

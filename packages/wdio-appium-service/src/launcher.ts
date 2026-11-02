@@ -1,19 +1,18 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
-import url from 'node:url'
 import path from 'node:path'
-import { spawn, type ChildProcessByStdio } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process'
 import { type Readable } from 'node:stream'
 import { promisify } from 'node:util'
 
 import logger from '@wdio/logger'
 import getPort from 'get-port'
-import { resolve } from 'import-meta-resolve'
 import { isCloudCapability } from '@wdio/config'
 import { SevereServiceError } from 'webdriverio'
 import type { Services, Capabilities, Options } from '@wdio/types'
 import { isAppiumCapability } from '@wdio/utils'
+import { resolveOptionalDependency } from '@wdio/utils/node'
 
 import { getFilePath, formatCliArgs } from './utils.js'
 import type { AppiumServerArguments, AppiumServiceConfig } from './types.js'
@@ -30,6 +29,10 @@ const DEFAULT_CONNECTION = {
     path: '/'
 }
 const APPIUM_START_TIMEOUT = 30 * 1000
+const MIN_APPIUM_MAJOR = 3
+const APPIUM3_UPGRADE_HINT =
+    'WebdriverIO 10 requires Appium 3. Install or upgrade with `npm i -D appium@^3`, ' +
+    'then run `appium driver update installed`. Stay on WebdriverIO 9 if you cannot upgrade the server.'
 
 export default class AppiumLauncher implements Services.ServiceInstance {
     private readonly _logPath?: string
@@ -79,7 +82,7 @@ export default class AppiumLauncher implements Services.ServiceInstance {
         let capabilityWasUpdated = false
 
         /**
-         * Multiremote sessions
+         * Multi-remote sessions
          */
         if (!Array.isArray(this._capabilities)) {
             for (const [, capability] of Object.entries(this._capabilities)) {
@@ -102,7 +105,7 @@ export default class AppiumLauncher implements Services.ServiceInstance {
             const w3cCap = cap as Capabilities.W3CCapabilities
 
             /**
-             * Parallel Multiremote
+             * Parallel multi-remote
              */
             if (Object.values(cap).length > 0 && Object.values(cap).every(c => typeof c === 'object' && c.capabilities)) {
                 Object.values(cap).forEach(c => {
@@ -161,6 +164,8 @@ export default class AppiumLauncher implements Services.ServiceInstance {
          * Append cli arguments
          */
         this._appiumCliArgs.push(...formatCliArgs({ ...this._args }))
+
+        await AppiumLauncher.ensureAppiumVersion(this._options.command)
 
         /**
          * start Appium
@@ -354,19 +359,88 @@ export default class AppiumLauncher implements Services.ServiceInstance {
         this._process.stderr.pipe(logStream)
     }
 
-    private static async _getAppiumCommand(command = 'appium') {
-        try {
-            const entryPath = await resolve(command, import.meta.url)
-            return url.fileURLToPath(entryPath)
-        } catch (err) {
-            const errorMessage = (
-                'Appium is not installed locally. Please install via e.g. `npm i --save-dev appium`.\n' +
-                'If you use globally installed appium please add: `appium: { command: \'appium\' }`\n' +
-                'to your wdio.conf.js!\n\n' +
-                (err as Error).stack
-            )
+    /**
+     * Refuse to launch Appium 1.x / 2.x. Prefer reading the local package version;
+     * fall back to `<command> --version` when an explicit binary is configured.
+     */
+    static async ensureAppiumVersion(command?: string) {
+        const version = command
+            ? AppiumLauncher._readCommandVersion(command)
+            : await AppiumLauncher._readLocalVersion()
+        AppiumLauncher._assertMinVersion(version)
+    }
+
+    private static _assertMinVersion(version: string) {
+        const major = Number.parseInt(version.replace(/^v/i, '').split('.')[0] || '', 10)
+        if (Number.isNaN(major) || major < MIN_APPIUM_MAJOR) {
+            const errorMessage =
+                `Detected Appium ${version}, but ${APPIUM3_UPGRADE_HINT}`
             log.error(errorMessage)
             throw new SevereServiceError(errorMessage)
         }
+    }
+
+    private static _readCommandVersion(command: string) {
+        try {
+            /**
+             * On Windows, `appium` is typically a `.cmd` shim. `execFileSync` cannot
+             * run those directly, so mirror the launch path and invoke via `cmd /c`.
+             */
+            const useWindowsCmd = os.platform() === 'win32'
+            const bin = useWindowsCmd ? 'cmd' : command
+            const args = useWindowsCmd ? ['/c', command, '--version'] : ['--version']
+            return execFileSync(bin, args, {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env, NODE_OPTIONS: '' }
+            }).trim().split(/\r?\n/).find(Boolean) || ''
+        } catch (err) {
+            const errorMessage =
+                `Could not determine Appium version from \`${command} --version\`. ${APPIUM3_UPGRADE_HINT}\n\n` +
+                (err as Error).stack
+            log.error(errorMessage)
+            throw new SevereServiceError(errorMessage)
+        }
+    }
+
+    private static async _readLocalVersion() {
+        const entryPath = await AppiumLauncher._getAppiumCommand()
+        let dir = path.dirname(entryPath)
+        for (let i = 0; i < 10; i++) {
+            const pkgPath = path.join(dir, 'package.json')
+            if (fs.existsSync(pkgPath)) {
+                try {
+                    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { name?: string, version?: string }
+                    if (pkg.name === 'appium' && pkg.version) {
+                        return pkg.version
+                    }
+                } catch {
+                    // keep walking
+                }
+            }
+            const parent = path.dirname(dir)
+            if (parent === dir) {
+                break
+            }
+            dir = parent
+        }
+        const errorMessage =
+            `Could not read the local Appium package version. ${APPIUM3_UPGRADE_HINT}`
+        log.error(errorMessage)
+        throw new SevereServiceError(errorMessage)
+    }
+
+    private static async _getAppiumCommand(command = 'appium') {
+        const entryPath = await resolveOptionalDependency(command, { from: import.meta.url })
+        if (entryPath) {
+            return entryPath
+        }
+        const errorMessage = (
+            'Appium is not installed locally. Please install via e.g. `npm i --save-dev appium@^3`.\n' +
+            'If you use globally installed appium please add: `appium: { command: \'appium\' }`\n' +
+            'to your wdio.conf.js!'
+        )
+        log.error(errorMessage)
+        throw new SevereServiceError(errorMessage)
     }
 }

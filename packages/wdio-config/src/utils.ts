@@ -13,12 +13,14 @@ export function applyHeadlessFlag(caps: WebdriverIO.Capabilities, headless: bool
     const target = (caps as { alwaysMatch?: WebdriverIO.Capabilities }).alwaysMatch || caps
     const browser = (target.browserName || '').toLowerCase()
 
-    // Multiremote: object whose values are individual capability objects
+    // Multi-remote: object whose values are the options of each instance,
+    // with the capabilities of the instance under `capabilities`
     if (!browser && !('alwaysMatch' in caps)) {
         for (const key of Object.keys(caps)) {
             const val = (caps as Record<string, unknown>)[key]
-            if (val && typeof val === 'object' && (val as WebdriverIO.Capabilities).browserName) {
-                applyHeadlessFlag(val as WebdriverIO.Capabilities, headless)
+            const instanceCaps = (val as { capabilities?: unknown } | undefined)?.capabilities || val
+            if (instanceCaps && typeof instanceCaps === 'object' && ('alwaysMatch' in instanceCaps || (instanceCaps as WebdriverIO.Capabilities).browserName)) {
+                applyHeadlessFlag(instanceCaps as WebdriverIO.Capabilities, headless)
             }
         }
         return caps
@@ -105,12 +107,17 @@ export function validateConfig<T>(defaults: Options.Definition<T>, options: T, k
         /**
          * check if options is given
          */
-        if (typeof options[name] === 'undefined' && !expectedOption.default && expectedOption.required) {
+        const hasDefault = typeof expectedOption.default !== 'undefined'
+
+        if (typeof options[name] === 'undefined' && !hasDefault && expectedOption.required) {
             throw new Error(`Required option "${name.toString()}" is missing`)
         }
 
-        if (typeof options[name] === 'undefined' && expectedOption.default) {
-            params[name] = expectedOption.default
+        /**
+         * note: falsy defaults such as `false`, `0` or `''` are applied as well
+         */
+        if (typeof options[name] === 'undefined' && hasDefault) {
+            params[name] = expectedOption.default as T[keyof T]
         }
 
         if (typeof options[name] !== 'undefined') {

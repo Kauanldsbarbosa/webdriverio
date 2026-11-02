@@ -51,6 +51,17 @@ export interface AllureReporterOptions extends ReporterConfig {
      * Note that setting this does not modify the actual environment variables.
      */
     reportedEnvironmentVars?: Record<string, string>
+    /**
+     * Include browser/OS version in Allure `historyId` (`false` by default).
+     *
+     * By default `historyId` is derived from the test title plus the browser or
+     * device family (`chrome`, `iphone 12`, …) so trends survive Chrome and
+     * platform updates. Set this to `true` if the same test runs against
+     * multiple versions of the same browser/device (e.g. iOS 14 vs iOS 15)
+     * and those runs should keep separate Allure history trends. Allure
+     * parameters still include the version for display either way.
+     */
+    includeVersionInHistoryId?: boolean
 }
 
 export type WDIORunnable =
@@ -191,7 +202,7 @@ export type WDIOSuiteStartMessage = {
 
 export type WDIOSuiteEndMessage = {
     type: 'allure:suite:end'
-    data: {}
+    data: { writeTest?: boolean }
 }
 
 export type WDIOTestStartMessage = {
@@ -199,6 +210,9 @@ export type WDIOTestStartMessage = {
     data: {
         name: string
         start: number
+        uuid?: string
+        // the result of a failed hook next to the test that ended: the next hooks stay on that test
+        standalone?: boolean
     }
 }
 
@@ -209,6 +223,7 @@ export type WDIOTestInfoMessage = {
         fullTitle?: string
         historyId?: string
         testCaseId?: string
+        titlePath?: string[]
     }
 }
 
@@ -217,6 +232,7 @@ export type WDIOTestEndMessage = {
     data: {
         status: AllureStatus
         statusDetails?: StatusDetails
+        start?: number
         stop?: number
         duration?: number
         stage?: Stage
@@ -229,6 +245,8 @@ export type WDIOHookStartMessage = {
         name: string
         type: 'before' | 'after'
         start: number
+        // from the hook kind of the framework: an all-hook of the root suite, another all-hook, an each-hook; else the title decides
+        scope?: 'root' | 'all' | 'each'
     }
 }
 

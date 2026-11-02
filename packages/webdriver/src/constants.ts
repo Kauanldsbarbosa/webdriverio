@@ -1,7 +1,20 @@
 import type { Options } from '@wdio/types'
 
-import { environment } from './environment.js'
 import type { RemoteConfig } from './types.js'
+
+/**
+ * Defined here, not in `bidi/core.ts`: `bidi/core.ts` imports this file through
+ * `bidi/utils.ts`, so a value imported from there was still undefined when
+ * `DEFAULTS` was created.
+ */
+export const DEFAULT_RESPONSE_TIMEOUT = 1000 * 180
+export const DEFAULT_CONNECT_TIMEOUT = 1000 * 10
+
+/**
+ * The `name` of the error of a command that can get no result because its session or
+ * its WebDriver BiDi connection ended, see `isSessionEndedError`.
+ */
+export const SESSION_ENDED_ERROR = 'session ended'
 
 export const DEFAULTS: Options.Definition<Required<RemoteConfig>> = {
     /**
@@ -93,6 +106,35 @@ export const DEFAULTS: Options.Definition<Required<RemoteConfig>> = {
         default: 3
     },
     /**
+     * Timeout for a WebDriver Bidi command to receive a response from the browser
+     */
+    bidiResponseTimeout: {
+        type: 'number',
+        default: DEFAULT_RESPONSE_TIMEOUT,
+        validate: (timeout: number): boolean => {
+            if (!Number.isFinite(timeout) || timeout <= 0) {
+                throw new TypeError('The option "bidiResponseTimeout" needs to be a positive number')
+            }
+
+            return true
+        }
+    },
+    /**
+     * Timeout for the browser to accept the WebDriver Bidi connection. After it the
+     * session continues with WebDriver Classic. Node.js only.
+     */
+    bidiConnectTimeout: {
+        type: 'number',
+        default: DEFAULT_CONNECT_TIMEOUT,
+        validate: (timeout: number): boolean => {
+            if (!Number.isFinite(timeout) || timeout <= 0) {
+                throw new TypeError('The option "bidiConnectTimeout" needs to be a positive number')
+            }
+
+            return true
+        }
+    },
+    /**
      * Override default agent
      */
     logLevels: {
@@ -139,8 +181,7 @@ export const DEFAULTS: Options.Definition<Required<RemoteConfig>> = {
      * when attempting to start a session.
      */
     cacheDir: {
-        type: 'string',
-        default: environment.value.variables.WEBDRIVER_CACHE_DIR
+        type: 'string'
     },
     /**
      * Mask sensitive data in logs by replacing matching string or all captured groups for the provided regular expressions as string

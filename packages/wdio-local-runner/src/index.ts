@@ -1,6 +1,6 @@
 import logger from '@wdio/logger'
 import { WritableStreamBuffer } from 'stream-buffers'
-import { XvfbManager } from '@wdio/xvfb'
+import { startDisplayDaemonFromConfig, type RunningDaemon } from '@wdio/display-server'
 import type { Workers } from '@wdio/types'
 
 import WorkerInstance from './worker.js'
@@ -18,8 +18,7 @@ export interface RunArgs extends Workers.WorkerRunPayload {
 
 export default class LocalRunner {
     workerPool: Record<string, WorkerInstance> = {}
-    private xvfbInitialized = false
-    private xvfbManager: XvfbManager
+    private daemon: RunningDaemon | null = null
 
     stdout = new WritableStreamBuffer(BUFFER_OPTIONS)
     stderr = new WritableStreamBuffer(BUFFER_OPTIONS)
@@ -27,23 +26,17 @@ export default class LocalRunner {
     constructor(
         private _options: never,
         protected config: WebdriverIO.Config
-    ) {
-        // Initialize XvfbManager
-        this.xvfbManager = new XvfbManager({
-            enabled: this.config.autoXvfb !== false,
-            autoInstall: this.config.xvfbAutoInstall,
-            autoInstallMode: this.config.xvfbAutoInstallMode,
-            autoInstallCommand: this.config.xvfbAutoInstallCommand,
-            xvfbMaxRetries: this.config.xvfbMaxRetries,
-            xvfbRetryDelay: this.config.xvfbRetryDelay
-        })
-    }
+    ) {}
 
     /**
-     * initialize local runner environment
+     * Runs before any service `onPrepare`, so drivers those services start inherit the display.
      */
     async initialize() {
-        // XVFB initialization is handled lazily during first worker creation, to access capabilities for headless detection
+        try {
+            this.daemon = await startDisplayDaemonFromConfig(this.config)
+        } catch (error) {
+            log.warn('Failed to start a display server; continuing without a virtual display:', error)
+        }
     }
 
     getWorkerCount() {
@@ -51,12 +44,6 @@ export default class LocalRunner {
     }
 
     async run({ command, args, ...workerOptions }: RunArgs) {
-        // Initialize XVFB lazily on first worker creation
-        if (!this.xvfbInitialized) {
-            await this.initializeXvfb(workerOptions)
-            this.xvfbInitialized = true
-        }
-
         /**
          * adjust max listeners on stdout/stderr when creating listeners
          */
@@ -71,36 +58,10 @@ export default class LocalRunner {
             workerOptions,
             this.stdout,
             this.stderr,
-            this.xvfbManager
         )
         this.workerPool[workerOptions.cid] = worker
         await worker.postMessage(command, args)
         return worker
-    }
-
-    /**
-     * Initialize XVFB with capability-aware detection
-     */
-    private async initializeXvfb(workerOptions: Workers.WorkerRunPayload) {
-        // Skip Xvfb initialization if disabled
-        if (this.config.autoXvfb === false) {
-            log.info('Skipping automatic Xvfb initialization (disabled by config)')
-            return
-        }
-
-        // Initialize Xvfb if needed for headless testing
-        try {
-            const capabilities = workerOptions.caps
-            const xvfbInitialized = await this.xvfbManager.init(capabilities)
-            if (xvfbInitialized) {
-                log.info('Xvfb is ready for use')
-            }
-        } catch (error) {
-            log.warn(
-                'Failed to initialize Xvfb, continuing without virtual display:',
-                error
-            )
-        }
     }
 
     /**
@@ -121,7 +82,7 @@ export default class LocalRunner {
                 server,
                 sessionId,
                 config,
-                isMultiremote,
+                isMultiRemote,
                 instances,
             } = worker
             let payload: Partial<Workers.WorkerMessageArgs> = {}
@@ -130,12 +91,18 @@ export default class LocalRunner {
              * put connection information to payload if in watch mode
              * in order to attach to browser session and kill it
              */
-            if (config && config.watch && (sessionId || isMultiremote)) {
+            if (config && config.watch && (sessionId || isMultiRemote)) {
                 payload = {
-                    config: { ...server, sessionId, ...config },
+                    /**
+                     * The worker's own session id wins over any id stored on
+                     * config. Workers used to share one config object, so the
+                     * last session started would otherwise be deleted twice
+                     * and the others left open.
+                     */
+                    config: { ...server, ...config, ...(sessionId ? { sessionId } : {}) },
                     capabilities,
                     watch: true,
-                    isMultiremote,
+                    isMultiRemote,
                     instances,
                 } as unknown as Workers.WorkerMessageArgs
             } else if (!worker.isBusy) {
@@ -182,11 +149,14 @@ export default class LocalRunner {
             }, 250)
         })
 
-        // Xvfb cleanup is handled automatically by xvfb-run
-        if (this.xvfbManager.shouldRun()) {
-            log.info('Xvfb cleanup handled automatically by xvfb-run')
-        }
-
         return shutdownResult
+    }
+
+    /**
+     * Stop the display daemon. Runs after `onComplete`, so a driver or app a
+     * service started in `onPrepare` still has its display while it is torn down.
+     */
+    async dispose() {
+        await this.daemon?.stop()
     }
 }

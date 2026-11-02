@@ -1,5 +1,3 @@
-import nock from 'nock'
-import { v4 as uuidv4 } from 'uuid'
 import type { Services } from '@wdio/types'
 
 import WebDriverMock from './WebDriverMock.js'
@@ -25,12 +23,15 @@ export default class WebdriverMockService implements Services.ServiceInstance {
         // define required responses
         this._mock.command.status().times(Infinity).reply(200, { value: {} })
         this._mock.command.newSession().times(Infinity).reply(200, () => {
-            newSession.value.sessionId = uuidv4()
+            newSession.value.sessionId = crypto.randomUUID()
             return newSession
         })
         this._mock.command.deleteSession().times(2).reply(200, deleteSession)
         this._mock.command.getTitle().times(Infinity).reply(200, { value: 'Mock Page Title' })
         this._mock.command.getUrl().times(Infinity).reply(200, { value: 'https://mymockpage.com' })
+        this._mock.command.getPageSource().times(Infinity).reply(200, { value: '<html><head><title>Mock Page Title</title></head><body></body></html>' })
+        this._mock.command.getWindowHandle().times(Infinity).reply(200, { value: 'CDwindow-XXXX-XXXX' })
+        this._mock.command.getWindowHandles().times(Infinity).reply(200, { value: ['CDwindow-XXXX-XXXX'] })
         this._mock.command.getElementRect(ELEMENT_ID).times(2).reply(200, { value: { width: 1, height: 2, x: 3, y: 4 } })
         this._mock.command.getElementRect(ELEMENT_ALT).times(3).reply(200, { value: { width: 10, height: 20, x: 30, y: 40 } })
         this._mock.command.getElementRect(ELEMENT_REFETCHED).times(1).reply(200, { value: { width: 1, height: 2, x: 3, y: 4 } })
@@ -48,7 +49,8 @@ export default class WebdriverMockService implements Services.ServiceInstance {
         specs: unknown,
         browser: WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser
     ) {
-        this._browser = browser
+        // TODO: remove casting once intersect typing issue with WebdriverIO.MultiRemoteBrowser is resolved
+        this._browser = browser as WebdriverIO.Browser
 
         /**
          * register request interceptors for specific scenarios
@@ -64,13 +66,25 @@ export default class WebdriverMockService implements Services.ServiceInstance {
         this._browser.addCommand('clickScenario', this.clickScenario.bind(this))
         this._browser.addCommand('isExistingScenario', this.isExistingScenario.bind(this))
         this._browser.addCommand('isNotExistingScenario', this.isNotExistingScenario.bind(this))
-        this._browser.addCommand('multiremoteFetch', this.multiremoteFetch.bind(this))
+        this._browser.addCommand('multiRemoteFetch', this.multiRemoteFetch.bind(this))
         this._browser.addCommand('asyncIterationScenario', this.asyncIterationScenario.bind(this))
         this._browser.addCommand('parentElementChaining', this.parentNextPreviousElementChaining.bind(this))
         this._browser.addCommand('refetchElementScenario', this.refetchElementScenario.bind(this))
         this._browser.addCommand('waitForExistScenario', this.waitForExistScenario.bind(this))
         this._browser.addCommand('executeMemLeakScenario', this.executeMemLeakScenario.bind(this))
         this._browser.addCommand('requestRetryScenario', this.requestRetryScenario.bind(this))
+        this._browser.addCommand('sessionGoneScenario', this.sessionGoneScenario.bind(this))
+        this._browser.addCommand('elementListScenario', this.elementListScenario.bind(this))
+    }
+
+    /**
+     * Every `findElements` gives `count` elements, e.g. for the element list scenario of the
+     * runner benchmark.
+     */
+    elementListScenario(count: number) {
+        this.nockReset()
+        const elements = Array.from({ length: count }, (_, i) => ({ [ELEM_PROP]: `${ELEMENT_ID}-${i}` }))
+        this._mock.command.findElements().times(Infinity).reply(200, { value: elements })
     }
 
     clickScenario() {
@@ -199,7 +213,7 @@ export default class WebdriverMockService implements Services.ServiceInstance {
         this._mock.command.getElementText(ELEMENT_REFETCHED).reply(200, { value: 'some element text' })
     }
 
-    multiremoteFetch () {
+    multiRemoteFetch () {
         const elemResponse = { [ELEM_PROP]: ELEMENT_ID }
         const elem2Response = { [ELEM_PROP]: ELEMENT_REFETCHED }
 
@@ -257,8 +271,7 @@ export default class WebdriverMockService implements Services.ServiceInstance {
             value: 'mockResponse',
         })
 
-        // due to memory leaks in nock, we have to reset it from within the test
-        // before measuring our actual memory usage
+        // reset mock state from within the test before measuring memory usage
         return () => this.nockReset()
     }
 
@@ -269,9 +282,32 @@ export default class WebdriverMockService implements Services.ServiceInstance {
         this._mock.command.navigateTo().reply(200, { value: null })
     }
 
+    /**
+     * The session is already gone at the end of the run (for example after a
+     * browser crash or a cloud timeout): `DELETE /session/:sessionId` fails
+     * with "invalid session id". Registered before the default stubs, so it
+     * replaces their `deleteSession` reply.
+     */
+    sessionGoneScenario() {
+        WebDriverMock.reset()
+        this._mock = new WebDriverMock()
+        this._mock.command.deleteSession().times(Infinity).reply(404, {
+            value: {
+                error: 'invalid session id',
+                message: 'A session is either terminated or not started',
+                stacktrace: ''
+            }
+        })
+        this.init()
+    }
+
+    /**
+     * Reset all mock interceptors and re-register the default command stubs.
+     * Kept as `nockReset` for compatibility with smoke tests that call it by name.
+     */
     nockReset() {
-        nock.cleanAll()
-        nock.abortPendingRequests()
+        WebDriverMock.reset()
+        this._mock = new WebDriverMock()
         this.init()
     }
 }
@@ -287,7 +323,12 @@ export const launcher = class WebdriverMockLauncher {
         config.port = 4444
         config.runnerEnv = {
             ...(config.runnerEnv || {}),
-            WDIO_USE_NATIVE_FETCH: 'true'
+            /**
+             * Opt workers into undici + MockAgent instead of native fetch + nock.
+             * `WDIO_UNIT_TESTS` alone still selects the web fetch implementation for
+             * Vitest unit tests that stub `globalThis.fetch`.
+             */
+            WDIO_USE_UNDICI_MOCK: 'true'
         }
     }
 }

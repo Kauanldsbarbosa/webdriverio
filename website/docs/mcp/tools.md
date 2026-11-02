@@ -1,681 +1,766 @@
 ---
 id: tools
 title: Tools
+description: "Look up the tools exposed by the WebdriverIO MCP server for sessions, navigation, page snapshots, element interaction, Electron, mocking, screenshots, gestures and app lifecycle."
 ---
 
-The following tools are available through the WebdriverIO MCP server. These tools enable AI assistants to automate browsers and mobile applications.
+The WebdriverIO MCP server exposes 42 tools organized by function. Which of them your client sees depends on the active session and on the groups you enable, so read [Tool visibility](#tool-visibility) before relying on a tool being listed. Each section states any platform or group restriction that applies to its tools.
+
+Every tool except `start_session`, `attach_session`, `launch_chrome`, `list_apps`, `upload_app`, `query_docs` and `enable_tools` also takes an optional `session` argument. It names a live session, either by the `name` it was started with or by its session ID, and you can omit it to use the default session. When you pass `session`, or when more than one session is live, the result starts with a line such as `[session: admin (1a2b3c4d)]` so you can tell which session answered. The sessionless tools do not take `session`, because they either create a session or do not use one.
+
+## Tool visibility
+
+Every tool definition is sent with every model request, so the server hides tools that cannot apply yet. Three things decide what is listed.
+
+**Platform.** Some tools work only on certain platforms. They are listed only while a session of a matching platform is active. With no session active, the browser set applies. The gated tools are:
+
+| Platform      | Tools                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `browser`     | `select_option`, `press_key`                                                                                                                                       |
+| `electron`    | `execute_electron_script`, `trigger_electron_deeplink`, `get_accessibility_tree`, `get_elements`                                                                   |
+| `ios`, `android` | `tap_element`, `swipe`, `drag_and_drop`, `switch_context`, `get_contexts`, `rotate_device`, `hide_keyboard`, `get_app_state`, `get_elements`                    |
+
+Every other tool is listed on all platforms. `get_elements` is not listed on browser sessions, so read the `wdio://session/current/elements` resource there instead. Calling a tool that does not apply to the active session returns an error rather than running.
+
+**Groups.** Tools that agents rarely need are hidden until their group is enabled with `enable_tools`. A group's tools still have to match the current platform to appear.
+
+| Group        | Tools                                                    | Covers                                                                                  |
+| ------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `mocks`      | `mock`, `get_mock_calls`, `manage_mock`                  | Mock network requests or Electron APIs                                                  |
+| `cookies`    | `get_cookies`, `set_cookie`, `delete_cookies`            | Read, set and delete cookies                                                            |
+| `device`     | `emulate_device`, `set_geolocation`                      | Emulate a phone or tablet, fake the location                                            |
+| `extensions` | `open_web_extension`                                     | Install and open a browser extension                                                    |
+| `attach`     | `launch_chrome`, `attach_session`                        | Launch Chrome with remote debugging, attach to a running WebDriver or Appium session    |
+| `elements`   | `get_elements`                                           | Raw element list with bounds                                                            |
+| `cloud-apps` | `list_apps`, `upload_app`                                | Upload and list mobile apps on BrowserStack, Sauce Labs, TestMu, TestingBot and Digital.ai |
+
+**Everything up front.** Some clients ignore tool list change notifications. For those, set `WDIO_MCP_TOOLS=all` in the server environment. Every tool is then listed from the start, and the platform and group rules above no longer hide anything. In this mode `enable_tools` is not registered at all, so the server exposes 41 tools instead of 42. Calls to a tool that does not apply to the active session still return an error.
+
+### `enable_tools`
+
+Adds the tools of one or more groups to the list. The enabled groups stay enabled for the rest of the server process, and the tools appear right away in clients that honor tool list changes. Read-only and sessionless.
+
+| Parameter | Type                                                                                              | Required | Description                                            |
+| --------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------ |
+| `groups`  | array of `"mocks" \| "cookies" \| "device" \| "extensions" \| "attach" \| "elements" \| "cloud-apps"` | ✓        | Groups to enable. Pass at least one.                   |
+
+The result names the tools that were added. If none of the tools in the requested groups apply to the current session, it says so instead, for example when you enable `elements` on a browser session.
+
+```js
+// Mocks and cookies, for a browser session
+enable_tools({ groups: ["mocks", "cookies"] })
+```
 
 ## Session Management
 
-### `start_browser`
+### `start_session`
 
-Launches a Chrome browser session.
+Starts a browser, Electron app or mobile app session. By default it closes the active session first. With `onExisting: "keep"` the new session runs alongside the sessions already live, and you target it by `name` through the `session` argument. Browsers run headless at 1280×800 by default; pass `navigationUrl` to open a page right away.
 
-#### Parameters
+| Parameter              | Type                                                                                                   | Required     | Default          | Description                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`                 | string                                                                                                 | —            | —                | Name for this session, unique among live sessions. Target it from other tools with `session: <name>`                                                         |
+| `onExisting`           | `"close" \| "keep"`                                                                                    | —            | `"close"`        | `close` replaces the active session. `keep` runs the new session alongside the existing ones and does not make it the default                                |
+| `platform`             | `"browser" \| "electron" \| "ios" \| "android"`                                                        | ✓            | —                | Session platform                                                                                                                                             |
+| `provider`             | `"local" \| "browserstack" \| "saucelabs" \| "testmu" \| "testingbot" \| "digitalai" \| "external"`    | —            | `"local"`        | Session provider. Cloud providers read credentials from the environment. `external` connects to a W3C WebDriver endpoint set with `webdriverConfig`           |
+| `browser`              | `"chrome" \| "firefox" \| "edge" \| "safari"`                                                          | browser only | —                | Browser to launch                                                                                                                                            |
+| `browserVersion`       | string                                                                                                 | —            | —                | Browser version on cloud providers; Electron version on `electron` sessions                                                                                                                       |
+| `os`                   | string                                                                                                 | —            | —                | Operating system (cloud providers only). Provider-native; see [Cloud Providers](./cloud-providers#operating-system-values)                                   |
+| `osVersion`            | string                                                                                                 | —            | —                | OS version (cloud providers only). Provider-native; see [Cloud Providers](./cloud-providers#operating-system-values)                                         |
+| `headless`             | boolean                                                                                                | —            | `true`           | Run browser headlessly                                                                                                                                       |
+| `windowWidth`          | number                                                                                                 | —            | `1280`           | Browser window width (400–3840)                                                                                                                              |
+| `windowHeight`         | number                                                                                                 | —            | `800`            | Browser window height (400–2160)                                                                                                                             |
+| `navigationUrl`        | string                                                                                                 | —            | —                | URL to open after starting                                                                                                                                   |
+| `electronRootDir`      | string                                                                                                 | conditional  | —                | Project root of the Electron app, used to find Electron Builder or Forge configuration. Electron sessions need this or `capabilities["wdio:electronServiceOptions"].appBinaryPath` / `.appEntryPoint`                                                                       |
+| `electronDeeplinkScheme` | string                                                                                               | —            | —                | URI scheme without the colon, such as `"myapp"`. Required before `trigger_electron_deeplink` can run. Stored in lowercase                                   |
+| `deviceName`           | string                                                                                                 | mobile only  | —                | Device, emulator or simulator name                                                                                                                           |
+| `deviceQuery`          | string                                                                                                 | —            | —                | Digital.ai mobile device query                                                                                                                               |
+| `platformVersion`      | string                                                                                                 | —            | —                | Mobile OS version (e.g. `"17.0"`, `"14"`)                                                                                                                    |
+| `appPath`              | string                                                                                                 | —            | —                | Local `.app`, `.apk` or `.ipa` to install                                                                                                                    |
+| `app`                  | string                                                                                                 | —            | —                | Cloud app URL from `upload_app`: `bs://…` (BrowserStack), `storage:filename=…` (Sauce Labs), `lt://…` (TestMu), `tb://…` (TestingBot), or `cloud:<name>` (Digital.ai) |
+| `automationName`       | `"XCUITest" \| "UiAutomator2"`                                                                         | —            | —                | Automation driver (mobile only)                                                                                                                              |
+| `autoGrantPermissions` | boolean                                                                                                | —            | `true`           | Auto-grant app permissions (mobile only)                                                                                                                     |
+| `autoAcceptAlerts`     | boolean                                                                                                | —            | `true`           | Auto-accept alerts (mobile only)                                                                                                                             |
+| `autoDismissAlerts`    | boolean                                                                                                | —            | —                | Auto-dismiss alerts (mobile only)                                                                                                                            |
+| `appWaitActivity`      | string                                                                                                 | —            | —                | Android activity to wait for on launch                                                                                                                       |
+| `udid`                 | string                                                                                                 | —            | —                | iOS real device UDID                                                                                                                                         |
+| `noReset`              | boolean                                                                                                | —            | —                | Preserve app data between sessions                                                                                                                           |
+| `fullReset`            | boolean                                                                                                | —            | —                | Uninstall app before and after the session                                                                                                                   |
+| `newCommandTimeout`    | number                                                                                                 | —            | `300`            | Appium command timeout (seconds)                                                                                                                             |
+| `attach`               | boolean                                                                                                | —            | `false`          | Attach to a running Chrome over CDP, using `attachConfig`. Run `launch_chrome` first                                                                         |
+| `attachConfig`         | object                                                                                                 | —            | `{ port: 9222, host: "localhost" }` | CDP connection. Missing keys fall back to these defaults                                                                                    |
+| `webdriverConfig`      | object                                                                                                 | `external` only | `{ protocol: "http", hostname: "127.0.0.1", port: 4445, path: "/" }` | W3C WebDriver endpoint for `provider: "external"`. Missing keys fall back to these defaults                       |
+| `appiumConfig`         | object                                                                                                 | —            | —                | Local Appium server: `{ host, port, path, protocol }`                                                                                                        |
+| `tunnel`               | `boolean \| "external"`                                                                                | —            | `false`          | Cloud providers. `true` starts a tunnel, `"external"` uses one that is already running                                                                       |
+| `tunnelName`           | string                                                                                                 | —            | —                | Tunnel identifier name                                                                                                                                       |
+| `reporting`            | object                                                                                                 | —            | —                | Cloud provider reporting labels: `{ project, build, session }`                                                                                              |
+| `trace`                | boolean                                                                                                | —            | `false`          | Save a Playwright-compatible trace zip to `.trace/` on `close_session`                                                                                       |
+| `networkLogs`          | `"none" \| "failures" \| "all"`                                                                        | —            | `"none"`         | Local Chromium performance log capture. The default comes from `WDIO_MCP_NETWORK_LOGS` when set                                                             |
+| `region`               | `"us-west-1" \| "eu-central-1" \| "apac-southeast-1"`                                                  | —            | `"eu-central-1"` | Sauce Labs data center region                                                                                                                                |
+| `capabilities`         | object                                                                                                 | —            | —                | Additional raw capabilities to merge, e.g. `"wdio:electronServiceOptions"`                                                                                   |
 
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `headless` | boolean | No | `false` | Run Chrome in headless mode |
-| `windowWidth` | number | No | `1920` | Browser window width (400-3840) |
-| `windowHeight` | number | No | `1080` | Browser window height (400-2160) |
-| `navigationUrl` | string | No | - | URL to navigate to after starting the browser |
+```js
+// Local Chrome browser
+start_session({ platform: "browser", browser: "chrome" })
 
-#### Example
+// A named browser session that runs alongside the active one
+start_session({ platform: "browser", browser: "chrome", name: "admin", onExisting: "keep" })
 
+// Browser session with WebDriver BiDi, needed for mocks, emulate_device and open_web_extension
+start_session({ platform: "browser", browser: "chrome", capabilities: { webSocketUrl: true } })
+
+// Electron app, with a deeplink scheme for trigger_electron_deeplink
+start_session({ platform: "electron", electronRootDir: "/path/to/app", electronDeeplinkScheme: "myapp" })
+
+// iOS simulator
+start_session({ platform: "ios", deviceName: "iPhone 16", platformVersion: "18.0", appPath: "/path/to/app.app" })
+
+// BrowserStack Android
+start_session({ platform: "android", provider: "browserstack", deviceName: "Samsung Galaxy S24", app: "bs://abc123" })
+
+// Sauce Labs iOS
+start_session({ platform: "ios", provider: "saucelabs", deviceName: "iPhone 15", platformVersion: "17.0", app: "storage:filename=MyApp.ipa" })
+
+// TestMu browser
+start_session({ platform: "browser", provider: "testmu", browser: "chrome", os: "Windows", osVersion: "11" })
+
+// TestingBot browser
+start_session({ platform: "browser", provider: "testingbot", browser: "chrome", os: "Windows", osVersion: "11" })
+
+// Digital.ai Android
+start_session({ platform: "android", provider: "digitalai", app: "cloud:<name>" })
+
+// Cloud provider with tunnel
+start_session({ platform: "browser", provider: "browserstack", browser: "chrome", tunnel: true })
+
+// Attach to existing Chrome (after launch_chrome; the attach group must be enabled)
+start_session({ platform: "browser", browser: "chrome", attach: true })
 ```
-Start a browser with 1920x1080 resolution and navigate to webdriver.io
-```
-
-#### Support
-
-- Desktop Browsers
 
 ---
 
-### `start_app_session`
+### `attach_session`
 
-Launches a mobile app session on iOS or Android via Appium.
+Attaches to an existing remote WebDriver or Appium session by ID, without creating a new session. It closes the active session unless you pass `onExisting: "keep"`. Given only a `name`, with no `sessionId`, it looks up a session that is already live under that name. Names are scoped to this server process. An externally managed session is detached rather than terminated when it closes, by default. Sessionless and hidden until `enable_tools({ groups: ["attach"] })`. Electron sessions cannot be attached.
 
-#### Parameters
+| Parameter       | Type                                                                                           | Required | Default   | Description                                                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`     | string                                                                                         | —        | —         | Existing remote WebDriver or Appium session ID. Required unless you only look up a live session by `name`                                   |
+| `name`          | string                                                                                         | —        | —         | Name to register the session under, or the name of a live session to look up when `sessionId` is omitted                                    |
+| `onExisting`    | `"close" \| "keep"`                                                                            | —        | `"close"` | `close` replaces the active session. `keep` runs the attached session alongside the existing ones                                           |
+| `provider`      | `"local" \| "browserstack" \| "saucelabs" \| "testmu" \| "testingbot" \| "digitalai" \| "external"` | —        | `"local"` | Provider hosting the existing session. Use `"external"` for a custom W3C WebDriver endpoint                                                 |
+| `platform`      | `"browser" \| "ios" \| "android"`                                                              | with `sessionId` | —    | Platform of the existing session                                                                                                             |
+| `browser`       | `"chrome" \| "firefox" \| "edge" \| "safari"`                                                  | —        | `"chrome"` | Browser for local command registration (browser platform only)                                                                              |
+| `automationName` | `"XCUITest" \| "UiAutomator2"`                                                                | —        | —         | Appium automation driver for local command registration (mobile only)                                                                        |
+| `webdriverConfig` | object                                                                                        | —        | `{ hostname: "127.0.0.1", port: 4445, path: "/", protocol: "http" }` | W3C WebDriver endpoint, with `provider: "external"`                                                    |
+| `appiumConfig`  | object                                                                                         | —        | —         | Appium server connection (local provider only): `{ host, port, path, protocol }`                                                            |
+| `region`        | `"us-west-1" \| "eu-central-1" \| "apac-southeast-1"`                                          | —        | `"eu-central-1"` | Sauce Labs region, with `provider: "saucelabs"`                                                                                       |
+| `trace`         | boolean                                                                                        | —        | `false`   | Record a trace for subsequent commands, saved to `.trace/` on `close_session`                                                               |
+| `capabilities`  | object                                                                                         | —        | —         | Capabilities used to register the right browser or Appium command surface locally. They are not sent to the remote endpoint                |
 
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `platform` | string | Yes | - | Platform to automate: `iOS` or `Android` |
-| `deviceName` | string | Yes | - | Name of the device or simulator/emulator |
-| `appPath` | string | No* | - | Path to the app file (.app, .ipa, or .apk) |
-| `platformVersion` | string | No | - | OS version (e.g., `17.0`, `14`) |
-| `automationName` | string | No | Auto | `XCUITest` (iOS), `UiAutomator2` or `Espresso` (Android) |
-| `udid` | string | No | - | Unique device identifier (required for real iOS devices) |
-| `noReset` | boolean | No | `false` | Preserve app state between sessions |
-| `fullReset` | boolean | No | `true` | Uninstall and reinstall app before session |
-| `autoGrantPermissions` | boolean | No | `true` | Automatically grant app permissions |
-| `autoAcceptAlerts` | boolean | No | `true` | Automatically accept system alerts |
-| `autoDismissAlerts` | boolean | No | `false` | Dismiss (instead of accept) alerts |
-| `appWaitActivity` | string | No | - | Activity to wait for on launch (Android only) |
-| `newCommandTimeout` | number | No | `60` | Seconds before session times out due to inactivity |
-| `appiumHost` | string | No | `127.0.0.1` | Appium server hostname |
-| `appiumPort` | number | No | `4723` | Appium server port |
-| `appiumPath` | string | No | `/` | Appium server path |
+```js
+// Attach to a session that is already running on a local Appium server
+attach_session({ sessionId: "abc123", platform: "android", automationName: "UiAutomator2", name: "device" })
 
-*Either `appPath` must be provided, or `noReset: true` to connect to an already-running app.
-
-#### Example
-
+// Look up a session that is already live under a name
+attach_session({ name: "device" })
 ```
-Start an iOS app session on iPhone 15 simulator with my app at /path/to/app.app
-```
-
-#### Support
-
-- iOS Simulators
-- iOS Real Devices
-- Android Emulators
-- Android Real Devices
 
 ---
 
 ### `close_session`
 
-Closes the current browser or app session.
+Closes or detaches from the current session.
 
-#### Parameters
+| Parameter | Type    | Required | Default | Description                                                    |
+| --------- | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `detach`  | boolean | —        | `false` | Disconnect without terminating (preserves app state on Appium) |
 
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `detach` | boolean | No | `false` | Detach from session instead of closing (keeps browser/app running) |
-
-#### Notes
-
-Sessions with `noReset: true` or without `appPath` automatically detach on close to preserve state.
-
-#### Support
-
-- Desktop Browsers
-- Mobile Apps
+Sessions started with `noReset: true` auto-detach by default.
 
 ---
 
-## Navigation
+### `launch_chrome`
+
+Prepares a Chrome instance with remote debugging enabled so `start_session({ attach: true })` can connect. Sessionless and hidden until `enable_tools({ groups: ["attach"] })`. Two modes:
+
+- `newInstance` (default): opens Chrome alongside your existing one using a separate profile directory; your current session is untouched.
+- `freshSession`: launches Chrome with an empty profile (no cookies, no logins). Use `copyProfileFiles: true` to carry over cookies and logins.
+
+| Parameter          | Type                              | Required | Default         | Description                                                      |
+| ------------------ | --------------------------------- | -------- | --------------- | ---------------------------------------------------------------- |
+| `port`             | number                            | —        | `9222`          | Remote debugging port                                            |
+| `mode`             | `"newInstance" \| "freshSession"` | —        | `"newInstance"` | Launch mode                                                      |
+| `copyProfileFiles` | boolean                           | —        | `false`         | Copy Chrome Default profile (cookies, logins) into debug session |
+
+After this tool succeeds, call `start_session({ platform: "browser", browser: "chrome", attach: true })`.
+
+## Navigation & Tabs
 
 ### `navigate`
 
-Navigates to a URL.
+Loads a URL in the current tab and waits for the page load event. Resets page state (DOM, JS runtime). **Browser-only.**
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `url` | string | Yes | The URL to navigate to |
-
-#### Example
-
-```
-Navigate to https://webdriver.io
-```
-
-#### Support
-
-- Desktop Browsers
+| Parameter | Type   | Required | Description        |
+| --------- | ------ | -------- | ------------------ |
+| `url`     | string | ✓        | URL to navigate to |
 
 ---
+
+### `get_tabs`
+
+Lists all browser tabs with handle, title, URL, and which is active. Use before `switch_tab` to find the target handle. **Browser-only.**
+
+No parameters.
+
+---
+
+### `switch_tab`
+
+Focuses a browser tab by window handle or 0-based index. All subsequent tool calls operate on the newly active tab. **Browser-only.**
+
+| Parameter | Type   | Required | Description                |
+| --------- | ------ | -------- | -------------------------- |
+| `handle`  | string | —        | Window handle to switch to |
+| `index`   | number | —        | 0-based tab index (≥ 0)    |
+
+Provide either `handle` or `index`. Get handles from `get_tabs` or `wdio://session/current/tabs`.
+
+---
+
+### `switch_frame`
+
+Switches WebDriver frame context into an iframe by CSS/XPath selector, or back to top-level if selector is omitted. Changes persist; all subsequent `click_element`, `set_value`, `get_elements` calls operate within the switched frame until you switch back. Waits up to 5s for the iframe. **Browser-only.**
+
+| Parameter  | Type   | Required | Description                                                                            |
+| ---------- | ------ | -------- | -------------------------------------------------------------------------------------- |
+| `selector` | string | —        | CSS/XPath selector for the iframe element. Omit to switch back to the top-level frame. |
+
+```js
+// Switch into an iframe
+switch_frame({ selector: "#my-iframe" })
+
+// Interact with elements inside the iframe
+click_element({ selector: "button.submit" })
+
+// Switch back to top-level
+switch_frame()
+```
 
 ## Element Interaction
 
 ### `click_element`
 
-Clicks an element identified by a selector.
+Clicks an element. On web pages the result lists what changed: new elements with refs, or the new page. In apps it does not, so take a snapshot to see the new screen. Several steps in a row belong in one `perform_actions` call.
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `selector` | string | Yes | - | CSS selector, XPath, or mobile selector |
-| `scrollToView` | boolean | No | `true` | Scroll element into view before clicking |
-| `timeout` | number | No | `3000` | Max time to wait for element (ms) |
-
-#### Notes
-
-- Supports WebdriverIO text selectors: `button=Exact text` or `a*=Contains text`
-- Uses center alignment for scroll positioning
-
-#### Example
-
-```
-Click the element with selector "#submit-button"
-```
-
-#### Support
-
-- Desktop Browsers
-- Mobile Native Apps
+| Parameter  | Type   | Required | Default | Description                                                                                            |
+| ---------- | ------ | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `selector` | string | ✓        | —       | Ref from `snapshot` (e.g. `e12`), or a CSS, XPath, `button=Exact text` or `a*=Partial text` selector  |
 
 ---
 
 ### `set_value`
 
-Types text into an input field.
+Replaces the text of an input or textarea. On web pages the result lists what changed. In apps it does not, so take a snapshot to see the new screen. To fill several fields, or fill and then click, use one `perform_actions` call.
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `selector` | string | Yes | - | Selector for the input element |
-| `value` | string | Yes | - | Text to type |
-| `scrollToView` | boolean | No | `true` | Scroll element into view before typing |
-| `timeout` | number | No | `3000` | Max time to wait for element (ms) |
-
-#### Notes
-
-Clears existing value before typing new text.
-
-#### Example
-
-```
-Set the value "john@example.com" in the element with selector "#email"
-```
-
-#### Support
-
-- Desktop Browsers
-- Mobile Native Apps
+| Parameter  | Type   | Required | Default | Description                                                                                            |
+| ---------- | ------ | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `selector` | string | ✓        | —       | Ref from `snapshot` (e.g. `e12`), or a CSS, XPath, `button=Exact text` or `a*=Partial text` selector  |
+| `value`    | string | ✓        | —       | Text to enter into the element                                                                         |
 
 ---
 
-## Page Analysis
+### `select_option`
 
-### `get_visible_elements`
+Selects an option of a `<select>` by its text. The result lists what changed on the page. **Browser-only.**
 
-Gets visible and interactable elements on the current page or screen. This is the primary tool for discovering what elements are available for interaction.
-
-#### Parameters
-
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `elementType` | string | No | `interactable` | Type of elements: `interactable` (buttons/links/inputs), `visual` (images/SVGs), or `all` |
-| `inViewportOnly` | boolean | No | `true` | Only return elements visible in the viewport |
-| `includeContainers` | boolean | No | `false` | Include layout containers (ViewGroup, ScrollView, etc.) |
-| `includeBounds` | boolean | No | `false` | Include element coordinates (x, y, width, height) |
-| `limit` | number | No | `0` | Maximum elements to return (0 = unlimited) |
-| `offset` | number | No | `0` | Number of elements to skip (for pagination) |
-
-#### Returns
-
-```json
-{
-  "total": 42,
-  "showing": 20,
-  "hasMore": true,
-  "elements": [...]
-}
-```
-
-**Web elements include:** tagName, type, id, className, textContent, value, placeholder, href, ariaLabel, role, cssSelector, isInViewport
-
-**Mobile elements include:** Multiple locator strategies (accessibility ID, resource ID, XPath, UiAutomator/predicates), element type, text, and optionally bounds
-
-#### Notes
-
-- **Web**: Uses an optimized browser script for fast element detection
-- **Mobile**: Uses efficient XML page source parsing (2 HTTP calls vs 600+ for element queries)
-- Use pagination (`limit` and `offset`) for large pages to reduce token usage
-
-#### Example
-
-```
-Get all visible elements on the page with their coordinates
-```
-
-#### Support
-
-- Desktop Browsers
-- Mobile Apps
+| Parameter  | Type   | Required | Description                                                       |
+| ---------- | ------ | -------- | ----------------------------------------------------------------- |
+| `selector` | string | ✓        | Ref from `snapshot` (e.g. `e12`), or a selector of the `<select>` |
+| `value`    | string | ✓        | Option text to select                                             |
 
 ---
 
-### `get_accessibility`
+### `press_key`
 
-Gets the accessibility tree of the current page with semantic information about roles, names, and states.
+Presses a key or combination in the focused element, such as `Enter`, `Tab`, `Escape` or `Control+a`. The result lists what changed on the page. **Browser-only.**
 
-#### Parameters
+| Parameter | Type    | Required | Default | Description                                                  |
+| --------- | ------- | -------- | ------- | ------------------------------------------------------------ |
+| `keys`    | string  | ✓        | —       | Key or combination                                           |
+| `times`   | number  | —        | —       | Press it this many times, e.g. to move a slider (1–100)      |
 
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `limit` | number | No | `100` | Maximum nodes to return (0 = unlimited) |
-| `offset` | number | No | `0` | Number of nodes to skip (for pagination) |
-| `roles` | string[] | No | All | Filter to specific roles (e.g., `["button", "link", "textbox"]`) |
-| `namedOnly` | boolean | No | `true` | Only return nodes with a name/label |
+---
 
-#### Returns
+### `perform_actions`
 
-```json
-{
-  "total": 85,
-  "showing": 100,
-  "hasMore": false,
-  "nodes": [
-    { "role": "button", "name": "Submit" },
-    { "role": "link", "name": "Home" }
-  ]
-}
+Runs several actions in one call, such as filling a form and then submitting it, on the page or app screen. On web pages it returns what each step changed. Put every step of a sequence into one call rather than sending one tool call per step.
+
+Each entry in `actions` names one of these `action` values: `click`, `fill`, `select`, `check`, `uncheck` or `press`. `value` is the text for `fill`, the option for `select` and the keys for `press`. `times` applies to `press` only.
+
+The run stops at the first failure, when a step loads a new page, or before a key press that follows a click, select, check or uncheck that changed the page. Continue with the refs from the new result. Steps the current session does not support are rejected before any step runs.
+
+| Parameter           | Type     | Required | Default | Description                                                                 |
+| ------------------- | -------- | -------- | ------- | --------------------------------------------------------------------------- |
+| `actions`           | object[] | ✓        | —       | Steps to run in order. At least one                                         |
+| `actions[].action`  | string   | ✓        | —       | `"click" \| "fill" \| "select" \| "check" \| "uncheck" \| "press"`          |
+| `actions[].selector` | string  | —        | —       | Ref (e.g. `e12`) or selector. Not used by `press`                           |
+| `actions[].value`   | string   | —        | —       | Text for `fill`, option for `select`, keys for `press`                      |
+| `actions[].times`   | number   | —        | —       | `press` only: repeat count (1–100)                                          |
+
+```js
+perform_actions({ actions: [
+  { action: "fill", selector: "e4", value: "ada@example.com" },
+  { action: "fill", selector: "e5", value: "correct horse" },
+  { action: "click", selector: "e6" },
+] })
 ```
 
-#### Notes
-
-- Browser-only. For mobile apps, use `get_visible_elements` instead
-- Useful when `get_visible_elements` doesn't return expected elements
-- `namedOnly: true` filters out anonymous containers and reduces noise
-
-#### Support
-
-- Desktop Browsers
-
 ---
-
-## Screenshots
-
-### `take_screenshot`
-
-Captures a screenshot of the current viewport.
-
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `outputPath` | string | No | Path to save screenshot file. If omitted, returns base64 data |
-
-#### Returns
-
-Base64-encoded image data (PNG or JPEG) with size information.
-
-#### Notes
-
-Screenshots are automatically optimized:
-- Maximum dimension: 2000px (scaled down if larger)
-- Maximum file size: 1MB
-- Format: PNG with max compression, or JPEG if needed to meet size limit
-
-#### Support
-
-- Desktop Browsers
-- Mobile Apps
-
----
-
-## Scrolling
 
 ### `scroll`
 
-Scrolls the page up or down by a specified number of pixels.
+Scrolls the page by a number of pixels. **Browser-only.** For mobile, use `swipe`.
 
-#### Parameters
+| Parameter   | Type             | Required | Default | Description      |
+| ----------- | ---------------- | -------- | ------- | ---------------- |
+| `direction` | `"up" \| "down"` | ✓        | —       | Scroll direction |
+| `pixels`    | number           | —        | `500`   | Pixels to scroll |
 
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `direction` | string | Yes | - | Scroll direction: `up` or `down` |
-| `pixels` | number | No | `500` | Number of pixels to scroll |
+## Element Analysis
 
-#### Notes
+### `snapshot`
 
-Browser-only. For mobile scrolling, use the `swipe` tool instead.
+Returns the page or app screen as an accessibility tree with refs, such as `button "Save" [ref=e3]`. This is the primary way to read a page: take a snapshot, then pass a ref such as `e12` to `click_element`, `set_value`, `select_option` or `perform_actions`. Refs from the latest result stay valid until the page changes.
 
-#### Support
+By default the snapshot lists interactive elements only and drops plain text. Pass `full: true` to include text. Pass `find` to return only the parts of the page that contain the text, with their refs. Pass `viewport: true` to limit the snapshot to what is on screen. `find` cannot be combined with `viewport`. Snapshots are capped at 12,000 characters, so use `find` or `scope` to narrow a large page.
 
-- Desktop Browsers
+| Parameter  | Type    | Required | Default | Description                                                                    |
+| ---------- | ------- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `find`     | string  | —        | —       | Text to look for. Returns only the matching parts of the page, with refs       |
+| `full`     | boolean | —        | `false` | Include text, not just interactive elements                                    |
+| `scope`    | string  | —        | —       | Only the part below this ref or selector                                       |
+| `viewport` | boolean | —        | `false` | Only what is on screen (not together with `find`)                              |
+
+```js
+// Read the page, then act on a ref from the result
+snapshot()
+click_element({ selector: "e12" })
+
+// Find the part of the page that mentions a term
+snapshot({ find: "Shipping address" })
+```
 
 ---
 
+### `get_elements`
+
+Returns interactable elements on the current page with selectors ready to use. Prefer the `wdio://session/current/elements` resource for ambient awareness; use this tool when you need filtering or pagination.
+
+**Platform:** listed only on `ios`, `android` and `electron` sessions. It is not listed on browser sessions. **Group:** `elements`, so enable it with `enable_tools({ groups: ["elements"] })` first.
+
+| Parameter           | Type    | Required | Default | Description                                 |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------- |
+| `inViewportOnly`    | boolean | —        | `false` | Only return viewport-visible elements       |
+| `includeContainers` | boolean | —        | `false` | Include container elements (divs, sections) |
+| `includeBounds`     | boolean | —        | `false` | Include bounding box coordinates            |
+| `limit`             | number  | —        | `0`     | Max elements to return (0 = unlimited)      |
+| `offset`            | number  | —        | `0`     | Elements to skip (pagination)               |
+
+---
+
+### `get_accessibility_tree`
+
+Returns the accessibility tree with roles, names, and selectors. Supports filtering and pagination. **Listed on Electron sessions:** the platform gating in [Tool visibility](#tool-visibility) lists it only on `electron` sessions. It works in any web context, so with `WDIO_MCP_TOOLS=all` it also runs on browser sessions; it rejects native iOS and Android.
+
+| Parameter | Type     | Required | Default | Description                                                |
+| --------- | -------- | -------- | ------- | ---------------------------------------------------------- |
+| `limit`   | number   | —        | `0`     | Max nodes to return (0 = unlimited)                        |
+| `offset`  | number   | —        | `0`     | Nodes to skip (pagination)                                 |
+| `roles`   | string[] | —        | —       | Filter by ARIA roles, e.g. `["button", "link", "heading"]` |
+
+## Screenshots
+
+### `get_screenshot`
+
+Takes a screenshot of the current page or screen. Returns a base64-encoded image, automatically resized and compressed to stay within model context limits (max 1 MB, max 2000px).
+
+No parameters. Prefer `wdio://session/current/elements` over screenshots for element discovery; it's faster and uses far fewer tokens. Use screenshots for visual verification or debugging layout.
+
 ## Cookie Management
+
+Cookie tools are hidden until `enable_tools({ groups: ["cookies"] })`.
 
 ### `get_cookies`
 
-Gets cookies from the current session.
+Returns all cookies for the current session, or a single cookie by name. **Browser-only.**
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `name` | string | No | Specific cookie name to retrieve (omit for all cookies) |
-
-#### Returns
-
-Cookie objects with name, value, domain, path, expiry, secure, and httpOnly properties.
-
-#### Support
-
-- Desktop Browsers
+| Parameter | Type   | Required | Description                              |
+| --------- | ------ | -------- | ---------------------------------------- |
+| `name`    | string | —        | Cookie name. Omit to return all cookies. |
 
 ---
 
 ### `set_cookie`
 
-Sets a cookie in the current session.
+Sets a browser cookie. The browser must already be on the target domain — cookies cannot be set cross-domain. Use to inject session tokens or feature flags without going through login flows. **Browser-only.**
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `name` | string | Yes | - | Cookie name |
-| `value` | string | Yes | - | Cookie value |
-| `domain` | string | No | Current | Cookie domain |
-| `path` | string | No | `/` | Cookie path |
-| `expiry` | number | No | - | Expiration as Unix timestamp (seconds) |
-| `secure` | boolean | No | - | Secure flag |
-| `httpOnly` | boolean | No | - | HttpOnly flag |
-| `sameSite` | string | No | - | SameSite attribute: `strict`, `lax`, or `none` |
-
-#### Support
-
-- Desktop Browsers
+| Parameter  | Type                          | Required | Description                                |
+| ---------- | ----------------------------- | -------- | ------------------------------------------ |
+| `name`     | string                        | ✓        | Cookie name                                |
+| `value`    | string                        | ✓        | Cookie value                               |
+| `domain`   | string                        | —        | Cookie domain (defaults to current domain) |
+| `path`     | string                        | —        | Cookie path (defaults to `/`)              |
+| `expiry`   | number                        | —        | Expiry as Unix timestamp (seconds)         |
+| `httpOnly` | boolean                       | —        | HttpOnly flag                              |
+| `secure`   | boolean                       | —        | Secure flag                                |
+| `sameSite` | `"strict" \| "lax" \| "none"` | —        | SameSite attribute                         |
 
 ---
 
 ### `delete_cookies`
 
-Deletes cookies from the current session.
+Deletes all cookies or a specific cookie by name. **Browser-only.**
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `name` | string | No | Specific cookie name to delete (omit to delete all) |
-
-#### Support
-
-- Desktop Browsers
-
----
+| Parameter | Type   | Required | Description                                        |
+| --------- | ------ | -------- | -------------------------------------------------- |
+| `name`    | string | —        | Cookie name to delete. Omit to delete all cookies. |
 
 ## Touch Gestures (Mobile)
 
 ### `tap_element`
 
-Taps on an element or screen coordinates.
+Calls `element.tap()` on a matched element or taps at absolute screen coordinates. Use on iOS when `click_element` is ignored; tap is the native gesture iOS responds to. **Mobile-only.**
 
-#### Parameters
+| Parameter  | Type   | Required | Description                                  |
+| ---------- | ------ | -------- | -------------------------------------------- |
+| `selector` | string | —        | Element selector                             |
+| `x`        | number | —        | X coordinate for screen tap (if no selector) |
+| `y`        | number | —        | Y coordinate for screen tap (if no selector) |
 
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `selector` | string | No* | Selector for the element to tap |
-| `x` | number | No* | X coordinate for tap |
-| `y` | number | No* | Y coordinate for tap |
-
-*Either `selector` or both `x` and `y` are required.
-
-#### Support
-
-- Mobile Apps
+Provide either `selector` or `x`/`y` coordinates.
 
 ---
 
 ### `swipe`
 
-Performs a swipe gesture in the specified direction.
+Performs a full-screen swipe gesture. Direction is content movement direction (e.g. `"up"` scrolls a list upward). Use for scrolling beyond visible bounds. For moving a specific element, use `drag_and_drop`. **Mobile-only.** For browsers, use `scroll`.
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Default | Description |
-|-----------|------|-----------|---------|-------------|
-| `direction` | string | Yes | - | Swipe direction: `up`, `down`, `left`, `right` |
-| `duration` | number | No | `500` | Swipe duration in milliseconds (100-5000) |
-| `percent` | number | No | 0.5/0.95 | Percentage of screen to swipe (0-1) |
-
-#### Notes
-
-- Default percent: 0.5 for vertical swipes, 0.95 for horizontal swipes
-- Direction indicates content movement: "swipe up" scrolls content up
-
-#### Example
-
-```
-Swipe up to scroll down the screen
-```
-
-#### Support
-
-- Mobile Apps
+| Parameter   | Type                                  | Required | Default        | Description                       |
+| ----------- | ------------------------------------- | -------- | -------------- | --------------------------------- |
+| `direction` | `"up" \| "down" \| "left" \| "right"` | ✓        | —              | Swipe direction                   |
+| `duration`  | number                                | —        | `500`          | Swipe duration (ms, 100–5000)     |
+| `percent`   | number                                | —        | `0.5` / `0.95` | Fraction of screen to swipe (0–1) |
 
 ---
 
 ### `drag_and_drop`
 
-Drags an element to another element or coordinates.
+Drags an element to another element or coordinates. **Mobile-only.**
 
-#### Parameters
+| Parameter        | Type   | Required | Default | Description                            |
+| ---------------- | ------ | -------- | ------- | -------------------------------------- |
+| `sourceSelector` | string | ✓        | —       | Source element to drag                 |
+| `targetSelector` | string | —        | —       | Target element to drop onto            |
+| `x`              | number | —        | —       | Target X offset (if no targetSelector) |
+| `y`              | number | —        | —       | Target Y offset (if no targetSelector) |
+| `duration`       | number | —        | —       | Drag duration (ms, 100–5000)           |
 
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `sourceSelector` | string | Yes | Source element selector to drag |
-| `targetSelector` | string | No* | Target element selector to drop onto |
-| `x` | number | No* | Target X offset (if no targetSelector) |
-| `y` | number | No* | Target Y offset (if no targetSelector) |
-| `duration` | number | No | Default | Drag duration in milliseconds (100-5000) |
-
-*Either `targetSelector` or both `x` and `y` are required.
-
-#### Support
-
-- Mobile Apps
-
----
-
-## App Lifecycle (Mobile)
-
-### `get_app_state`
-
-Gets the current state of an app.
-
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `bundleId` | string | Yes | App identifier (bundle ID for iOS, package name for Android) |
-
-#### Returns
-
-App state: `not installed`, `not running`, `running in background (suspended)`, `running in background`, or `running in foreground`.
-
-#### Support
-
-- Mobile Apps
-
----
-
-## Context Switching (Hybrid Apps)
+## Context Switching (Mobile)
 
 ### `get_contexts`
 
-Lists all available contexts (native and webviews).
+Returns available automation contexts and the currently active one. Use before `switch_context` to discover `NATIVE_APP` and `WEBVIEW_*` targets. **Mobile-only.**
 
-#### Parameters
-
-None
-
-#### Returns
-
-Array of context names (e.g., `["NATIVE_APP", "WEBVIEW_com.example.app"]`).
-
-#### Support
-
-- Mobile Hybrid Apps
-
----
-
-### `get_current_context`
-
-Gets the currently active context.
-
-#### Parameters
-
-None
-
-#### Returns
-
-Current context name (e.g., `NATIVE_APP` or `WEBVIEW_*`).
-
-#### Support
-
-- Mobile Hybrid Apps
+No parameters.
 
 ---
 
 ### `switch_context`
 
-Switches between native and webview contexts.
+Switches between native and webview automation contexts in a hybrid mobile app. Required before using CSS/XPath selectors inside an embedded webview. **Mobile-only.**
 
-#### Parameters
+| Parameter | Type   | Required | Description                                                    |
+| --------- | ------ | -------- | -------------------------------------------------------------- |
+| `context` | string | ✓        | Context name, e.g. `"NATIVE_APP"`, `"WEBVIEW_com.example.app"` |
 
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `context` | string | Yes | Context name or index (1-based) from `get_contexts` |
+Get available context names from `get_contexts` or `wdio://session/current/contexts`.
 
-#### Example
+```js
+// 1. Check what's available
+get_contexts()
+// → { contexts: ["NATIVE_APP", "WEBVIEW_com.example.app"], currentContext: "NATIVE_APP" }
 
+// 2. Switch into the webview for CSS/XPath
+switch_context({ context: "WEBVIEW_com.example.app" })
+
+// 3. Interact with webview elements using CSS selectors
+click_element({ selector: "#login-button" })
+
+// 4. Switch back to native for native UI
+switch_context({ context: "NATIVE_APP" })
 ```
-Switch to the WEBVIEW_com.example.app context
-```
-
-#### Support
-
-- Mobile Hybrid Apps
-
----
 
 ## Device Control (Mobile)
 
 ### `rotate_device`
 
-Rotates the device to a specific orientation.
+Rotates the device to portrait or landscape and waits for the OS rotation to complete. Use to test orientation-dependent layouts. **Mobile-only.**
 
-#### Parameters
-
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `orientation` | string | Yes | `PORTRAIT` or `LANDSCAPE` |
-
-#### Support
-
-- Mobile Apps
+| Parameter     | Type                        | Required | Description        |
+| ------------- | --------------------------- | -------- | ------------------ |
+| `orientation` | `"PORTRAIT" \| "LANDSCAPE"` | ✓        | Target orientation |
 
 ---
 
 ### `hide_keyboard`
 
-Hides the on-screen keyboard.
+Dismisses the software keyboard. Call after text entry when the keyboard obscures elements you need next. No-op if already hidden. **Mobile-only.**
 
-#### Parameters
-
-None
-
-#### Support
-
-- Mobile Apps
-
----
-
-### `get_geolocation`
-
-Gets the current GPS coordinates.
-
-#### Parameters
-
-None
-
-#### Returns
-
-Object with `latitude`, `longitude`, and `altitude`.
-
-#### Support
-
-- Mobile Apps
+No parameters.
 
 ---
 
 ### `set_geolocation`
 
-Sets the device GPS coordinates.
+Overrides device GPS coordinates for the session. Affects `navigator.geolocation` on web and location services on mobile. Location permissions must be granted to the app beforehand. Hidden until `enable_tools({ groups: ["device"] })`.
 
-#### Parameters
+| Parameter   | Type   | Required | Description             |
+| ----------- | ------ | -------- | ----------------------- |
+| `latitude`  | number | ✓        | Latitude (−90 to 90)    |
+| `longitude` | number | ✓        | Longitude (−180 to 180) |
+| `altitude`  | number | —        | Altitude in metres      |
 
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `latitude` | number | Yes | Latitude coordinate (-90 to 90) |
-| `longitude` | number | Yes | Longitude coordinate (-180 to 180) |
-| `altitude` | number | No | Altitude in meters |
+## App Lifecycle (Mobile)
 
-#### Example
+### `get_app_state`
 
-```
-Set geolocation to San Francisco (37.7749, -122.4194)
-```
+Returns the current lifecycle state of a mobile app. **Mobile-only.**
 
-#### Support
+| Parameter  | Type   | Required | Description                                                     |
+| ---------- | ------ | -------- | --------------------------------------------------------------- |
+| `bundleId` | string | ✓        | iOS bundle ID or Android package name, e.g. `"com.example.app"` |
 
-- Mobile Apps
+Returns one of: `not installed`, `not running`, `background (suspended)`, `background`, `foreground`.
+
+## Browser Utilities
+
+### `emulate_device`
+
+Emulates a mobile or tablet device in the current browser session (sets viewport, DPR, user-agent, touch events). Requires a BiDi-enabled session: `start_session({ capabilities: { webSocketUrl: true } })`. **Browser-only.** Hidden until `enable_tools({ groups: ["device"] })`.
+
+| Parameter | Type   | Required | Description                                                                                                             |
+| --------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `device`  | string | —        | Device preset name (e.g. `"iPhone 15"`, `"Pixel 7"`). Omit to list presets. Pass `"reset"` to restore desktop defaults. |
 
 ---
-
-## Script Execution
 
 ### `execute_script`
 
 Executes JavaScript in the browser or mobile commands via Appium.
 
-#### Parameters
+| Parameter | Type   | Required | Description                                                   |
+| --------- | ------ | -------- | ------------------------------------------------------------- |
+| `script`  | string | ✓        | JS code (browser) or Appium command like `"mobile: pressKey"` |
+| `args`    | any[]  | —        | Arguments passed to the script or command                     |
 
-| Parameter | Type | Mandatory | Description |
-|-----------|------|-----------|-------------|
-| `script` | string | Yes | JavaScript code (browser) or mobile command (e.g., `mobile: pressKey`) |
-| `args` | array | No | Arguments for the script |
-
-#### Browser Examples
+**Browser:** use `return` to get values back.
 
 ```javascript
 // Get page title
 execute_script({ script: "return document.title" })
 
-// Get scroll position
-execute_script({ script: "return window.scrollY" })
-
-// Click element by selector
-execute_script({ script: "arguments[0].click()", args: ["#myButton"] })
+// Scroll element into view
+execute_script({ script: "arguments[0].scrollIntoView()", args: ["#my-element"] })
 ```
 
-#### Mobile (Appium) Examples
+**Mobile (Appium):** uses `mobile: <command>` syntax.
 
 ```javascript
-// Press back key (Android)
+// Press Android back key
 execute_script({ script: "mobile: pressKey", args: [{ keycode: 4 }] })
 
-// Activate app
-execute_script({ script: "mobile: activateApp", args: [{ appId: "com.example" }] })
+// Activate app (iOS/Android)
+execute_script({ script: "mobile: activateApp", args: [{ bundleId: "com.example.app" }] })
 
-// Terminate app
-execute_script({ script: "mobile: terminateApp", args: [{ appId: "com.example" }] })
-
-// Deep link
-execute_script({ script: "mobile: deepLink", args: [{ url: "myapp://screen", package: "com.example" }] })
-
-// Shell command (Android)
-execute_script({ script: "mobile: shell", args: [{ command: "dumpsys", args: ["battery"] }] })
+// Deep link (iOS)
+execute_script({ script: "mobile: deepLink", args: [{ url: "myapp://route", bundleId: "com.example.app" }] })
 ```
 
-#### Common Android Key Codes
+---
 
-| Key | Code |
-|-----|------|
-| BACK | 4 |
-| HOME | 3 |
-| ENTER | 66 |
-| MENU | 82 |
-| SEARCH | 84 |
+### `open_web_extension`
 
-#### More Mobile Commands
+Installs a web extension through WebDriver BiDi and opens one of its extension pages, so the other tools can inspect and drive its UI. **Browser-only.** Requires a BiDi-enabled session: `start_session({ capabilities: { webSocketUrl: true } })`. Hidden until `enable_tools({ groups: ["extensions"] })`.
 
-For a complete list of available Appium mobile commands, see:
-- [XCUITest Mobile Commands](https://appium.github.io/appium-xcuitest-driver/latest/reference/execute-methods/) (iOS)
-- [UiAutomator2 Mobile Commands](https://github.com/appium/appium-uiautomator2-driver#mobile-commands) (Android)
+Use the `base64` form for cloud or remote sessions where the browser driver cannot read the MCP server's filesystem.
 
-#### Support
+| Parameter               | Type                                                  | Required | Description                                                                                  |
+| ----------------------- | ----------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `extensionData`         | object                                                | ✓        | One of `{ type: "path", path }` (unpacked directory), `{ type: "archivePath", path }` (packaged archive), or `{ type: "base64", value }` (base64-encoded archive). Paths are on the remote end |
+| `path`                  | string                                                | ✓        | Page inside the extension, such as `options.html` or `popup.html`. Leading slashes are ignored |
 
-- Desktop Browsers
-- Mobile Apps (via Appium mobile commands)
+```js
+// Install an unpacked extension and open its options page
+open_web_extension({ extensionData: { type: "path", path: "/tmp/my-extension" }, path: "options.html" })
+```
+
+## Electron
+
+Electron tools run only in Electron sessions, started with `start_session({ platform: "electron" })`. They are listed only while such a session is active.
+
+### `execute_electron_script`
+
+Executes JavaScript in the Electron main process, with access to the Electron APIs. This is privileged code execution, so use it only with trusted scripts. **Electron-only.**
+
+| Parameter | Type   | Required | Description                                                                                                  |
+| --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `script`  | string | ✓        | JavaScript body. `electron` gives the Electron APIs, `args` the supplied values, and `return` sends back a result |
+| `args`    | any[]  | —        | Values made available to the script as `args[0]`, `args[1]`, and so on                                        |
+
+```js
+execute_electron_script({ script: "return electron.app.getName()" })
+
+execute_electron_script({ script: "return args[0] + 1", args: [41] })
+```
+
+---
+
+### `trigger_electron_deeplink`
+
+Triggers a deeplink through the running Electron app. The session must have been started with `electronDeeplinkScheme`, and the URL's scheme must match it. Packaged binaries are required for deeplinks on Windows and Linux. **Electron-only.**
+
+| Parameter | Type   | Required | Description                                                                        |
+| --------- | ------ | -------- | ---------------------------------------------------------------------------------- |
+| `url`     | string | ✓        | Deeplink URI, such as `myapp://route/settings`. Must be a valid URL with the session's scheme |
+
+## Mocking
+
+Mocks are scoped to the session that created them. The three mock tools are hidden until `enable_tools({ groups: ["mocks"] })`. A mock targets either the browser or an Electron API, selected with `mockType`. `mockType` defaults to `browser` in WebDriver sessions and is required in Electron sessions. Appium sessions do not support mocks.
+
+| Parameter    | Type                    | Required                  | Description                                                                       |
+| ------------ | ----------------------- | ------------------------- | --------------------------------------------------------------------------------- |
+| `mockType`   | `"browser" \| "electron"` | Electron sessions         | Which kind of mock to create or read. Defaults to `browser` in WebDriver sessions |
+| `apiName`    | string                  | `electron` mocks          | Electron API module, such as `dialog`, `app` or `clipboard`                       |
+| `funcName`   | string                  | `electron` mocks          | API function, such as `showOpenDialog` or `getName`                               |
+| `url`        | string                  | `browser` mocks           | URL glob to intercept, such as `**/api/todos`                                      |
+| `method`     | string                  | —                         | Browser mocks only: request method filter, such as `get`                          |
+
+### `mock`
+
+Configures a session-scoped mock. Browser mocks intercept the network requests that match `url`. They need a BiDi-enabled session, started with `capabilities: { webSocketUrl: true }`. Electron mocks replace an Electron API function in the main process and need an Electron session.
+
+Omit `behavior` to observe. The mock then records matching requests without altering them, and you read them with `get_mock_calls`. An existing mock keeps its configured behavior when you call `mock` again without one, so use `manage_mock` with `action: "reset"` to return it to observe-only.
+
+| Parameter    | Type                                                                                                              | Required | Default                                              | Description                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `behavior`   | `"mockReturnValue" \| "mockReturnValueOnce" \| "mockResolvedValue" \| "mockResolvedValueOnce" \| "mockRejectedValue" \| "mockRejectedValueOnce"` (Electron), or `"respond" \| "respondOnce" \| "abort" \| "abortOnce" \| "redirect" \| "redirectOnce"` (browser) | — | Electron: `mockReturnValue`. Browser: none (observe) | What the mock does. `Once` behaviors apply to the next matching call only          |
+| `value`      | any JSON                                                                                                          | —        | —                                                    | Electron: the value to return, resolve or reject with. Browser `respond`: the response body, required (`""` for an empty body). Browser `redirect`: the target URL, required. Omit for `abort` and observing |
+| `statusCode` | number                                                                                                            | —        | —                                                    | Browser `respond` behaviors only: response status code                                                                                                 |
+| `headers`    | object of strings                                                                                                 | —        | —                                                    | Browser `respond` behaviors only: response header overrides                                                                                            |
+
+Repeated calls keep the call history. Queued `Once` values survive further `Once` calls, but a later sticky behavior (a non-`Once` behavior such as `respond`, `abort`, `redirect` or `mockResolvedValue`) replaces the queue.
+
+```js
+// Observe every request to the API without changing it
+mock({ url: "**/api/**" })
+get_mock_calls({ url: "**/api/**" })
+
+// Answer GET requests to the API with an empty list
+mock({ url: "**/api/todos", method: "get", behavior: "respond", value: "[]", statusCode: 200, headers: { "content-type": "application/json" } })
+
+// Make the next dialog.showOpenDialog call resolve as cancelled, in an Electron session
+mock({ mockType: "electron", apiName: "dialog", funcName: "showOpenDialog", behavior: "mockResolvedValueOnce", value: { canceled: true, filePaths: [] } })
+```
+
+---
+
+### `get_mock_calls`
+
+Reads the arguments of every recorded call for a mock, with the same target fields as `mock`. Returns `{ "calls": [...], "callCount": n }` as JSON. It fails if no mock exists for that target yet. **Read-only.**
+
+```js
+get_mock_calls({ mockType: "electron", apiName: "dialog", funcName: "showOpenDialog" })
+```
+
+---
+
+### `manage_mock`
+
+Manages an existing mock, with the same target fields as `mock`. The `action` decides how far the cleanup goes:
+
+| `action`  | Effect                                                                                                    |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| `clear`   | Removes the call history. The configured behavior stays in place                                          |
+| `reset`   | Removes the call history, the configured behavior and any queued `Once` values. The mock keeps observing  |
+| `restore` | Reinstates the original behavior and releases the mock. A later `mock` call creates it again              |
+
+```js
+manage_mock({ url: "**/api/todos", action: "restore" })
+```
+
+## Cloud Providers
+
+### `list_apps`
+
+Lists apps uploaded to a cloud provider (BrowserStack App Automate, Sauce Labs App Storage, TestMu, TestingBot Storage or Digital.ai Applications). Reads provider-specific credentials from the environment. Sessionless and hidden until `enable_tools({ groups: ["cloud-apps"] })`.
+
+| Parameter          | Type                                                                                       | Required | Default          | Description                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------ | -------- | ---------------- | --------------------------------------------------------------------------- |
+| `provider`         | `"browserstack" \| "saucelabs" \| "testmu" \| "testingbot" \| "digitalai"`                  | ✓        | —                | Cloud provider                                                              |
+| `sortBy`           | `"app_name" \| "uploaded_at"`                                                               | —        | `"uploaded_at"`  | Sort order                                                                  |
+| `organizationWide` | boolean                                                                                    | —        | `false`          | (BrowserStack only) List apps uploaded by all users in the organization      |
+| `limit`            | number                                                                                     | —        | `20`             | Max results. Applies when `organizationWide` is `true`                      |
+| `region`           | `"us-west-1" \| "eu-central-1" \| "apac-southeast-1"`                                      | —        | `"eu-central-1"` | Sauce Labs region                                                           |
+
+```js
+// List apps on each provider
+list_apps({ provider: "browserstack" })
+list_apps({ provider: "saucelabs", region: "us-west-1" })
+list_apps({ provider: "testmu" })
+list_apps({ provider: "testingbot" })
+list_apps({ provider: "digitalai" })
+```
+
+---
+
+### `upload_app`
+
+Uploads a local `.apk` or `.ipa` to a cloud provider (BrowserStack, Sauce Labs, TestMu, TestingBot or Digital.ai). Returns the app URL for use in `start_session`. Sessionless and hidden until `enable_tools({ groups: ["cloud-apps"] })`.
+
+| Parameter  | Type                                                                                       | Required | Default          | Description                                      |
+| ---------- | ------------------------------------------------------------------------------------------ | -------- | ---------------- | ------------------------------------------------ |
+| `provider` | `"browserstack" \| "saucelabs" \| "testmu" \| "testingbot" \| "digitalai"`                  | ✓        | —                | Cloud provider                                   |
+| `path`     | string                                                                                     | ✓        | —                | Absolute path to the `.apk` or `.ipa` file       |
+| `customId` | string                                                                                     | —        | —                | Optional custom ID for referencing the app later |
+| `region`   | `"us-west-1" \| "eu-central-1" \| "apac-southeast-1"`                                      | —        | `"eu-central-1"` | Sauce Labs region                                |
+
+```js
+// Upload to each provider
+upload_app({ provider: "browserstack", path: "/path/to/app.apk" })
+upload_app({ provider: "saucelabs", path: "/path/to/app.ipa", region: "us-west-1" })
+upload_app({ provider: "testmu", path: "/path/to/app.apk" })
+upload_app({ provider: "testingbot", path: "/path/to/app.apk" })
+upload_app({ provider: "digitalai", path: "/path/to/app.apk" })
+```
+
+## Documentation
+
+### `query_docs`
+
+Searches the official WebdriverIO documentation and returns the most relevant excerpts, each with its page title, section trail, `path` and score. The corpus is fetched on first use and cached locally. Sessionless, read-only, and listed on every platform. Results come back in TOON format.
+
+Query with 2 to 3 distinctive keywords, not a sentence. `appium setup`, `devtools trace.zip` and `allure reporter` each return the right page first, while a full question dilutes the ranking. A word can also collide with an unrelated page: `wire` matches Wire Protocol, so if a query misses, retry with the exact page title. To browse instead of searching, read the `wdio://docs/index` resource for every page title and slug, then `wdio://docs/page/{slug}` for one page in full.
+
+Cite the `path` of any page you rely on.
+
+| Parameter  | Type    | Required | Default | Description                                                                        |
+| ---------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------- |
+| `query`    | string  | ✓        | —       | 2–3 distinctive keywords: an API name, config key, page title or feature           |
+| `limit`    | number  | —        | `5`     | Number of results (1–20)                                                           |
+| `fullPage` | boolean | —        | `false` | Return the full matched pages instead of excerpts                                  |
+
+```js
+query_docs({ query: "appium setup" })
+query_docs({ query: "devtools trace.zip", fullPage: true, limit: 3 })
+```

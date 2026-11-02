@@ -1,4 +1,18 @@
+import { getBrowserObject } from '@wdio/utils'
+
+import { Key } from '../../constants.js'
+import { isElementNotFoundAgain } from '../../utils/elementNotFound.js'
+import { isStaleElementToFindAgain } from '../../utils/index.js'
 import type { InputOptions } from '../../types.js'
+import { bidiGetProperty, isBidiCommandsEnabled } from '../../utils/bidi/elementCommands.js'
+
+/**
+ * Input types whose value can't be typed: a range input ignores key strokes,
+ * and date and time inputs split their value into segments that typing fills
+ * in the browser's locale order, so "2026-10-04" ends up as "61004-02-02".
+ * `setValue` sets their value like the browser's own picker does instead.
+ */
+const SET_DIRECTLY = ['range', 'date', 'datetime-local', 'month', 'week', 'time', 'color']
 
 /**
  * Send a sequence of key strokes to an element after the input has been cleared before. If the element doesn't need
@@ -11,6 +25,14 @@ import type { InputOptions } from '../../types.js'
  *
  * :::
  *
+ * Inputs of type `range`, `date`, `datetime-local`, `month`, `week`, `time` and `color` don't take key strokes
+ * as typed text. For them `setValue` sets the value directly and fires the `input` and `change` events, as
+ * picking a value with the mouse does. Pass the value in the input's own format, e.g. `2026-10-04` for a date
+ * or `14:30` for a time. The browser corrects values that don't fit, like a range input does with a value
+ * between two steps; read the result with [`getValue`](/docs/api/element/getValue). A value the browser
+ * can't parse at all, like `garbage` for a date or a range, or an empty value for a range, throws an error and
+ * leaves the previous value in place.
+ *
  * <example>
     :setValue.js
     it('should set value for a certain element', async () => {
@@ -19,6 +41,13 @@ import type { InputOptions } from '../../types.js'
         await input.setValue(123)
 
         console.log(await input.getValue()); // outputs: '123'
+    });
+
+    it('should set the value of a date input', async () => {
+        const input = await $('input[type="date"]');
+        await input.setValue('2026-10-04')
+
+        console.log(await input.getValue()); // outputs: '2026-10-04'
     });
  * </example>
  *
@@ -32,6 +61,106 @@ export async function setValue (
     value: string | number,
     options?: InputOptions,
 ) {
+    if ((typeof value === 'string' || typeof value === 'number') && await setsDirectly(this)) {
+        const browser = getBrowserObject(this)
+        const result = await browser.execute(function setInputValue (elem: HTMLInputElement, newValue: string) {
+            // leave a field the user can't change to the key strokes, which fail with the reason
+            if (elem.disabled || elem.readOnly) {
+                return 'skipped'
+            }
+            // a range input falls back to its midpoint for a value that isn't a finite number (an empty one too,
+            // as a range can't be empty), which a value inside the range can't be told from, so check it first
+            if (elem.type === 'range' && !(/^-?(\d+|\d*\.\d+)([eE][-+]?\d+)?$/.test(newValue) && Number.isFinite(Number(newValue)))) {
+                return 'rejected'
+            }
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+            const previous = elem.value
+            setter.call(elem, newValue)
+            // the other types reject a value they can't parse by resetting the input to an empty string,
+            // a color input to #000000, which is only right if the value is a CSS color for black
+            let rejected = newValue !== '' && elem.value === ''
+            if (!rejected && newValue !== '' && elem.type === 'color' && elem.value === '#000000') {
+                // a canvas keeps its current color for a value it can't parse
+                const context = document.createElement('canvas').getContext('2d')!
+                context.fillStyle = '#010101'
+                context.fillStyle = newValue
+                rejected = context.fillStyle !== '#000000'
+            }
+            if (rejected) {
+                setter.call(elem, previous)
+                return 'rejected'
+            }
+            elem.dispatchEvent(new Event('input', { bubbles: true }))
+            elem.dispatchEvent(new Event('change', { bubbles: true }))
+            return 'set'
+        }, this as unknown as HTMLInputElement, value.toString())
+        if (result === 'rejected') {
+            throw new Error(
+                `The browser rejected the value "${value}" for this input, which keeps its previous value. ` +
+                'Pass the value in the format of the input type: `2026-10-04` for a date, `14:30` for a time, a number for a range or `#rrggbb` for a color.'
+            )
+        }
+        if (result === 'set') {
+            return
+        }
+    }
     await this.clearValue()
+    await clearStubbornValue(this)
     return this.addValue(value, options)
+}
+
+/**
+ * A failed property lookup gives no value, except when the element changed:
+ * - the page removed it: the next command (`clearValue`, `addValue`) would wait for it again;
+ * - it is stale (the page rendered it again, and the lookup still failed): the `setValue` layer
+ *   finds it again and runs `setValue` again, as the middleware does for any command. With no
+ *   type, a date, range, time or color input would get key strokes instead of its value; with
+ *   no value after the clear, the value would be typed after the text of an input that the page
+ *   rendered again with its old text ("oldnew").
+ */
+function noPropertyUnlessElementChanged (err: unknown) {
+    if (isElementNotFoundAgain(err) || isStaleElementToFindAgain(err)) {
+        throw err
+    }
+    return undefined
+}
+
+/**
+ * A field whose framework keeps the value in its own state (React, Vue) can
+ * put it back right after `clearValue`, and the new value would be typed
+ * after it ("Phoenix, AZ90210"). Clearing the way a user does, select all
+ * and delete, goes through the framework's own handlers.
+ */
+async function clearStubbornValue (elem: WebdriverIO.Element) {
+    const browser = getBrowserObject(elem)
+    if (browser.isMobile && (browser.isNativeContext || browser.isWindowsApp || browser.isMacApp)) {
+        return
+    }
+    const remaining = await readProperty(elem, 'value')
+    if (typeof remaining !== 'string' || remaining === '') {
+        return
+    }
+    await browser.execute((el: HTMLElement) => el.focus(), elem as unknown as HTMLElement)
+    await browser.keys([Key.Ctrl, 'a'])
+    await browser.keys(Key.Backspace)
+}
+
+/**
+ * whether the element is an input that takes its value directly, see SET_DIRECTLY
+ */
+async function setsDirectly (elem: WebdriverIO.Element) {
+    const browser = getBrowserObject(elem)
+    // native apps have no DOM to set a value in
+    if (browser.isMobile && (browser.isNativeContext || browser.isWindowsApp || browser.isMacApp)) {
+        return false
+    }
+    const type = await readProperty(elem, 'type')
+    return typeof type === 'string' && SET_DIRECTLY.includes(type)
+}
+
+function readProperty (elem: WebdriverIO.Element, name: string): Promise<unknown> {
+    const read = isBidiCommandsEnabled(getBrowserObject(elem) as WebdriverIO.Browser)
+        ? bidiGetProperty(elem, name)
+        : elem.getElementProperty(elem.elementId, name)
+    return read.catch(noPropertyUnlessElementChanged)
 }

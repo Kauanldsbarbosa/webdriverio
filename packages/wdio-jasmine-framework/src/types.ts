@@ -1,3 +1,5 @@
+import type { Frameworks } from '@wdio/types'
+
 export interface ReporterOptions {
     cid: string
     specs: string[]
@@ -9,6 +11,8 @@ export interface ParentSuite {
     description: string
     id: string
     tests: number
+    /** the spec file of the suite, when it is known */
+    specFile?: string
 }
 
 export interface SuiteEvent extends jasmine.SuiteResult {
@@ -25,6 +29,8 @@ export interface TestEvent extends jasmine.SpecResult {
     duration: number | null,
     errors?: jasmine.FailedExpectation[],
     error?: jasmine.FailedExpectation,
+    /** the kind of a beforeAll / afterAll hook event, as `@wdio/reporter` reads it. @experimental */
+    hookKind?: Extract<Frameworks.HookKind, 'beforeAll' | 'afterAll'>
 }
 
 export interface ResultHandlerPayload {
@@ -80,8 +86,9 @@ export interface JasmineOpts {
      */
     requires?: string[]
     /**
-     * Whether to randomize spec execution order.
-     * @default true
+     * Whether to randomize spec execution order. Jasmine's own default is `true`, but
+     * WebdriverIO runs the specs in order unless this option is set.
+     * @default false
      */
     random?: boolean
     /**
@@ -90,13 +97,6 @@ export interface JasmineOpts {
      */
     seed?: Function
     /**
-     * Whether to stop execution of the suite after the first spec failure.
-     * @default false
-     * @since v3.3.0
-     * @deprecated Use the `stopOnSpecFailure` config property instead.
-     */
-    failFast?: boolean
-    /**
      * Whether to fail the spec if it ran no expectations. By default a spec that ran no expectations is reported as passed.
      * Setting this to true will report such spec as a failure.
      * @default false
@@ -104,7 +104,8 @@ export interface JasmineOpts {
      */
     failSpecWithNoExpectations?: boolean
     /**
-     * Whether to cause specs to only have one expectation failure.
+     * Stop a spec at its first failed expectation. A failed sync matcher stops the spec at
+     * once, and an awaited async matcher stops it when its promise settles.
      * @default false
      * @since v3.3.0
      */
@@ -126,19 +127,15 @@ export interface JasmineOpts {
     invertGrep?: boolean
     /**
      * Clean up stack trace and remove all traces of node module packages.
-     * @default false
+     * @default true
      */
     cleanStack?: boolean
     /**
-     * Stops test suite (`describe`) execution on first spec (`it`) failure (other suites continue running)
+     * Stop the spec file at its first failed spec (`it`): the other specs of the file do not
+     * run, also in other `describe` blocks. Other spec files run in their own workers.
      * @default false
      */
     stopOnSpecFailure?: boolean
-    /**
-     * Stops a spec (`it`) execution on a first expectation failure (other specs continue running)
-     * @default false
-     */
-    stopSpecOnExpectationFailure?: boolean
     /**
      * The Jasmine framework allows it to intercept each assertion in order to log the state of the application
      * or website depending on the result. For example it is pretty handy to take a screenshot every time

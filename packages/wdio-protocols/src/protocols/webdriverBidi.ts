@@ -10,7 +10,7 @@
  * ```
  *
  * from the project root. You can find the scripts that generates this file in
- * ./scripts/bidi/**
+ * ./infra/bidiCodegen/**
  */
 
 const protocol = {
@@ -90,7 +90,7 @@ const protocol = {
             "returns": {
                 "type": "Object",
                 "name": "local.SessionNewResult",
-                "description": "Command return value with the following interface:\n   ```ts\n   {\n     sessionId: string;\n     capabilities: {\n       acceptInsecureCerts: boolean;\n       browserName: string;\n       browserVersion: string;\n       platformName: string;\n       setWindowRect: boolean;\n       userAgent: string;\n       proxy?: SessionProxyConfiguration;\n       unhandledPromptBehavior?: SessionUserPromptHandler;\n       webSocketUrl?: string;\n     };\n   }\n   ```"
+                "description": "Command return value with the following interface:\n   ```ts\n   {\n     sessionId: string;\n     capabilities: SessionCapabilityResponse;\n   }\n   ```"
             }
         }
     },
@@ -323,7 +323,7 @@ const protocol = {
                 {
                     "name": "params",
                     "type": "`remote.BrowsingContextCaptureScreenshotParameters`",
-                    "description": "<pre>\\{<br />  context: BrowsingContextBrowsingContext;<br />  /\\*\\*<br />   \\* @default 'viewport'<br />   \\*/<br />  origin?: \"viewport\" &#124; \"document\";<br />  format?: BrowsingContextImageFormat;<br />  clip?: BrowsingContextClipRectangle;<br />\\}</pre>",
+                    "description": "<pre>\\{<br />  context: BrowsingContextBrowsingContext;<br />  /\\*\\*<br />   \\* @default 'viewport'<br />   \\*/<br />  origin?: \"viewport\" &#124; \"document\";<br />  format?: BrowsingContextImageFormat;<br />  clip?: BrowsingContextClipRectangle;<br />  imageSize?: BrowsingContextImageSize;<br />\\}</pre>",
                     "required": true
                 }
             ],
@@ -534,6 +534,46 @@ const protocol = {
             }
         }
     },
+    "browsingContext.startScreencast": {
+        "socket": {
+            "command": "browsingContextStartScreencast",
+            "description": "WebDriver Bidi command to send command method \"browsingContext.startScreencast\" with parameters.",
+            "ref": "https://w3c.github.io/webdriver-bidi/#command-browsingContext-startScreencast",
+            "parameters": [
+                {
+                    "name": "params",
+                    "type": "`remote.BrowsingContextStartScreencastParameters`",
+                    "description": "<pre>\\{<br />  context: BrowsingContextBrowsingContext;<br />  destinationFolder?: string;<br />  mimeType?: string;<br />  video?: BrowsingContextMediaTrackConstraints;<br />  audio?: boolean;<br />\\}</pre>",
+                    "required": true
+                }
+            ],
+            "returns": {
+                "type": "Object",
+                "name": "local.BrowsingContextStartScreencastResult",
+                "description": "Command return value with the following interface:\n   ```ts\n   {\n     screencast: BrowsingContextScreencast;\n     path: string;\n   }\n   ```"
+            }
+        }
+    },
+    "browsingContext.stopScreencast": {
+        "socket": {
+            "command": "browsingContextStopScreencast",
+            "description": "WebDriver Bidi command to send command method \"browsingContext.stopScreencast\" with parameters.",
+            "ref": "https://w3c.github.io/webdriver-bidi/#command-browsingContext-stopScreencast",
+            "parameters": [
+                {
+                    "name": "params",
+                    "type": "`remote.BrowsingContextStopScreencastParameters`",
+                    "description": "<pre>\\{<br />  screencast: BrowsingContextScreencast;<br />\\}</pre>",
+                    "required": true
+                }
+            ],
+            "returns": {
+                "type": "Object",
+                "name": "local.BrowsingContextStopScreencastResult",
+                "description": "Command return value with the following interface:\n   ```ts\n   {\n     path: string;\n     error?: string;\n   }\n   ```"
+            }
+        }
+    },
     "browsingContext.traverseHistory": {
         "socket": {
             "command": "browsingContextTraverseHistory",
@@ -610,6 +650,26 @@ const protocol = {
             "returns": {
                 "type": "Object",
                 "name": "local.EmulationSetLocaleOverrideResult",
+                "description": "Command return value with the following interface:\n   ```ts\n   ;\n   ```"
+            }
+        }
+    },
+    "emulation.setMediaFeaturesOverride": {
+        "socket": {
+            "command": "emulationSetMediaFeaturesOverride",
+            "description": "WebDriver Bidi command to send command method \"emulation.setMediaFeaturesOverride\" with parameters.",
+            "ref": "https://w3c.github.io/webdriver-bidi/#command-emulation-setMediaFeaturesOverride",
+            "parameters": [
+                {
+                    "name": "params",
+                    "type": "`remote.EmulationSetMediaFeaturesOverrideParameters`",
+                    "description": "<pre>\\{<br />  features: EmulationMediaFeatures &#124; null;<br />  contexts?: BrowsingContextBrowsingContext[];<br />  userContexts?: BrowserUserContext[];<br />\\}</pre>",
+                    "required": true
+                }
+            ],
+            "returns": {
+                "type": "Object",
+                "name": "local.EmulationSetMediaFeaturesOverrideResult",
                 "description": "Command return value with the following interface:\n   ```ts\n   ;\n   ```"
             }
         }
@@ -694,6 +754,26 @@ const protocol = {
             }
         }
     },
+    "emulation.setViewportMetaOverride": {
+        "socket": {
+            "command": "emulationSetViewportMetaOverride",
+            "description": "WebDriver Bidi command to send command method \"emulation.setViewportMetaOverride\" with parameters.",
+            "ref": "https://w3c.github.io/webdriver-bidi/#command-emulation-setViewportMetaOverride",
+            "parameters": [
+                {
+                    "name": "params",
+                    "type": "`remote.EmulationSetViewportMetaOverrideParameters`",
+                    "description": "<pre>\\{<br />  viewportMeta: true &#124; null;<br />  contexts?: BrowsingContextBrowsingContext[];<br />  userContexts?: BrowserUserContext[];<br />\\}</pre>",
+                    "required": true
+                }
+            ],
+            "returns": {
+                "type": "Object",
+                "name": "local.EmulationSetViewportMetaOverrideResult",
+                "description": "Command return value with the following interface:\n   ```ts\n   ;\n   ```"
+            }
+        }
+    },
     "emulation.setScriptingEnabled": {
         "socket": {
             "command": "emulationSetScriptingEnabled",
@@ -730,6 +810,26 @@ const protocol = {
             "returns": {
                 "type": "Object",
                 "name": "local.EmulationSetScrollbarTypeOverrideResult",
+                "description": "Command return value with the following interface:\n   ```ts\n   ;\n   ```"
+            }
+        }
+    },
+    "emulation.setTextLayoutModeOverride": {
+        "socket": {
+            "command": "emulationSetTextLayoutModeOverride",
+            "description": "WebDriver Bidi command to send command method \"emulation.setTextLayoutModeOverride\" with parameters.",
+            "ref": "https://w3c.github.io/webdriver-bidi/#command-emulation-setTextLayoutModeOverride",
+            "parameters": [
+                {
+                    "name": "params",
+                    "type": "`remote.EmulationSetTextLayoutModeOverrideParameters`",
+                    "description": "<pre>\\{<br />  textLayoutMode: EmulationTextLayoutMode &#124; null;<br />  contexts?: BrowsingContextBrowsingContext[];<br />  userContexts?: BrowserUserContext[];<br />\\}</pre>",
+                    "required": true
+                }
+            ],
+            "returns": {
+                "type": "Object",
+                "name": "local.EmulationSetTextLayoutModeOverrideResult",
                 "description": "Command return value with the following interface:\n   ```ts\n   ;\n   ```"
             }
         }

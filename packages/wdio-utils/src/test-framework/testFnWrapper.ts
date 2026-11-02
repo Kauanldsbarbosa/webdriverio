@@ -1,5 +1,6 @@
 import { logHookError } from './errorHandler.js'
-import { executeHooksWithArgs, executeAsync } from '../shim.js'
+import { executeHooksWithArgs, executeAsync, followFrameworkTimer } from '../shim.js'
+import { fullTestNameFrom, getDebugAgentPause, runnableFrom, setCurrentRunnable } from './debugAgent.js'
 
 import type {
     WrapperMethods,
@@ -7,14 +8,6 @@ import type {
     BeforeHookParam,
     AfterHookParam
 } from './types.js'
-
-declare global {
-    // Firstly variable '_wdioDynamicJasmineResultErrorList' gets reference to test result in packages/wdio-jasmine-framework/src/index.ts and then used here in wdio-utils/ as workaround for Jasmine
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    var _wdioDynamicJasmineResultErrorList: any | undefined
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    var _jasmineTestResult: any | undefined
-}
 
 const STACKTRACE_FILTER = [
     'node_modules/webdriver/',
@@ -53,6 +46,30 @@ export const testFnWrapper = function (
     return testFrameworkFnWrapper.call(this, { executeHooksWithArgs, executeAsync }, ...args)
 }
 
+/** Jasmine hook names as words, as in Mocha hook titles */
+const HOOK_LABELS = new Map([
+    ['beforeEach', 'before each'], ['afterEach', 'after each'], ['beforeAll', 'before all'], ['afterAll', 'after all']
+])
+
+/**
+ * Name of a Jasmine test or hook for a WDIO timeout error, as Jasmine has no runnable
+ * (Mocha: `undefined`, its runnable title is used): `'before each' hook: <function> for
+ * '<full spec name>'`. Single quotes, as the error quotes the name with `JSON.stringify`.
+ * The identity of a `beforeAll` / `afterAll` is the previous spec, so it gets no spec.
+ */
+function timeoutTitleOf (type: string, hookName: string | undefined, identity: unknown, fnName?: string) {
+    if (type === 'Test') {
+        return fullTestNameFrom(identity)
+    }
+    const label = type === 'Hook' && hookName ? HOOK_LABELS.get(hookName) : undefined
+    if (!label) {
+        return undefined
+    }
+    const hook = `'${label}' hook${fnName ? `: ${fnName}` : ''}`
+    const spec = hookName?.endsWith('Each') ? fullTestNameFrom(identity) : undefined
+    return spec ? `${hook} for '${spec}'` : hook
+}
+
 /**
  * wraps test framework spec/hook function with WebdriverIO before/after hooks
  *
@@ -71,7 +88,7 @@ export const testFrameworkFnWrapper = async function (
     this: unknown,
     { executeHooksWithArgs, executeAsync }: WrapperMethods,
     type: string,
-    { specFn, specFnArgs }: SpecFunction,
+    { specFn, specFnArgs, frameworkResult: readFrameworkResult }: SpecFunction,
     { beforeFn, beforeFnArgs }: BeforeHookParam<unknown>,
     { afterFn, afterFnArgs }: AfterHookParam<unknown>,
     cid: string,
@@ -79,37 +96,80 @@ export const testFrameworkFnWrapper = async function (
     hookName?: string,
     timeout?: number
 ) {
+    /**
+     * before the first `await`: Mocha starts the timeout of this test or hook
+     * as soon as this function returns its promise
+     */
+    followFrameworkTimer((this as { _runnable?: unknown } | undefined)?._runnable)
     const retries = { attempts: 0, limit: repeatTest }
     const beforeArgs = beforeFnArgs(this)
+    if (type === 'Test') {
+        setCurrentRunnable({ cid, ...runnableFrom(beforeArgs[0]) })
+    }
     if (type === 'Hook' && hookName) {
         beforeArgs.push(hookName)
     }
     await logHookError(`Before${type}`, await executeHooksWithArgs(`before${type}`, beforeFn, beforeArgs), cid)
 
+    /**
+     * Snapshot the runnable identity BEFORE running the spec/hook body.
+     *
+     * On a timeout, the framework's own race timer can fire fractionally before the framework
+     * records the failure, after which the framework synchronously advances its runnable pointer
+     * to the NEXT runnable. The awaited continuation below would then read a stale `context.test`
+     * and emit the after-hook with the WRONG (next) identity, leaving the runnable that actually
+     * timed out without a matching finish event.
+     *
+     * `afterFnArgs(this)` returns `[identityObject, context]` (see HookFnArgs). We capture that
+     * array here and reuse its identity element (index 0) at emit time; the result/error/duration
+     * args are still computed post-await, so result data stays accurate. Framework-agnostic: this
+     * path also serves jasmine, and `afterFnArgs` is guarded in case it is undefined.
+     */
+    const identitySnapshot = typeof afterFnArgs === 'function' ? afterFnArgs(this) : undefined
+    const timeoutTitle = (this as { _runnable?: unknown } | undefined)?._runnable
+        ? undefined
+        : timeoutTitleOf(type, hookName, identitySnapshot?.[0], (specFn as Function | undefined)?.name)
+
     let result
-    let error
+    let error: { stack?: string, matcherName?: string } | undefined
     let skip = false
     let autoSkipError: unknown
 
     const testStart = Date.now()
     try {
-        result = await executeAsync.call(this, specFn, retries, specFnArgs, timeout)
-        if (globalThis._jasmineTestResult !== undefined) {
-            result = globalThis._jasmineTestResult
-            globalThis._jasmineTestResult = undefined
-        }
-
-        if (globalThis._wdioDynamicJasmineResultErrorList?.length > 0) {
-            globalThis._wdioDynamicJasmineResultErrorList[0].stack = filterStackTrace(globalThis._wdioDynamicJasmineResultErrorList[0].stack)
-            error = globalThis._wdioDynamicJasmineResultErrorList[0]
-            globalThis._wdioDynamicJasmineResultErrorList = undefined
+        result = await executeAsync.call(this, specFn, retries, specFnArgs, timeout, timeoutTitle)
+        const frameworkResult = readFrameworkResult?.()
+        if (frameworkResult) {
+            if (frameworkResult.result !== undefined) {
+                result = frameworkResult.result
+            }
+            const frameworkError = frameworkResult.errors?.[0]
+            if (frameworkError) {
+                if (typeof frameworkError.stack === 'string') {
+                    frameworkError.stack = filterStackTrace(frameworkError.stack)
+                }
+                error = frameworkError
+            }
         }
     } catch (_err: unknown) {
         /**
          * To address skipping tests for Mocha and Jasmine
          */
-        if (!(JSON.stringify(_err, Object.getOwnPropertyNames(_err)).includes('sync skip; aborting execution') || JSON.stringify(_err, Object.getOwnPropertyNames(_err)).includes('marked Pending'))) {
-            const err = _err instanceof Error ? _err : new Error(typeof _err === 'string' ? _err : 'An unknown error occurred')
+        const errMessage = _err instanceof Error
+            ? _err.message
+            : (typeof _err === 'string' ? _err : '')
+        const isFrameworkSkip = (
+            errMessage.includes('sync skip; aborting execution') ||
+            errMessage.includes('marked Pending')
+        )
+        if (!isFrameworkSkip) {
+            const err = _err instanceof Error
+                ? _err
+                : new Error(
+                    typeof _err === 'string'
+                        ? _err
+                        : `An unknown error occurred: ${JSON.stringify(_err)}`
+                )
             if (err.stack) {
                 err.stack = filterStackTrace(err.stack)
             }
@@ -121,7 +181,23 @@ export const testFrameworkFnWrapper = async function (
         }
     }
     const duration = Date.now() - testStart
-    const afterArgs = afterFnArgs(this)
+    /**
+     * Reuse the pre-await identity snapshot so a timed-out runnable reports its OWN identity.
+     *
+     * The snapshot is `[identityObject, context]`. We keep the snapshotted identity (index 0,
+     * the `{...context.test, parent}` object that may have gone stale post-await) but re-read the
+     * live `context` (index 1) so anything the after-hook derives from the live framework context
+     * stays current. If `afterFnArgs` was undefined we fall back to an empty args array.
+     *
+     * `identitySnapshot` and `liveAfterArgs` both come from the same `afterFnArgs` callback, so when
+     * it is a function they share the same 2-tuple shape — `slice(1)` can never drop a context that
+     * was present; and when it is not a function both are absent (`undefined`/`[]`), so this branch
+     * is not taken and no context is lost.
+     */
+    const liveAfterArgs = typeof afterFnArgs === 'function' ? afterFnArgs(this) : []
+    const afterArgs = (identitySnapshot && identitySnapshot.length > 0)
+        ? [identitySnapshot[0], ...liveAfterArgs.slice(1)]
+        : liveAfterArgs
     afterArgs.push({
         retries,
         error,
@@ -133,6 +209,28 @@ export const testFrameworkFnWrapper = async function (
 
     if (type === 'Hook' && hookName) {
         afterArgs.push(hookName)
+    }
+
+    /**
+     * `wdio run --debug=agent` pauses a failed test before user `afterTest`
+     * hooks. `close` from that session fails the test.
+     */
+    if ((type === 'Test' || type === 'Step') && error && !skip) {
+        const pause = getDebugAgentPause()
+        if (pause) {
+            const identity = runnableFrom(afterArgs[0])
+            try {
+                await pause({ cid, spec: identity.spec, test: identity.test })
+            } catch (closeErr) {
+                const closed = closeErr instanceof Error ? closeErr : new Error(String(closeErr))
+                error = closed
+                const report = afterArgs[afterArgs.length - 1] as { error?: unknown, passed?: boolean }
+                if (report && typeof report === 'object') {
+                    report.error = closed
+                    report.passed = false
+                }
+            }
+        }
     }
 
     await logHookError(`After${type}`, await executeHooksWithArgs(`after${type}`, afterFn, [...afterArgs]), cid)

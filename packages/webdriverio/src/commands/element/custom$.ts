@@ -3,6 +3,7 @@ import { ELEMENT_KEY } from 'webdriver'
 import { getElement } from '../../utils/getElementObject.js'
 import { getBrowserObject } from '@wdio/utils'
 import type { CustomStrategyFunction } from '../../types.js'
+import { describeSelector } from '../../utils/describeSelector.js'
 
 /**
  *
@@ -49,7 +50,7 @@ export async function custom$ (
      * $('.notExisting').$('.someElem')
      */
     if (!this.elementId) {
-        throw Error(`Can't call custom$ on element with selector "${this.selector}" because element wasn't found`)
+        throw Error(`Can't call custom$ on element with selector "${describeSelector(this)}" because element wasn't found`)
     }
 
     const strategyRef = { strategy, strategyName, strategyArguments: [...strategyArguments, this] }
@@ -65,9 +66,13 @@ export async function custom$ (
         res = res[0]
     }
 
+    /**
+     * `custom$` never counts matches itself, so a refetch (implicit wait, stale
+     * element) must not suddenly apply the global strict `$` default either
+     */
     if (res && typeof res[ELEMENT_KEY] === 'string') {
-        return await getElement.call(this, strategyRef, res)
+        return await getElement.call(this, strategyRef, res, { strict: false })
     }
 
-    return await getElement.call(this, strategyRef, new Error('no such element'))
+    return await getElement.call(this, strategyRef, new Error('no such element'), { strict: false })
 }

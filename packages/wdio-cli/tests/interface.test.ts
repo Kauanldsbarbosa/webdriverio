@@ -1,4 +1,5 @@
 import path from 'node:path'
+import url from 'node:url'
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest'
 import WDIOCLInterface from '../src/interface.js'
 import { HookError } from '../src/utils.js'
@@ -73,6 +74,22 @@ describe('cli interface', () => {
         expect(wdioClInterface.result.passed).toBe(1)
         expect(wdioClInterface.result.retries).toBe(2)
         expect(wdioClInterface.result.failed).toBe(1)
+    })
+
+    it('should collect workerTimings messages', () => {
+        wdioClInterface.onMessage({
+            origin: 'worker',
+            name: 'workerTimings',
+            cid: '0-0',
+            content: { setup: 0.1, execution: 0.5, teardown: 0.05, total: 0.65 }
+        } as any)
+        expect(wdioClInterface.workerTimings).toEqual([{
+            cid: '0-0',
+            setup: 0.1,
+            execution: 0.5,
+            teardown: 0.05,
+            total: 0.65
+        }])
     })
 
     it('should mark jobs as skipped', () => {
@@ -188,24 +205,28 @@ describe('cli interface', () => {
     })
 
     describe('setup', () => {
-        it('called within constructor', () => {
-            wdioClInterface.onStart = vi.fn()
+        it('resets jobs, results, timings, and stored messages', () => {
+            wdioClInterface.emit('job:start', { cid: '0-0', hasTests: true })
+            wdioClInterface.result.finished = 4
+            wdioClInterface.result.passed = 3
+            wdioClInterface.result.retries = 1
+            wdioClInterface.result.failed = 2
+            wdioClInterface.workerTimings.push({ cid: '0-0', total: 1 })
+            wdioClInterface['_messages'] = {
+                reporter: { spec: ['failed'] },
+                debugger: { start: ['paused'] }
+            }
+
+            wdioClInterface.setup()
+
+            expect(wdioClInterface['_jobs'].size).toBe(0)
             expect(wdioClInterface.result).toEqual({
                 finished: 0,
                 passed: 0,
                 retries: 0,
                 failed: 0
             })
-            expect(wdioClInterface['_messages']).toEqual(EMPTY_INTERFACE_MESSAGE_OBJECT)
-        })
-
-        it('called explicitly', () => {
-            wdioClInterface.onStart = vi.fn()
-            wdioClInterface['_messages'] = {
-                reporter: {},
-                debugger: {}
-            }
-            wdioClInterface.setup()
+            expect(wdioClInterface.workerTimings).toEqual([])
             expect(wdioClInterface['_messages']).toEqual(EMPTY_INTERFACE_MESSAGE_OBJECT)
         })
     })
@@ -284,8 +305,28 @@ describe('cli interface', () => {
             expect(wdioClInterface.getFilenames()).toEqual('')
         })
 
-        it('no args', () => {
+        it('joins spec filenames', () => {
             expect(wdioClInterface.getFilenames(['foo', 'bar'])).toEqual('- foo, bar')
+        })
+
+        it('keeps spec file URLs intact', () => {
+            const spec = url.pathToFileURL(path.join(process.cwd(), 'test', 'specs', 'example.e2e.ts')).href
+            expect(wdioClInterface.getFilenames([spec])).toEqual(`- ${spec}`)
+        })
+
+        it('keeps plain spec paths intact', () => {
+            const spec = path.join(process.cwd(), 'test', 'specs', 'example.e2e.ts')
+            expect(wdioClInterface.getFilenames([spec])).toEqual(`- ${spec}`)
+        })
+
+        it('does not throw for a cwd that is an invalid regex', () => {
+            const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/project (1')
+            try {
+                const spec = url.pathToFileURL('/tmp/project (1/foo.ts').href
+                expect(wdioClInterface.getFilenames([spec])).toEqual(`- ${spec}`)
+            } finally {
+                cwdSpy.mockRestore()
+            }
         })
     })
 
@@ -423,13 +464,12 @@ describe('cli interface', () => {
         it('percentCompleted', () => {
             wdioClInterface.totalWorkerCnt = 31
             wdioClInterface.result.finished = 13
-            const result = Math.round(wdioClInterface.result.finished / wdioClInterface.totalWorkerCnt * 100)
-            expect(wdioClInterface.printSummary().some(x => x.includes(result))).toBe(true)
+            expect(wdioClInterface.printSummary().some(x => String(x).includes('42% completed'))).toBe(true)
         })
 
         it('percentCompleted without workers', () => {
             wdioClInterface.totalWorkerCnt = 0
-            expect(wdioClInterface.printSummary().some(x => x.includes(0))).toBe(true)
+            expect(wdioClInterface.printSummary().some(x => String(x).includes('(0% completed)'))).toBe(true)
         })
     })
 

@@ -2,7 +2,9 @@ import path from 'node:path'
 import { expect, test, beforeEach, vi } from 'vitest'
 import puppeteer from 'puppeteer-core'
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { remote } from '../../../src/index.js'
+import { setParallelContextStore, getParallelContextStore } from '../../../src/session/context.js'
 
 vi.mock('fetch')
 vi.mock('puppeteer-core')
@@ -21,6 +23,8 @@ vi.mock('@wdio/utils', async (origMod) => {
     }
 })
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
+
+const noopParallelContextStore = getParallelContextStore()
 
 // @ts-ignore mock feature
 const cdpSession = new puppeteer.CDPSessionMock()
@@ -87,4 +91,76 @@ test('should allow to send objects as param', async () => {
     expect(cdpSession.send).toBeCalledWith(
         'Network.emulateNetworkConditions',
         { foo: 'bar' })
+})
+
+test('should apply throttling to registered service workers', async () => {
+    const browser = await remote({
+        capabilities: {
+            browserName: 'devtools'
+        }
+    })
+
+    const serviceWorkerSession = { send: vi.fn() }
+    const serviceWorkerTarget = {
+        type: vi.fn().mockReturnValue('service_worker'),
+        createCDPSession: vi.fn().mockResolvedValue(serviceWorkerSession)
+    }
+    /**
+     * every connect call creates a new mock instance without a `connected`
+     * flag, so pin `puppeteer.connect` to a single instance we control
+     */
+    const puppeteerMock = new (puppeteer as any).PuppeteerMock()
+    puppeteerMock.targets = vi.fn().mockReturnValue([serviceWorkerTarget])
+    vi.mocked(puppeteer.connect).mockResolvedValue(puppeteerMock)
+
+    await browser.throttleNetwork('offline')
+
+    expect(serviceWorkerTarget.createCDPSession).toBeCalledTimes(1)
+    expect(serviceWorkerSession.send).toBeCalledWith('Network.enable')
+    expect(serviceWorkerSession.send).toBeCalledWith('Network.emulateNetworkConditions', {
+        offline: true,
+        downloadThroughput: 0,
+        uploadThroughput: 0,
+        latency: 1
+    })
+})
+
+test('should not touch sessions of non service worker targets', async () => {
+    const browser = await remote({
+        capabilities: {
+            browserName: 'devtools'
+        }
+    })
+
+    const otherSession = { send: vi.fn() }
+    const otherTarget = {
+        type: vi.fn().mockReturnValue('iframe'),
+        createCDPSession: vi.fn().mockResolvedValue(otherSession)
+    }
+    const puppeteerMock = new (puppeteer as any).PuppeteerMock()
+    puppeteerMock.targets = vi.fn().mockReturnValue([otherTarget])
+    vi.mocked(puppeteer.connect).mockResolvedValue(puppeteerMock)
+
+    await browser.throttleNetwork('offline')
+
+    expect(otherTarget.createCDPSession).not.toBeCalled()
+    expect(otherSession.send).not.toBeCalled()
+})
+
+test('should throw inside a parallel test scope and not touch the first tab', async () => {
+    const browser = await remote({
+        capabilities: {
+            browserName: 'devtools'
+        }
+    })
+    const store = new AsyncLocalStorage<string>()
+    setParallelContextStore(store)
+    try {
+        await expect(store.run('ctx-1', () => browser.throttleNetwork('Regular3G'))).rejects.toThrow(
+            '"throttleNetwork" is not supported inside parallel mode tests because it targets the whole browser'
+        )
+        expect(cdpSession.send).not.toHaveBeenCalled()
+    } finally {
+        setParallelContextStore(noopParallelContextStore)
+    }
 })

@@ -1,6 +1,7 @@
 ---
 id: selectors
 title: Selectors
+description: "Find elements with CSS, text, XPath, accessibility name, ARIA role and other selector strategies, and learn which ones are most resilient."
 ---
 
 The [WebDriver Protocol](https://w3c.github.io/webdriver/) provides several selector strategies to query an element. WebdriverIO simplifies them to keep selecting elements simple. Please note that even though the command to query elements is called `$` and `$$`, they have nothing to do with jQuery or the [Sizzle Selector Engine](https://github.com/jquery/sizzle).
@@ -29,8 +30,35 @@ We __do__ and __do not__ recommend the following selectors:
 | `$(() => document.queryElement('button'))` | ⚠️ Sparingly | Effective querying, complex to write. |
 | `$('button[name="submission"]')` | ⚠️ Sparingly | Coupled to the `name` attribute which has HTML semantics. |
 | `$('button[data-testid="submit"]')` | ✅ Good | Requires additional attribute, not connected to a11y. |
-| `$('aria/Submit')` | ✅ Good | Good. Resembles how the user interacts with the page. It is recommended to use translation files so your tests don't break when translations are updated. Note: This selector can be slower than others on large pages. |
+| `$('aria/Submit')` | ✅ Good | Good. Resembles how the user interacts with the page. It is recommended to use translation files so your tests don't break when translations are updated. On WebDriver BiDi sessions this uses the browser accessibility tree. On Classic sessions it falls back to XPath and can be slower on large pages. |
 | `$('button=Submit')` | ✅ Always | Best. Resembles how the user interacts with the page and is fast. It is recommended to use translation files so your tests don't break when translations are updated. |
+
+## Strict Mode
+
+As of v10 the [`$`](/docs/api/browser/$) command is __strict__: it represents exactly one element. If the selector matches more than one element, the command throws a `StrictSelectorError` instead of silently picking the first match:
+
+```js
+// there are 12 buttons on the page
+await $('button').click()
+// StrictSelectorError: strict mode violation: `$("button")` resolved to 12 elements, expected 1.
+```
+
+This is the same behavior as [Playwright locators](https://playwright.dev/docs/locators#strictness). Cypress differs: its queries may resolve to several elements, and it is the action commands such as [`.click()`](https://docs.cypress.io/api/commands/click#Click-all-elements-with-id-starting-with-btn) that reject a multi-element subject by default. Strict mode surfaces selectors that are too broad, which would otherwise silently interact with the wrong element as soon as the page grows.
+
+The rule applies to every step of a [chain](#chain-selectors) and to every selector type `$` accepts — string selectors (including ones that pierce the shadow DOM), [JS functions](#js-function), [mobile selectors](#mobile-selectors) and [custom strategy](#custom-selector-strategies) references.
+
+### What is not affected
+
+- `$$` keeps returning zero or many elements, as an [`ElementArray`](/docs/api/browser/$$). Await the list (or its `.length`) before you read the count or use `for...of`. `for await` works on the list directly.
+- The dedicated helper commands `custom$`, `shadow$` and `react$` are not strict — they still return their first match, as do their `$$` counterparts.
+- A selector that matches nothing still returns a lazily-resolved element, so [`waitForExist`](/docs/api/element/waitForExist) and the [auto-waiting](/docs/autowait) behavior are unchanged.
+- Passing an element reference, e.g. `$(await browser.getActiveElement())`, always refers to a single node and is never checked.
+
+:::info Migrating to v10
+
+For how to audit your suite for strict-mode violations, narrow or opt out of individual queries, and disable strict mode project-wide, see the [v10 migration guide](/docs/v10-migration).
+
+:::
 
 ## CSS Query Selector
 
@@ -133,7 +161,7 @@ https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7ef
 
 ## Name Attribute
 
-For querying elements with a specific name attribute you can either use a normal CSS3 selector or the provided name strategy from the [JSONWireProtocol](https://github.com/SeleniumHQ/selenium/wiki/JsonWireProtocol) by passing something like [name="some-name"] as selector parameter:
+For querying elements with a specific name attribute, use a CSS selector such as `[name="some-name"]`. On a mobile session that same shorthand is sent with Appium's `name` locator strategy:
 
 ```html reference
 https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/selectors/example.html#L6
@@ -143,7 +171,7 @@ https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7ef
 https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/selectors/example.js#L68-L69
 ```
 
-__Note:__ This selector strategy it deprecated and only works in old browser that are run by the JSONWireProtocol protocol or by using Appium.
+__Note:__ The `name` locator strategy is an Appium locator. Desktop sessions keep `[name="some-name"]` on the CSS strategy.
 
 ## xPath
 
@@ -170,6 +198,8 @@ https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7ef
 ## Accessibility Name Selector
 
 Query elements by their accessible name. The accessible name is what is announced by a screen reader when that element receives focus. The value of the accessible name can be both visual content or hidden text alternatives.
+
+On [WebDriver BiDi](https://w3c.github.io/webdriver-bidi/) sessions (Chrome, Edge, Firefox and other BiDi-capable browsers) WebdriverIO first uses [`browsingContext.locateNodes`](https://w3c.github.io/webdriver-bidi/#command-browsingContext-locateNodes) with an accessibility locator. That queries the browser accessibility tree directly and is typically much faster than the XPath approximation. If the accessibility locator finds nothing, WebdriverIO falls back to the Classic XPath heuristic so existing `aria/` queries keep matching.
 
 :::info
 
@@ -227,9 +257,36 @@ https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7ef
 https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/selectors/example.js#L114-L115
 ```
 
+## Role Selector
+
+Query elements by their ARIA role and accessible name, the way a screen reader describes them: "the *Add to cart* button". A role plus a name keeps matching when class names, test ids or the DOM structure change.
+
+```js
+await $('role/button[name="Add to cart"]').click()
+await expect($('role/heading[name="Order summary"]')).toBeDisplayed()
+
+// role only
+const rows = await $$('role/row')
+
+// scoped to a parent element
+const dialog = $('role/dialog[name="Checkout"]')
+await dialog.$('role/button[name="Pay now"]').click()
+```
+
+The syntax is `role/<role>` or `role/<role>[name="<accessible name>"]`. Single quotes work too, and a quote inside the name is escaped with a backslash: `role/button[name="Say \"hi\""]`.
+
+- The name has to match the full accessible name.
+- The role has to be an ARIA role. A typo fails with the closest valid role, for example `"buton" is not an ARIA role. Did you mean "button"?`.
+- `img` and its ARIA 1.3 name `image` are the same role.
+- The selector follows the [strict mode](#strict-mode) of `$` like every other selector.
+
+On a [WebDriver BiDi](https://w3c.github.io/webdriver-bidi/) session, WebdriverIO passes role and name to [`browsingContext.locateNodes`](https://w3c.github.io/webdriver-bidi/#command-browsingContext-locateNodes). The browser computes both itself, the same way assistive technology sees the page. Elements inside open shadow roots and inside frames, including frames from another origin, are found. If the browser finds no element, there is no fallback to a heuristic. Note that the browser decides the role: for example, a `<table>` without headers or caption can be a layout table, and its rows then have no `row` role.
+
+On a WebDriver Classic session, and when a browser does not support the role locator, WebdriverIO computes role and accessible name in the page with [`dom-accessibility-api`](https://github.com/eps1lon/dom-accessibility-api), the implementation Testing Library uses. A text field without a label is named by its `placeholder`, as browsers do. The role selector is not available in a native mobile app context. Use an [accessibility id](#accessibility-id) there.
+
 ## ARIA - Role Attribute
 
-For querying elements based on [ARIA roles](https://www.w3.org/TR/html-aria/#docconformance), you can directly specify role of the element like `[role=button]` as selector parameter:
+For querying elements based on [ARIA roles](https://www.w3.org/TR/html-aria/#docconformance), you can directly specify role of the element like `[role=button]` as selector parameter. This selector approximates the role from the element name and attributes. Prefer the [role selector](#role-selector), which uses the role the browser computes and can also match the accessible name:
 
 ```html reference
 https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7efbd9ae292201d/selectors/aria.html#L13
@@ -280,6 +337,8 @@ https://github.com/webdriverio/example-recipes/blob/e8b147e88e7a38351b0918b4f7ef
 Starting with `v9` of WebdriverIO there is no need for this special selector as WebdriverIO automatically pierces through the Shadow DOM for you. It is recommended to migrate off this selector by removing the `>>>` in front it.
 
 :::
+
+On a WebDriver BiDi session, `$` and `$$` look into every open shadow root: roots created with `attachShadow()` and declarative shadow roots (`<template shadowrootmode="open">`) that the page or `setHTMLUnsafe()` adds to the document. They do not look into a closed declarative shadow root, or into a declarative shadow root that `setHTMLUnsafe()` creates in an element that is not in the document yet. For these, use [`shadow$`](https://webdriver.io/docs/api/element/shadow$) on the host element.
 
 Many frontend applications heavily rely on elements with [shadow DOM](https://developer.mozilla.org/en-US/docs/Web/Web_Components/Using_shadow_DOM). It is technically impossible to query elements within the shadow DOM without workarounds. The [`shadow$`](https://webdriver.io/docs/api/element/shadow$) and [`shadow$$`](https://webdriver.io/docs/api/element/shadow$$) have been such workarounds that had their [limitations](https://github.com/Georgegriff/query-selector-shadow-dom#how-is-this-different-to-shadow). With the deep selector you can now query all elements within any shadow DOM using the common query command.
 
@@ -469,12 +528,14 @@ These commands allow you to select components off the [React VirtualDOM](https:/
 
 **Note**: The commands `react$` and `react$$` are similar in functionality, except that `react$$` will return *all* matching instances as an array of WebdriverIO elements, and `react$` will return the first found instance.
 
+The commands work with React 16 to 19, for an app that starts with `createRoot` or with `ReactDOM.render`. They read the components of the current render, so they also find components that a state change added. If React has not rendered a root of the page yet, they wait up to 5 seconds for it.
+
 #### Basic example
 
 ```jsx
 // index.jsx
 import React from 'react'
-import ReactDOM from 'react-dom'
+import { createRoot } from 'react-dom/client'
 
 function MyComponent() {
     return (
@@ -488,7 +549,7 @@ function App() {
     return (<MyComponent />)
 }
 
-ReactDOM.render(<App />, document.querySelector('#root'))
+createRoot(document.querySelector('#root')).render(<App />)
 ```
 
 In the above code there is a simple `MyComponent` instance inside the application, which React is rendering inside a HTML element with `id="root"`.
@@ -503,7 +564,7 @@ Now that you have the WebdriverIO element stored in `myCmp` variable, you can ex
 
 #### Filtering components
 
-The library that WebdriverIO uses internally allows to filter your selection by props and/or state of the component. To do so, you need to pass a second argument for props and/or a third argument for state to the browser command.
+You can filter your selection by the props and/or the state of the component. To do so, pass `props` and/or `state` in the second argument of the command.
 
 ```jsx
 // index.jsx
@@ -545,6 +606,23 @@ const myCmp = await browser.react$('MyComponent', {
     state: { myState: 'some value' }
 })
 ```
+
+A filter matches when each of its keys that the component also has matches. A key that the component does not have is ignored. A nested object matches the same way, and an array matches when it has one value in common with the array of the component. `null`, `false` and `0` match the same value. For a function component with hooks, the state is the state of the first hook (`useState` or `useReducer`): if the first hook is another hook, for example `useRef`, the state filter does not match. With both `props` and `state`, a component must match both.
+
+#### Selector rules
+
+- `*` matches one or more characters: `browser.react$$('My*')` finds `MyComponent` and `MyOtherComponent`.
+- Names separated by spaces find a component inside another one: `browser.react$$('List Item')` finds each `Item` inside a `List`.
+- The name of a component is its `displayName`, or else the name of its function or class. A component of `React.memo` has the name of its function (the development build of React 17 also gives it the `displayName` of the memo object). A component of `React.forwardRef` has no name, unless it has a `displayName`.
+- For a higher-order component with a name like `withRouter(MyComponent)`, the name inside the parentheses is used: `MyComponent`.
+- Without an element scope, the commands search all React roots of the page, in the order of the document, also roots inside other roots and roots in open shadow roots. `react$` gives the first match. To search one root only, call the command on its container or on an element of that root: `$('#other-root').react$$('MyComponent')`.
+- The results come root after root. In a root, they come in the order of the component tree, level by level, not in the order of the document. `react$$` gives each DOM node once.
+- For an app in a frame, call the command on the browsing context of the frame, or on an element of the frame: `(await page.frame({ selector: 'iframe' })).react$$('MyComponent')`.
+
+Known limits:
+
+- A component that renders only text gives a text node. With WebDriver Classic, a text node cannot be sent back, and the command fails with `javascript error: circular reference`.
+- While React hydrates a `Suspense` boundary of a server-rendered page, the components inside it do not exist yet. Wait until the page has finished to hydrate.
 
 #### Dealing with `React.Fragment`
 

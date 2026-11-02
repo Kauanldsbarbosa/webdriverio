@@ -1,28 +1,27 @@
 type ExpectType = import('expect-webdriverio').Expect
 
+declare namespace WebdriverIO {
+    /**
+     * The type of the global `expect`. A framework adapter can add call signatures to it.
+     */
+    interface GlobalExpect extends ExpectType {}
+}
+
 declare namespace NodeJS {
     interface Global {
-        /**
-         * @deprecated Use `multiRemoteBrowser` instead.
-         */
-        multiremotebrowser: WebdriverIO.MultiRemoteBrowser
         multiRemoteBrowser: WebdriverIO.MultiRemoteBrowser
         browser: WebdriverIO.Browser
         driver: WebdriverIO.Browser
-        expect: ExpectType
+        expect: WebdriverIO.GlobalExpect
     }
 }
 
 declare function $(...args: Parameters<WebdriverIO.Browser['$']>): ReturnType<WebdriverIO.Browser['$']>
 declare function $$(...args: Parameters<WebdriverIO.Browser['$$']>): ReturnType<WebdriverIO.Browser['$$']>
-/**
- * @deprecated Use `multiRemoteBrowser` instead.
- */
-declare var multiremotebrowser: WebdriverIO.MultiRemoteBrowser
 declare var multiRemoteBrowser: WebdriverIO.MultiRemoteBrowser
 declare var browser: WebdriverIO.Browser
 declare var driver: WebdriverIO.Browser
-declare var expect: ExpectType
+declare var expect: WebdriverIO.GlobalExpect
 
 /**
  * custom environment primitives for WebdriverIO when running in a browser

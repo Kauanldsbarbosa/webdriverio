@@ -9,12 +9,6 @@ export interface WebDriverResponse<T = unknown> {
     error?: string
     message?: string
     stacktrace?: string
-
-    /**
-     * JSONWP property
-     */
-    status?: number
-    sessionId?: string
 }
 
 export type RequestLibResponse = Options.RequestLibResponse
@@ -25,7 +19,7 @@ export interface RequestEventHandler {
     onResponse?: (ev: RequestEndEvent) => void
     onRetry?: (ev: RequestRetryEvent) => void
     onPerformance?: (ev: RequestPerformanceEvent) => void
-    onLogData?: (ev: BodyInit) => void
+    onLogData?: (ev: BodyInit | Record<string, unknown>) => void
 }
 
 export type RequestStartEvent = RequestInit

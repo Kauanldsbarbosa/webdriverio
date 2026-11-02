@@ -1,10 +1,6 @@
 import path from 'node:path'
-import cp from 'node:child_process'
-import fs from 'node:fs/promises'
 
-import { vi, describe, it, expect, afterEach, beforeEach, test } from 'vitest'
-import readDir from 'recursive-readdir'
-import { readPackageUp } from 'read-pkg-up'
+import { vi, describe, it, expect, beforeEach, test } from 'vitest'
 import { SevereServiceError } from 'webdriverio'
 import { ConfigParser } from '@wdio/config/node'
 
@@ -13,36 +9,12 @@ import {
     runOnCompleteHook,
     runServiceHook,
     getRunnerName,
-    findInConfig,
     getCapabilities,
+    shouldEnableTsx,
+    looksLikeTypeScriptPath,
 } from '../src/utils.js'
 
-vi.mock('recursive-readdir', () => ({
-    default: vi.fn().mockResolvedValue([
-        '/foo/bar/loo/page.js.ejs',
-        '/foo/bar/example.e2e.js'
-    ] as any)
-}))
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
-vi.mock('child_process', () => {
-    const m = {
-        execSyncRes: 'APPIUM_MISSING',
-        execSync: () => m.execSyncRes,
-        exec: vi.fn(),
-        spawn: vi.fn().mockReturnValue({ on: vi.fn().mockImplementation((ev, fn) => fn(0)) })
-    }
-    return { default: m }
-})
-
-vi.mock('read-pkg-up')
-
-vi.mock('node:fs/promises', () => ({
-    default: {
-        access: vi.fn().mockRejectedValue(new Error('ENOENT')),
-        mkdir: vi.fn(),
-        writeFile: vi.fn().mockReturnValue(Promise.resolve())
-    }
-}))
 
 vi.mock('@wdio/config/node', () => ({
     ConfigParser: class ConfigParserMock {
@@ -51,16 +23,14 @@ vi.mock('@wdio/config/node', () => ({
     }
 }))
 
-beforeEach(() => {
-    global.console.log = vi.fn()
+const { resolveMock } = vi.hoisted(() => ({
+    resolveMock: vi.fn((specifier: string) => specifier)
+}))
+vi.mock('import-meta-resolve', () => ({ resolve: resolveMock }))
+vi.mock('tsx', () => ({}))
 
-    vi.mocked(readPackageUp).mockResolvedValue({
-        path: '/foo/package.json',
-        packageJson: {
-            name: 'cool-test-module',
-            type: 'module'
-        }
-    })
+beforeEach(() => {
+    resolveMock.mockClear()
 })
 
 describe('runServiceHook', () => {
@@ -111,22 +81,18 @@ describe('runServiceHook', () => {
     it('executes all hooks and stops after a hook throws SevereServiceError', async () => {
         const hookFailing = vi.fn().mockImplementation(() => { throw new SevereServiceError() })
 
-        try {
-            await runServiceHook([
-                { onPrepare: hookSuccess },
-                // @ts-ignore test invalid parameter
-                { onPrepare: 'foobar' },
-                { onPrepare: asyncHookSuccess },
-                { onPrepare: hookFailing },
-            ], 'onPrepare', 1, true, 'abc')
-        } catch (err: any) {
-            expect(err.message).toEqual(expect.stringContaining('SevereServiceError'))
-            expect(err.message).toEqual(expect.stringContaining('Stopping runner...'))
-            expect(hookSuccess).toBeCalledTimes(1)
-            expect(hookFailing).toBeCalledTimes(1)
-            expect(slowSetupFn).toBeCalledTimes(1)
-            expect(asyncHookSuccess).toBeCalledTimes(1)
-        }
+        await expect(runServiceHook([
+            { onPrepare: hookSuccess },
+            // @ts-ignore test invalid parameter
+            { onPrepare: 'foobar' },
+            { onPrepare: asyncHookSuccess },
+            { onPrepare: hookFailing },
+        ], 'onPrepare', 1, true, 'abc')).rejects.toThrow(/SevereServiceError[\s\S]*Stopping runner\.\.\./)
+
+        expect(hookSuccess).toBeCalledTimes(1)
+        expect(hookFailing).toBeCalledTimes(1)
+        expect(slowSetupFn).toBeCalledTimes(1)
+        expect(asyncHookSuccess).toBeCalledTimes(1)
     })
 })
 
@@ -232,24 +198,6 @@ test('getRunnerName', () => {
     expect(getRunnerName({ foo: { capabilities: [] } })).toBe('MultiRemote')
 })
 
-describe('findInConfig', () => {
-    it('finds text for services', () => {
-        const str = "services: ['foo', 'bar'],"
-
-        expect(findInConfig(str, 'service')).toMatchObject([
-            'services: [\'foo\', \'bar\']'
-        ])
-    })
-
-    it('finds text for frameworks', () => {
-        const str = "framework: 'mocha'"
-
-        expect(findInConfig(str, 'framework')).toMatchObject([
-            "framework: 'mocha'"
-        ])
-    })
-})
-
 describe('getCapabilities', () => {
     it('should return driver with capabilities for android', async () => {
         expect(await getCapabilities({ option: 'foo.apk' } as any)).toMatchSnapshot()
@@ -313,7 +261,27 @@ describe('getCapabilities', () => {
         expect(autoCompileMock).toBeCalledTimes(1)
     })
 
-    it('should return driver with capabilities for multiremote config', async () => {
+    it.each(['.ts', '.tsx', '.mts', '.cts'])('should support %s TypeScript config files', async (ext) => {
+        const getCapabilitiesMock = vi.spyOn(ConfigParser.prototype, 'getCapabilities')
+        getCapabilitiesMock.mockReturnValue([
+            { browserName: 'chrome' }
+        ] as WebdriverIO.Capabilities)
+        expect(await getCapabilities({ option: `/path/to/config${ext}`, capabilities: 0 } as any))
+            .toEqual({ capabilities: { browserName: 'chrome' } })
+        expect(resolveMock).toHaveBeenCalledWith('tsx', expect.any(String))
+    })
+
+    it('should not load tsx for non-TypeScript config files', async () => {
+        const getCapabilitiesMock = vi.spyOn(ConfigParser.prototype, 'getCapabilities')
+        getCapabilitiesMock.mockReturnValue([
+            { browserName: 'chrome' }
+        ] as WebdriverIO.Capabilities)
+        expect(await getCapabilities({ option: '/path/to/config.js', capabilities: 0 } as any))
+            .toEqual({ capabilities: { browserName: 'chrome' } })
+        expect(resolveMock).not.toHaveBeenCalled()
+    })
+
+    it('should return driver with capabilities for multi-remote config', async () => {
         const getCapabilitiesMock = vi.spyOn(ConfigParser.prototype, 'getCapabilities')
         getCapabilitiesMock.mockReturnValue({
             myChromeBrowser: {
@@ -333,10 +301,47 @@ describe('getCapabilities', () => {
     })
 })
 
-afterEach(() => {
-    vi.mocked(console.log).mockRestore()
-    vi.mocked(readDir).mockClear()
-    vi.mocked(fs.writeFile).mockClear()
-    vi.mocked(cp.spawn).mockClear()
-    vi.mocked(fs.mkdir).mockClear()
+describe('shouldEnableTsx', () => {
+    it('detects TypeScript config files and tsConfigPath', () => {
+        expect(shouldEnableTsx('/tmp/wdio.conf.ts')).toBe(true)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', { tsConfigPath: './tsconfig.json' })).toBe(true)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js')).toBe(false)
+    })
+
+    it('detects TypeScript specs and require hooks on the config', () => {
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {
+            specs: ['./test/**/*.ts']
+        })).toBe(true)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {
+            mochaOpts: { require: ['./helpers/setup.ts'] }
+        })).toBe(true)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {
+            specs: ['./test/**/*.js']
+        })).toBe(false)
+    })
+
+    it('detects TypeScript specs declared on capabilities', () => {
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {}, [{
+            browserName: 'chrome',
+            specs: ['./e2e/**/*.ts'],
+            exclude: ['./e2e/skip.spec.ts']
+        } as WebdriverIO.Capabilities])).toBe(false)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {}, [{
+            browserName: 'chrome',
+            'wdio:specs': ['./e2e/app.spec.ts']
+        } as WebdriverIO.Capabilities])).toBe(true)
+        expect(shouldEnableTsx('/tmp/wdio.conf.js', {}, {}, [{
+            browserName: 'chrome',
+            'wdio:exclude': ['./e2e/skip.spec.ts']
+        } as WebdriverIO.Capabilities])).toBe(true)
+    })
+})
+
+describe('looksLikeTypeScriptPath', () => {
+    it('matches common TypeScript path forms', () => {
+        expect(looksLikeTypeScriptPath('./foo.ts')).toBe(true)
+        expect(looksLikeTypeScriptPath('./foo.tsx')).toBe(true)
+        expect(looksLikeTypeScriptPath('./foo/**/*.mts')).toBe(true)
+        expect(looksLikeTypeScriptPath('./foo.js')).toBe(false)
+    })
 })

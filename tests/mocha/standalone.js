@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { remote, attach, multiremote } from '../../packages/webdriverio/build/index.js'
+import { remote, attach, multiRemote } from '../../packages/webdriverio/build/index.js'
 
 function sleep (ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))
@@ -38,7 +38,8 @@ describe('scripts run in standalone mode', () => {
             assert.equal(await remoteBrowser.getTitle(), 'Mock Page Title')
             assert.equal(beforeCmdCounter, 1)
             assert.equal(afterCmdCounter, 1)
-            assert.ok((Date.now() - start) > 200)
+            // each hook sleeps 100ms, but a timer can fire about 1ms early when measured with Date.now()
+            assert.ok((Date.now() - start) >= 195)
         })
 
         it('should not have testrunner options since we initiating it as standalone instance', async () => {
@@ -76,11 +77,11 @@ describe('scripts run in standalone mode', () => {
         })
     })
 
-    describe('multiremote', () => {
+    describe('multi-remote', () => {
         let remoteBrowser
 
         before(async () => {
-            remoteBrowser = await multiremote({
+            remoteBrowser = await multiRemote({
                 foo: {
                     hostname: 'localhost',
                     port: 4444,

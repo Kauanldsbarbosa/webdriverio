@@ -1,4 +1,5 @@
 import path from 'node:path'
+import url from 'node:url'
 import { expect, test, vi, it, describe, afterEach } from 'vitest'
 import logger from '@wdio/logger'
 import { wrapGlobalTestMethod, executeHooksWithArgs } from '@wdio/utils'
@@ -7,12 +8,13 @@ import { jasmine } from 'jasmine'
 import type { EventEmitter } from 'node:events'
 
 import JasmineAdapterFactory, { JasmineAdapter } from '../src/index.js'
+import { wdioCustomMatchers } from 'expect-webdriverio'
 
 vi.mock('jasmine')
 vi.mock('expect-webdriverio', () => ({
     expect: {},
-    matchers: new Map([['toHaveTitle', vi.fn()]]),
-    getConfig: vi.fn()
+    wdioCustomMatchers:  { toHaveTitle: vi.fn() },
+    getDefaultOptions: vi.fn(),
 }))
 vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
 vi.mock('@wdio/utils', () => import(path.join(process.cwd(), '__mocks__', '@wdio/utils')))
@@ -50,7 +52,8 @@ const hookPayload = (type: string, error?: Error) => ({
     failedExpectations: [],
     deprecationWarnings: [],
     status: '',
-    pendingReason: ''
+    pendingReason: '',
+    hookKind: `${type}All`
 })
 
 const adapterFactory = (config = {}) => new JasmineAdapter(
@@ -70,25 +73,17 @@ test('comes with a factory', async () => {
         { browserName: 'chrome' },
         wdioReporter
     )
-    instance.setupExpect(expect as any, new Map(), vi.fn())
+    instance.setupExpect(expect as any, wdioCustomMatchers, vi.fn())
+
+    // verify the WDIO matcher bridge fired, with WDIO matchers only
+    const asyncMatchersArg = vi.mocked(jasmine.addAsyncMatchers).mock.calls[0]?.[0]
+    expect(Object.keys(asyncMatchersArg)).toEqual(['toHaveTitle'])
+
     const result = await instance.run()
     expect(result).toBe(0)
 
-    globalThis.jasmine.addAsyncMatchers = vi.fn()
-    globalThis.jasmine.addMatchers({
-        testMatcher: function testMatcher(/*matcherUtils*/) {
-            return {
-                compare: function compare(/*actual, expected*/) {
-                    return { pass: true, message: 'Just good vibes.' }
-                }
-            }
-        }
-    })
-    expect(jasmine.addAsyncMatchers).toBeCalledTimes(1)
-    const testMatcher = vi.mocked(globalThis.jasmine.addAsyncMatchers).mock.calls[0][0].testMatcher
-    const { compare, negativeCompare } = testMatcher({} as any)
-    expect(compare.constructor.name).toBe('AsyncFunction')
-    expect(negativeCompare?.constructor.name).toBe('AsyncFunction')
+    // user sync matchers stay sync
+    expect(globalThis.jasmine.addMatchers).toBe('addMatchers')
 })
 
 test('should properly set up jasmine', async () => {
@@ -99,7 +94,7 @@ test('should properly set up jasmine', async () => {
     expect(result).toBe(0)
     expect(vi.mocked(adapter['_jrunner']!.addSpecFile).mock.calls[0][0]).toEqual('/foo/bar.test.js')
     // @ts-ignore outdated types
-    expect(vi.mocked(adapter['_jrunner']!.jasmine.addReporter).mock.calls).toHaveLength(2)
+    expect(adapter['_jrunner']!.jasmine.addReporter).toHaveBeenCalledTimes(1)
     expect(vi.mocked(executeHooksWithArgs).mock.calls).toHaveLength(1)
 
     // @ts-expect-error
@@ -116,8 +111,6 @@ test('should properly set up jasmine', async () => {
     expect(adapter['_jrunner']!.configureDefaultReporter.name).toBe('noop')
     // @ts-ignore outdated types
     adapter['_jrunner']!.configureDefaultReporter()
-
-    expect(globalThis.jasmine.addAsyncMatchers).toBeCalledTimes(1)
 })
 
 test('should propery wrap interfaces', async () => {
@@ -160,10 +153,11 @@ test('emitHookEvent: should emit events for beforeAll and afterAll hooks', async
     adapter['_reporter'] = { emit: vi.fn() } as any
     allHooks.forEach((hookName) => {
         const hookIdx = INTERFACES.bdd.indexOf(hookName)
-        adapter['_reporter'].startedSuite = true as any
-        (vi.mocked(wrapGlobalTestMethod).mock.calls[hookIdx][BEFORE_HOOK_IDX] as Function[]).pop()!(null, null, undefined)
-        adapter['_reporter'].startedSuite = false as any
-        (vi.mocked(wrapGlobalTestMethod).mock.calls[hookIdx][AFTER_HOOK_IDX] as Function[]).pop()!(null, null, { error: new Error(hookName) })
+        const calls = vi.mocked(wrapGlobalTestMethod).mock.calls
+        const beforeHook = calls[hookIdx][BEFORE_HOOK_IDX] as Function[]
+        const afterHook = calls[hookIdx][AFTER_HOOK_IDX] as Function[]
+        beforeHook.pop()!(null, null, undefined)
+        afterHook.pop()!(null, null, { error: new Error(hookName) })
     })
 
     expect(adapter['_reporter'].emit).toHaveBeenCalledTimes(4)
@@ -177,17 +171,15 @@ test('emitHookEvent: should emit events for beforeAll and afterAll hooks', async
 test('should properly configure the jasmine environment', async () => {
     const stopOnSpecFailure = false
     const failSpecWithNoExpectations = false
-    const stopSpecOnExpectationFailure = false
+    const oneFailurePerSpec = true
     const random = false
-    const failFast = false
     const seed = false
 
     const adapter = adapterFactory({
         jasmineOpts: {
             stopOnSpecFailure,
-            stopSpecOnExpectationFailure,
+            oneFailurePerSpec,
             random,
-            failFast,
         }
     })
     await adapter.init()
@@ -196,12 +188,55 @@ test('should properly configure the jasmine environment', async () => {
     expect(adapter['_jrunner']!.jasmine.getEnv().configure).toBeCalledWith({
         specFilter: expect.any(Function),
         failSpecWithNoExpectations,
-        oneFailurePerSpec: stopSpecOnExpectationFailure,
+        stopSpecOnExpectationFailure: oneFailurePerSpec,
         stopOnSpecFailure,
         random,
         seed,
-        failFast,
     })
+})
+
+test('rejects removed jasmine config aliases', () => {
+    expect(() => adapterFactory({ jasmineNodeOpts: { grep: '@smoke' } })).toThrow(
+        /jasmineNodeOpts/
+    )
+    expect(() => adapterFactory({
+        jasmineOpts: { stopSpecOnExpectationFailure: true }
+    })).toThrow(/oneFailurePerSpec/)
+})
+
+test('hands the spec result to the wrapped spec once', async () => {
+    const adapter = adapterFactory()
+    await adapter.init()
+
+    const calls = vi.mocked(wrapGlobalTestMethod).mock.calls
+    const specCall = calls.find((call) => call[5] === 'it')
+    const hookCall = calls.find((call) => call[5] === 'beforeEach')
+    const readResult = specCall?.[8] as (() => { result: unknown, errors?: unknown[] } | undefined) | undefined
+
+    expect(readResult).toEqual(expect.any(Function))
+    expect(hookCall?.[8]).toBeUndefined()
+    expect(readResult!()).toBeUndefined()
+
+    adapter['_reporter'].specStarted({
+        id: 'test1',
+        description: 'test',
+        fullName: 'test',
+        failedExpectations: [{ stack: 'at spec', matcherName: 'toBe' }],
+        passedExpectations: [],
+        deprecationWarnings: [],
+        pendingReason: '',
+        duration: null,
+        properties: null,
+        debugLogs: null,
+        status: 'failed',
+        filename: '/foo/bar.test.js'
+    } as any)
+
+    expect(readResult!()).toEqual({
+        result: adapter['_lastTest'],
+        errors: [{ stack: 'at spec', matcherName: 'toBe' }]
+    })
+    expect(readResult!()).toBeUndefined()
 })
 
 test('set custom ', async () => {
@@ -217,46 +252,8 @@ test('set custom ', async () => {
     expect(config.jasmineOpts.expectationResultHandler).toBeCalledWith('foobar', undefined)
 })
 
-test('get data from beforeAll hook', async () => {
+test('records the in-flight spec when a spec starts', async () => {
     const adapter = adapterFactory()
-    await adapter.init()
-    await adapter.run()
-    expect(adapter['_lastSpec']).toBeUndefined()
-
-    // @ts-ignore outdated types
-    adapter['_jrunner']!.jasmine.Suite.prototype.beforeAll.call({
-        result: 'some result'
-    }, 'foobar')
-    expect(adapter['_lastSpec']).toBe('some result')
-    // @ts-ignore outdated types
-    expect(adapter['_jrunner']!.beforeAllHook).toBeCalledWith('foobar')
-})
-
-test('get data from execute hook', async () => {
-    const adapter = adapterFactory()
-    await adapter.init()
-    await adapter.run()
-    expect(adapter['_lastTest']).toBeUndefined()
-
-    adapter['_jrunner']!.jasmine.Spec.prototype.execute.call({
-        result: {
-            text: 'some result'
-        }
-    }, 'barfoo')
-
-    // @ts-ignore outdated types
-    expect(adapter['_lastTest'].text).toBe('some result')
-    // @ts-ignore outdated types
-    expect(typeof adapter['_lastTest'].start).toBe('number')
-    // @ts-ignore outdated types
-    expect(adapter['_jrunner']!.executeHook).toBeCalledWith('barfoo')
-})
-
-test('should populate last test data even if jasmine Spec.prototype.execute is undefined', async () => {
-    const adapter = adapterFactory()
-    // simulate Jasmine 5.10+ where this private API is no longer available
-    adapter['_jrunner']!.jasmine.Spec.prototype.execute = undefined as any
-
     await adapter.init()
     await adapter.run()
 
@@ -282,6 +279,35 @@ test('should populate last test data even if jasmine Spec.prototype.execute is u
     expect(adapter['_lastTest'].id).toBe('test1')
     // @ts-ignore outdated types
     expect(typeof adapter['_lastTest'].start).toBe('number')
+})
+
+// Jasmine names the file that calls `it()`, which is the WebdriverIO wrapper, not the spec file
+test('gives the test hooks the spec file of the suite of the test', async () => {
+    const [first, second] = ['a.test.js', 'b.test.js'].map((name) => path.resolve('foo', name))
+    const adapter = new JasmineAdapter('0-2', { beforeHook: [], afterHook: [] } as any, [first, url.pathToFileURL(second).href], { browserName: 'chrome' } as any, wdioReporter)
+    await adapter.init()
+    await adapter.run()
+    const spec = (id: string) => ({ id, description: id, fullName: id, failedExpectations: [], passedExpectations: [], filename: '/wdio/utils/build/index.js' }) as any
+
+    adapter['_reporter'].specStarted(spec('top-level'))
+    // @ts-ignore outdated types
+    expect(adapter['_lastTest'].file).toBe(first)
+    adapter['_reporter'].suiteStarted({ id: 's1', description: 'suite', fullName: 'suite', filename: second } as any)
+    adapter['_reporter'].specStarted(spec('in a suite'))
+    // @ts-ignore outdated types
+    expect(adapter['_lastTest'].file).toBe(second)
+    adapter['_jrunner']!.specFiles = [first, second]
+    expect(adapter.prepareMessage('afterTest').file).toBe(second)
+})
+
+test('gives a test outside every suite of grouped spec files the first spec file, as the hook messages do', async () => {
+    const [first, second] = ['a.test.js', 'b.test.js'].map((name) => path.resolve('foo', name))
+    const adapter = new JasmineAdapter('0-2', { beforeHook: [], afterHook: [] } as any, [first, url.pathToFileURL(second).href], { browserName: 'chrome' } as any, wdioReporter)
+    await adapter.init()
+    await adapter.run()
+    adapter['_reporter'].specStarted({ id: 'top-level', description: 'top-level', fullName: 'top-level', failedExpectations: [], passedExpectations: [], filename: '/wdio/utils/build/index.js' } as any)
+    // @ts-ignore outdated types
+    expect(adapter['_lastTest'].file).toBe(first)
 })
 
 test('customSpecFilter', () => {
@@ -353,7 +379,6 @@ test('formatMessage', () => {
     })
     expect(message.error?.message).toBe('foobar')
 
-    adapter['_lastSpec'] = { description: 'lasttestdesc' } as any
     message = adapter.formatMessage({
         type: 'afterTest',
         payload: {
@@ -368,7 +393,6 @@ test('formatMessage', () => {
     expect(message.duration).toBeGreaterThan(1999)
     expect(message.duration).toBeLessThan(2005)
     expect(message.passed).toBe(true)
-    expect(message.parent).toBe('lasttestdesc')
     expect(message.title).toBe('foodesc')
 
     message = adapter.formatMessage({
@@ -407,17 +431,6 @@ test('getExpectationResultHandler returns origHandler if none is given', () => {
     expect(handler).toBe('foobar')
 })
 
-test('getExpectationResultHandler returns modified origHandler if expectationResultHandler is given', () => {
-    const jasmine = { Spec: { prototype: { addExpectationResult: 'foobar' } } }
-    const config = { jasmineOpts: { expectationResultHandler: vi.fn() } }
-    const adapter = adapterFactory(config)
-
-    adapter.expectationResultHandler = vi.fn().mockImplementation(() => 'barfoo')
-    const handler = adapter.getExpectationResultHandler(jasmine as any)
-    expect(handler).toBe('barfoo')
-    expect(adapter.expectationResultHandler).toBeCalledWith('foobar')
-})
-
 test('expectationResultHandler', () => {
     const origHandler = vi.fn()
     const config = { jasmineOpts: { expectationResultHandler: vi.fn() } }
@@ -451,6 +464,37 @@ test('expectationResultHandler failing', () => {
     )
 })
 
+test('expectationResultHandler records a thrown handler as a failure', () => {
+    const origHandler = vi.fn()
+    const err = new Error('uuups')
+    const config = { jasmineOpts: { expectationResultHandler: () => {
+        throw err
+    } } }
+    const adapter = adapterFactory(config)
+    const lastTest = {
+        failedExpectations: [] as { passed?: boolean, message?: string }[],
+        passedExpectations: [] as unknown[],
+        [Symbol.for('wdio.jasmine.recordedExpectations')]: true
+    }
+    adapter['_lastTest'] = lastTest as any
+    adapter['_jrunner'] = {
+        jasmine: {
+            private: {
+                buildExpectationResult: (options: { message?: string, passed?: boolean }) => options
+            }
+        }
+    } as any
+
+    const resultHandler = adapter.expectationResultHandler(origHandler)
+    // @ts-ignore mock feature
+    resultHandler(true, { message: 'ok' })
+    expect(lastTest.passedExpectations).toHaveLength(0)
+    expect(lastTest.failedExpectations).toEqual([expect.objectContaining({
+        passed: false,
+        message: 'expectationResultHandlerError: uuups'
+    })])
+})
+
 test('expectationResultHandler failing with failing test', () => {
     const origHandler = vi.fn()
     const config = { jasmineOpts: { expectationResultHandler: () => {
@@ -469,15 +513,12 @@ test('prepareMessage', () => {
     adapter.formatMessage = (params) => params
     adapter['_jrunner'] = {} as any
     adapter['_jrunner']!.specFiles = ['/some/path.test.js']
-    adapter['_lastSpec'] = { foo: 'bar' } as any
     adapter['_lastTest'] = { bar: 'foo' } as any
 
     const msg = adapter.prepareMessage('beforeSuite')
     expect(msg.type).toBe('beforeSuite')
     // @ts-ignore overwritten formatMessage
     expect(msg.payload.file).toBe('/some/path.test.js')
-    // @ts-ignore overwritten formatMessage
-    expect(msg.payload.foo).toBe('bar')
 
     const msgSpec = adapter.prepareMessage('beforeTest')
     expect(msgSpec.type).toBe('beforeTest')
@@ -504,7 +545,7 @@ describe('_grep', () => {
 })
 
 describe('loadFiles', () => {
-    it('should set _hasTests to true if there are tests to run', async () => {
+    it('should set hasTests to true if there are tests to run', async () => {
         const adapter = adapterFactory({})
         // @ts-ignore test scenario
         delete adapter['_hasTests']
@@ -522,10 +563,10 @@ describe('loadFiles', () => {
         expect(adapter['_jrunner']!.loadRequires).toBeCalled()
         expect(adapter['_jrunner']!.loadHelpers).toBeCalled()
         expect(adapter['_jrunner']!.loadSpecs).toBeCalled()
-        expect(adapter['_hasTests']).toBe(true)
+        expect(adapter.hasTests()).toBe(true)
     })
 
-    it('should set _hasTests to false if there no tests to run', async () => {
+    it('should set hasTests to false if there are no tests to run', async () => {
         const adapter = adapterFactory()
         // @ts-ignore test scenario
         delete adapter['_hasTests']
@@ -549,33 +590,25 @@ describe('loadFiles', () => {
         expect(adapter['_jrunner']!.addRequires).toHaveBeenCalledWith(adapter['_jasmineOpts'].requires)
         // @ts-ignore outdated types
         expect(adapter['_jrunner']!.addMatchingHelperFiles).toHaveBeenCalledWith(adapter['_jasmineOpts'].helpers)
-        expect(adapter['_hasTests']).toBe(false)
-    })
-
-    it('should not fail on exception', () => {
-        const adapter = adapterFactory()
-        adapter['_jrunner'] = {} as any
-        // @ts-ignore test scenario
-        delete adapter['_hasTests']
-
-        // @ts-ignore outdated types
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-        adapter['_jrunner']!.loadRequires = vi.fn().mockImplementation(() => { throw new Error('foo') }),
-
-        adapter._loadFiles()
-        // @ts-ignore outdated types
-        expect(adapter['_jrunner']!.loadRequires).toBeCalled()
-        expect(adapter['_hasTests']).toBe(undefined)
-    })
-})
-
-describe('hasTests', () => {
-    it('should return flag result', () => {
-        const adapter = adapterFactory()
-        adapter['_hasTests'] = true
-        expect(adapter.hasTests()).toBe(true)
-        adapter['_hasTests'] = false
         expect(adapter.hasTests()).toBe(false)
+    })
+
+    it('logs and resolves when spec files fail to load', async () => {
+        const adapter = adapterFactory()
+        const loadError = new Error('foo')
+        adapter['_jrunner'] = {} as any
+        // @ts-ignore outdated types
+        adapter['_jrunner']!.loadRequires = vi.fn().mockImplementation(() => { throw loadError })
+        vi.mocked(logger('').warn).mockClear()
+
+        await expect(adapter._loadFiles()).resolves.toBeUndefined()
+
+        expect(adapter.hasTests()).toBe(true)
+        expect(vi.mocked(logger('').warn)).toBeCalledWith(
+            expect.stringContaining('Unable to load spec files'),
+            'Error: ',
+            loadError
+        )
     })
 })
 
@@ -584,3 +617,4 @@ afterEach(() => {
     vi.mocked(executeHooksWithArgs).mockClear()
     vi.mocked(jasmine.addAsyncMatchers).mockClear()
 })
+

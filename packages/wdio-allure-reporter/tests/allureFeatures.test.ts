@@ -197,6 +197,43 @@ describe('reporter runtime implementation', () => {
         expect(results[0].steps[0].attachments).toHaveLength(1)
     })
 
+    it('start/end step and runtime messages via reporter instance events', async () => {
+        const reporter = new AllureReporter({ outputDir })
+        reporter.onRunnerStart(runnerStart())
+        reporter.onTestStart(testStart())
+        reporter.emit(events.startStep, 'bar')
+        reporter.emit(events.endStep, Status.FAILED)
+        reporter.emit(events.runtimeMessage, { type: 'metadata', data: { labels: [{ name: 'tag', value: 'relayed' }] } })
+        reporter.onTestPass(testPassed())
+        await reporter.onRunnerEnd(runnerEnd())
+        const { results } = getResults(outputDir)
+        expect(results[0].steps[0].name).toBe('bar')
+        expect(results[0].steps[0].status).toBe(Status.FAILED)
+        expect(results[0].labels).toContainEqual({ name: 'tag', value: 'relayed' })
+    })
+
+    it('enables lane mode for the vitest framework only', () => {
+        const laneModeFor = (framework: string) => {
+            const reporter = new AllureReporter({ outputDir })
+            reporter.onRunnerStart({ ...runnerStart(), config: { framework } } as any)
+            return reporter['_laneMode']
+        }
+        expect(laneModeFor('vitest')).toBe(true)
+        expect(laneModeFor('mocha')).toBe(false)
+    })
+
+    it('falls back to sequential handling without a context id in lane mode', async () => {
+        const reporter = new AllureReporter({ outputDir })
+        reporter.onRunnerStart({ ...runnerStart(), config: { framework: 'vitest' } } as any)
+        reporter.onTestStart(testStart())
+        reporter.emit(events.startStep, 'bar')
+        reporter.emit(events.endStep, Status.PASSED)
+        reporter.onTestPass(testPassed())
+        await reporter.onRunnerEnd(runnerEnd())
+        const { results } = getResults(outputDir)
+        expect(results[0].steps[0].name).toBe('bar')
+    })
+
     it('start/end step via process events', async () => {
         const reporter = new AllureReporter({ outputDir })
         reporter.onRunnerStart(runnerStart())
@@ -275,18 +312,18 @@ describe('reporter runtime implementation', () => {
             expect(results[0].parameters[0]).toEqual({ name: 'device', value: 'Google Pixel 3-9.0' })
         })
 
-        it('should correctly add argument for multiremote', async () => {
+        it('should correctly add argument for multi-remote', async () => {
             const reporter = new AllureReporter({ outputDir })
             reporter.onRunnerStart({
                 ...runnerStart(),
-                isMultiremote: true,
+                isMultiRemote: true,
                 capabilities: { myBrowser: { browserName: 'chrome' } },
             })
             reporter.onTestStart(testStart())
             reporter.onTestPass(testPassed())
             await reporter.onRunnerEnd(runnerEnd())
             const { results } = getResults(outputDir)
-            expect(results[0].parameters[0]).toEqual({ name: 'isMultiremote', value: 'true' })
+            expect(results[0].parameters[0]).toEqual({ name: 'isMultiRemote', value: 'true' })
         })
     })
 })
@@ -534,6 +571,136 @@ describe('hooks handling default', () => {
         const afterCount = Array.isArray(test.fixtures) ? test.fixtures.filter((f: any) => f.type === 'after').length : 0
         expect(beforeCount).toBeGreaterThanOrEqual(1)
         expect(afterCount).toBeGreaterThanOrEqual(1)
+    })
+
+    it('attaches a root-level "before all" hook (fired before any suite exists) to the first test', async () => {
+        reporter.onRunnerStart(runnerStart())
+
+        reporter.onHookStart({ cid: cid(), title: '"before all" hook in "{root}"', parent: '' } as HookStats)
+        reporter.addStep('root-before-all-step')
+        reporter.onHookEnd({ cid: cid(), title: '"before all" hook in "{root}"', parent: '' } as HookStats)
+
+        reporter.onSuiteStart(suiteStart())
+        reporter.onTestStart(testStart())
+        reporter.onTestPass(testPassed())
+        reporter.onSuiteEnd(suiteEnd())
+        await reporter.onRunnerEnd(runnerEnd())
+
+        const { results, containers } = getResults(outputDir)
+        expect(results).toHaveLength(1)
+        expect(containers).toHaveLength(1)
+        expect(containers[0].befores[0].steps[0]).toEqual(expect.objectContaining({ name: 'root-before-all-step' }))
+    })
+
+    it('attaches a before-all hook step to every test in the suite, not just one', async () => {
+        const reporter = new AllureReporter({ outputDir })
+        reporter.onRunnerStart(runnerStart())
+        reporter.onSuiteStart({ cid: cid(), title: 'My Login application' } as any)
+
+        reporter.onHookStart({ title: '"before all" hook for "My Login application"', parent: 'My Login application' } as HookStats)
+        reporter.addStep('Start login')
+        reporter.onHookEnd({ title: '"before all" hook for "My Login application"', parent: 'My Login application' } as HookStats)
+
+        reporter.onTestStart({ ...testStart(), title: 'test 1' } as any)
+        reporter.onTestPass(testPassed())
+
+        reporter.onTestStart({ ...testStart(), title: 'test 2' } as any)
+        reporter.onTestPass(testPassed())
+
+        reporter.onTestStart({ ...testStart(), title: 'test 3' } as any)
+        reporter.onTestPass(testPassed())
+
+        reporter.onSuiteEnd(suiteEnd())
+        await reporter.onRunnerEnd(runnerEnd())
+
+        const { results, containers } = getResults(outputDir)
+        expect(results).toHaveLength(3)
+        expect(containers).toHaveLength(1)
+
+        const container = containers[0]
+        expect(container.children).toHaveLength(3)
+        expect(container.children.sort()).toEqual(results.map((r: any) => r.uuid).sort())
+        expect(container.befores[0].steps[0]).toEqual(expect.objectContaining({ name: 'Start login' }))
+    })
+
+    it('keeps before-all/after-all fixtures shared but before-each/after-each fixtures isolated per test', async () => {
+        const reporter = new AllureReporter({ outputDir })
+        reporter.onRunnerStart(runnerStart())
+        reporter.onSuiteStart(suiteStart())
+
+        reporter.onHookStart({ title: '"before all" hook', parent: 'Login' } as HookStats)
+        reporter.addStep('before-all-step')
+        reporter.onHookEnd({ title: '"before all" hook', parent: 'Login' } as HookStats)
+
+        for (const n of [1, 2, 3]) {
+            reporter.onTestStart({ ...testStart(), title: `test ${n}` } as any)
+            reporter.onHookStart({ title: '"before each" hook', parent: 'Login' } as HookStats)
+            reporter.addStep(`before-each-step-${n}`)
+            reporter.onHookEnd({ title: '"before each" hook', parent: 'Login' } as HookStats)
+            reporter.onTestPass(testPassed())
+            reporter.onHookStart({ title: '"after each" hook', parent: 'Login' } as HookStats)
+            reporter.addStep(`after-each-step-${n}`)
+            reporter.onHookEnd({ title: '"after each" hook', parent: 'Login' } as HookStats)
+        }
+
+        reporter.onHookStart({ title: '"after all" hook', parent: 'Login' } as HookStats)
+        reporter.addStep('after-all-step')
+        reporter.onHookEnd({ title: '"after all" hook', parent: 'Login' } as HookStats)
+
+        reporter.onSuiteEnd(suiteEnd())
+        await reporter.onRunnerEnd(runnerEnd())
+
+        const { results, containers } = getResults(outputDir)
+        expect(results).toHaveLength(3)
+        const testUuids = results.map((r: any) => r.uuid).sort()
+
+        const beforeAllContainer = containers.find((c: any) => c.name === '"before all" hook')
+        const afterAllContainer = containers.find((c: any) => c.name === '"after all" hook')
+        expect(beforeAllContainer).toBeDefined()
+        expect(afterAllContainer).toBeDefined()
+        expect(beforeAllContainer.children.sort()).toEqual(testUuids)
+        expect(afterAllContainer.children.sort()).toEqual(testUuids)
+
+        const beforeEachContainers = containers.filter((c: any) => c.name === '"before each" hook')
+        const afterEachContainers = containers.filter((c: any) => c.name === '"after each" hook')
+        expect(beforeEachContainers).toHaveLength(3)
+        expect(afterEachContainers).toHaveLength(3)
+        for (const c of [...beforeEachContainers, ...afterEachContainers]) {
+            expect(c.children).toHaveLength(1)
+        }
+    })
+
+    it('does not misclassify before-each/after-each hooks whose title mentions "all" via the suite/test name', async () => {
+        const reporter = new AllureReporter({ outputDir })
+        reporter.onRunnerStart(runnerStart())
+        // Mocha formats an "each" hook's title as `"before each" hook for "<test title>"` -
+        // a test named to contain the word "all" must not make the hook look suite-scoped.
+        reporter.onSuiteStart({ cid: cid(), title: 'All users' } as any)
+
+        for (const n of [1, 2, 3]) {
+            reporter.onTestStart({ ...testStart(), title: `should handle all cases ${n}` } as any)
+            reporter.onHookStart({ title: `"before each" hook for "should handle all cases ${n}"`, parent: 'All users' } as HookStats)
+            reporter.addStep(`before-each-step-${n}`)
+            reporter.onHookEnd({ title: `"before each" hook for "should handle all cases ${n}"`, parent: 'All users' } as HookStats)
+            reporter.onTestPass(testPassed())
+            reporter.onHookStart({ title: `"after each" hook for "should handle all cases ${n}"`, parent: 'All users' } as HookStats)
+            reporter.addStep(`after-each-step-${n}`)
+            reporter.onHookEnd({ title: `"after each" hook for "should handle all cases ${n}"`, parent: 'All users' } as HookStats)
+        }
+
+        reporter.onSuiteEnd(suiteEnd())
+        await reporter.onRunnerEnd(runnerEnd())
+
+        const { results, containers } = getResults(outputDir)
+        expect(results).toHaveLength(3)
+
+        const beforeEachContainers = containers.filter((c: any) => /before each/.test(c.name))
+        const afterEachContainers = containers.filter((c: any) => /after each/.test(c.name))
+        expect(beforeEachContainers).toHaveLength(3)
+        expect(afterEachContainers).toHaveLength(3)
+        for (const c of [...beforeEachContainers, ...afterEachContainers]) {
+            expect(c.children).toHaveLength(1)
+        }
     })
 })
 

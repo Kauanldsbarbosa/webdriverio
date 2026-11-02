@@ -19,7 +19,8 @@ export const WDIO_DEFAULTS: Options.Definition<Capabilities.WebdriverIOConfig> =
             }
 
             /**
-             * skip following check if user uses Node.js v20.5 or below
+             * import.meta.resolve exists on every supported Node.js release.
+             * Skip the lookup when a bundler does not expose it.
              */
             if (typeof import.meta.resolve !== 'function') {
                 return
@@ -71,6 +72,26 @@ export const WDIO_DEFAULTS: Options.Definition<Capabilities.WebdriverIOConfig> =
         default: 5000
     },
     /**
+     * Throw if `$` matches more than one element
+     */
+    strictSelectors: {
+        type: 'boolean',
+        default: true
+    },
+    /**
+     * Maximum size of the response body (in bytes) that `browser.mock` collects.
+     * Use 0 to disable data collection of the spied response payload. Without
+     * this entry, `remote()` drops the option in standalone mode.
+     */
+    maxSpyCollectedBodySize: {
+        type: 'number',
+        validate: (param: number) => {
+            if (!Number.isInteger(param) || param < 0) {
+                throw new Error('maxSpyCollectedBodySize should be an integer of 0 or more')
+            }
+        }
+    },
+    /**
      * Hooks
      */
     onReload: HOOK_DEFINITION,
@@ -90,6 +111,7 @@ export const DRIVER_DEFAULT_ENDPOINT = {
 export const FF_REMOTE_DEBUG_ARG = '-remote-debugging-port'
 export const DEEP_SELECTOR = '>>>'
 export const ARIA_SELECTOR = 'aria/'
+export const ROLE_SELECTOR = 'role/'
 
 export const ERROR_REASON = [
     'Failed', 'Aborted', 'TimedOut', 'AccessDenied', 'ConnectionClosed',
@@ -99,9 +121,9 @@ export const ERROR_REASON = [
 ]
 
 /**
- * store all preload scripts in a map (per instance) so that we can easily remove them
+ * Store restore functions per browser without retaining closed browser instances.
  */
-export const restoreFunctions = new Map<WebdriverIO.Browser, RestoreMap>()
+export const restoreFunctions = new WeakMap<WebdriverIO.Browser, RestoreMap>()
 
 /**
  * Special Characters

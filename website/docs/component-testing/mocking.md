@@ -1,6 +1,7 @@
 ---
 id: mocking
 title: Mocking
+description: "Mock functions, modules and network requests in browser runner component tests with fn, spyOn and mock from @wdio/browser-runner."
 ---
 
 When writing tests it's only a matter of time before you need to create a "fake" version of an internal — or external — service. This is commonly referred to as mocking. WebdriverIO provides utility functions to help you out. You can `import { fn, spyOn, mock, unmock } from '@wdio/browser-runner'` to access it. See more information about the available mocking utilities in the [API docs](/docs/api/modules#wdiobrowser-runner).
@@ -306,3 +307,7 @@ mock('./some/module.ts', async () => {
 ## Requests
 
 If you are looking for mocking browser requests, e.g. API calls, head over to the [Request Mock and Spies](/docs/mocksandspies) section.
+
+In component tests, use an absolute URL pattern with a fixed protocol and hostname for `browser.mock()`, such as `https://api.webdriver.io/api/*`. A host-less pattern such as `*/api/*` intercepts every request of the page, including the browser runner's own Vite and driver traffic.
+
+A single `*` also matches slashes. In a string pattern, `**` is the same as `*`; in a `URLPattern` object, use a single `*`. See [creating a mock](/docs/mocksandspies#creating-a-mock).

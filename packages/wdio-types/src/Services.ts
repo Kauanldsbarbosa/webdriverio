@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Testrunner as TestrunnerOptions, WebdriverIO as WebdriverIOOptions } from './Options.js'
-import type { RequestedStandaloneCapabilities, RequestedMultiremoteCapabilities, TestrunnerCapabilities, ResolvedTestrunnerCapabilities } from './Capabilities.js'
+import type { RequestedStandaloneCapabilities, RequestedMultiRemoteCapabilities, TestrunnerCapabilities, ResolvedTestrunnerCapabilities } from './Capabilities.js'
 import type { Suite, Test, TestResult } from './Frameworks.js'
 import type { Worker } from './Workers.js'
 
 export interface RunnerInstance {
     initialize(): Promise<void>
     shutdown(): Promise<boolean>
+    dispose?(): Promise<void>
     closeSession?: (cid: number) => Promise<void>
     getWorkerCount(): number
     run(args: any): Worker
@@ -32,11 +33,27 @@ export interface ServiceOption {
 
 export interface ServiceClass {
     new(options: WebdriverIO.ServiceOption, capabilities: ResolvedTestrunnerCapabilities, config: WebdriverIOOptions): ServiceInstance
+    /**
+     * Runs in a worker before construction. Return false to skip this service for the worker.
+     */
+    shouldRun?(
+        options: WebdriverIO.ServiceOption,
+        capabilities: ResolvedTestrunnerCapabilities,
+        config: WebdriverIOOptions
+    ): boolean | Promise<boolean>
 }
 
 export interface ServicePlugin extends ServiceClass {
     default: ServiceClass
     launcher?: ServiceClass
+    /**
+     * Runs once per package in the launcher. Return false to skip importing the package in workers.
+     * Launcher services are still initialized.
+     */
+    shouldLoad?(
+        config: Omit<TestrunnerOptions, 'capabilities' | keyof HookFunctions>,
+        capabilities: TestrunnerCapabilities
+    ): boolean | Promise<boolean>
 }
 
 export interface ServiceInstance extends HookFunctions {
@@ -47,7 +64,8 @@ export interface ServiceInstance extends HookFunctions {
 
 interface AssertionHookParams {
     /**
-     * name of the matcher, e.g. `toHaveText` or `toBeClickable`
+     * name of the matcher that the test called, e.g. `toHaveText` or `toBeClickable`.
+     * For an alias, it is the name of the alias, e.g. `toBeExisting` and not `toExist`.
      */
     matcherName: string
     /**
@@ -67,9 +85,13 @@ interface AssertionHookParams {
     options: object
 }
 interface AfterAssertionHookParams extends AssertionHookParams {
+    /**
+     * result of the matcher. `pass` is `true` when the value matches the expected value,
+     * also with `.not`: with `.not`, the assertion passes when `pass` is `false`.
+     */
     result: {
         message: () => string
-        result: boolean
+        pass: boolean
     }
 }
 
@@ -154,15 +176,17 @@ export interface HookFunctions {
     /**
      * Gets executed just after a worker process has exited.
      * @param  {string} cid      capability id (e.g 0-0)
-     * @param  {number} exitCode 0 - success, 1 - fail
+     * @param  {number} exitCode 0 - success, 1 - fail, `128` + signal number if terminated by a signal
      * @param  {object} specs    specs to be run in the worker process
      * @param  {number} retries  number of retries used
+     * @param  {string} signal   signal that terminated the worker, if any, e.g. `SIGSEGV`
      */
     onWorkerEnd?(
         cid: string,
         exitCode: number,
         specs: string[],
         retries: number,
+        signal?: NodeJS.Signals | null,
     ): unknown | Promise<unknown>
 
     /**
@@ -173,7 +197,7 @@ export interface HookFunctions {
      * @param browser       instance of created browser/device session
      */
     before?(
-        capabilities: RequestedStandaloneCapabilities | RequestedMultiremoteCapabilities,
+        capabilities: RequestedStandaloneCapabilities | RequestedMultiRemoteCapabilities,
         specs: string[],
         browser: any // BrowserObject
     ): unknown | Promise<unknown>
@@ -187,7 +211,7 @@ export interface HookFunctions {
      */
     after?(
         result: number,
-        capabilities: RequestedStandaloneCapabilities | RequestedMultiremoteCapabilities,
+        capabilities: RequestedStandaloneCapabilities | RequestedMultiRemoteCapabilities,
         specs: string[]
     ): unknown | Promise<unknown>
 
@@ -201,7 +225,7 @@ export interface HookFunctions {
      */
     beforeSession?(
         config: Omit<TestrunnerOptions, 'capabilities'>,
-        capabilities: RequestedStandaloneCapabilities | RequestedMultiremoteCapabilities,
+        capabilities: RequestedStandaloneCapabilities | RequestedMultiRemoteCapabilities,
         specs: string[],
         cid: string
     ): unknown | Promise<unknown>
@@ -279,7 +303,8 @@ export interface HookFunctions {
     afterHook?(test: Test, context: any, result: TestResult, hookName: string): unknown | Promise<unknown>
 
     /**
-     * Runs before a WebdriverIO command gets executed.
+     * Runs before a WebdriverIO command gets executed. For an element command, it runs
+     * before WebdriverIO waits for the element.
      * @param commandName command name
      * @param args        arguments that command would receive
      */
@@ -289,7 +314,9 @@ export interface HookFunctions {
     ): unknown | Promise<unknown>
 
     /**
-     * Runs after a WebdriverIO command gets executed
+     * Runs after a WebdriverIO command gets executed. For an element command, it runs after
+     * the wait for the element, with the result or the error of the last try when WebdriverIO
+     * retries the command.
      * @param commandName  command name
      * @param args         arguments that command would receive
      * @param result       result of the command
@@ -304,17 +331,13 @@ export interface HookFunctions {
 
     /**
      * Runs before a WebdriverIO assertion library makes an assertion.
-     * @param commandName command name
-     * @param args        arguments that command would receive
+     * @param params  assertion information: matcher name, expected value and options
      */
     beforeAssertion?(params: AssertionHookParams): unknown | Promise<unknown>
 
     /**
-     * Runs after a WebdriverIO command gets executed
-     * @param commandName  command name
-     * @param args         arguments that command would receive
-     * @param result       result of the command
-     * @param error        error in case something went wrong
+     * Runs after a WebdriverIO assertion library makes an assertion.
+     * @param params  assertion information, the same as in `beforeAssertion`, and the result of the assertion
      */
     afterAssertion?(params: AfterAssertionHookParams): unknown | Promise<unknown>
 }

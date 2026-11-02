@@ -40,35 +40,30 @@ export default class FirefoxProfileLauncher {
      * Sets any preferences and proxy
      */
     _setPreferences() {
-        if (!this._profile) {
-            return
-        }
+        const profile = this._profile!
 
         for (const [preference, value] of Object.entries(this._options)) {
-            if (['extensions', 'proxy', 'legacy', 'profileDirectory'].includes(preference)) {
+            if (['extensions', 'proxy', 'profileDirectory'].includes(preference)) {
                 continue
             }
 
-            this._profile.setPreference(preference, value as string)
+            profile.setPreference(preference, value as string)
         }
 
         if (this._options.proxy) {
-            this._profile.setProxy(this._options.proxy)
+            profile.setProxy(this._options.proxy)
         }
 
-        this._profile.updatePreferences()
+        profile.updatePreferences()
     }
 
     async _buildExtension(capabilities: Capabilities.TestrunnerCapabilities) {
-        if (!this._profile) {
-            return
-        }
-
-        const zippedProfile = await promisify(this._profile.encoded.bind(this._profile))()
+        const profile = this._profile!
+        const zippedProfile = await promisify(profile.encoded.bind(profile))()
 
         if (Array.isArray(capabilities)) {
-            (capabilities as Capabilities.RequestedStandaloneCapabilities[] | Capabilities.RequestedMultiremoteCapabilities[])
-                .flatMap((c: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities) => {
+            (capabilities as Capabilities.RequestedStandaloneCapabilities[] | Capabilities.RequestedMultiRemoteCapabilities[])
+                .flatMap((c: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities) => {
                     if (Object.values(c).length > 0 && Object.values(c).every(c => typeof c === 'object' && c.capabilities)) {
                         return Object.values(c).map((o) => o.capabilities)
                     }
@@ -83,7 +78,7 @@ export default class FirefoxProfileLauncher {
         }
 
         for (const browser in capabilities) {
-            const capability = capabilities[browser].capabilities as Capabilities.RequestedMultiremoteCapabilities[string]['capabilities']
+            const capability = capabilities[browser].capabilities as Capabilities.RequestedMultiRemoteCapabilities[string]['capabilities']
             const cap = capability && ('alwaysMatch' in capability ? capability.alwaysMatch : capability)
             if (!capability || cap.browserName !== 'firefox') {
                 continue

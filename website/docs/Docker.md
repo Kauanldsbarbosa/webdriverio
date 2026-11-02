@@ -1,6 +1,7 @@
 ---
 id: docker
 title: Docker
+description: "Run your WebdriverIO test suite inside a Docker container with a preinstalled browser for consistent results across machines."
 ---
 
 Docker is a powerful containerization technology that allows to encapsulate your test suite into a container that behaves the same on every system. This can avoid flakiness due to different browser or platform versions. In order to run your tests within a container, create a `Dockerfile` in your project directory, e.g.:
@@ -62,3 +63,14 @@ docker run -it mytest
 ```
 
 For more information on how to configure the Docker image, check out the [Docker docs](https://docs.docker.com/).
+
+## Images where WebdriverIO downloads the browser
+
+When the image has no browser, WebdriverIO downloads Chrome, Chromium, Firefox and Chromedriver itself. Chrome, Chromium and Chromedriver come as zip files, and WebdriverIO extracts them with the `unzip` command on Linux and macOS (`tar.exe` or PowerShell on Windows). Slim images, such as `node:24-slim`, and minimal Alpine images do not have `unzip`, so install it in your `Dockerfile`:
+
+```Dockerfile
+FROM node:24-slim
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
+```
+
+On Alpine, use `RUN apk add --no-cache unzip`. Without it, the download fails with `Extraction failed: no zip archiver is available`.

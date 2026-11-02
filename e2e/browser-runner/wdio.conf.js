@@ -5,6 +5,7 @@ import { loadEnv } from 'vite'
 import { expect } from '@wdio/globals'
 
 const isMac = os.platform() === 'darwin' && process.env.CI
+const requiresBidi = process.argv.some((arg) => arg.endsWith('mock.test.ts'))
 
 /**
  * skip tests if:
@@ -16,12 +17,7 @@ if (
      * see https://github.com/testing-library/vue-testing-library/issues/292
      * Please ignore and remove this in your project!
      */
-    (process.env.CI && process.env.WDIO_PRESET === 'vue') ||
-    /**
-     * We are running network mocking tests on Safari in CI where Safari has no support for
-     * Bidi just yet.
-     */
-    (process.env.CI && isMac && process.argv.includes('mock.test.ts'))
+    (process.env.CI && process.env.WDIO_PRESET === 'vue')
 ) {
     process.exit(0)
 }
@@ -40,13 +36,16 @@ export const config = {
      * capabilities
      */
     capabilities: [
-        isMac
+        isMac && !requiresBidi
             ? {
                 browserName: 'safari'
             }
             : {
                 browserName: 'chrome',
                 browserVersion: 'canary',
+                'goog:chromeOptions': {
+                    args: ['--headless', '--disable-gpu']
+                }
             }
     ],
 
@@ -55,6 +54,15 @@ export const config = {
      */
     logLevel: 'trace',
     framework: 'mocha',
+    /**
+     * these specs `render()` fixtures directly into `document.body` without
+     * cleaning up between tests, so generic selectors legitimately accumulate
+     * multiple matches across a spec file's lifetime. These suites are about
+     * component-framework integration, not selector strictness, so keep the
+     * pre-v10 first-match behavior here (same rationale as the unit test and
+     * smoke test suites).
+     */
+    strictSelectors: false,
     outputDir: path.join(__dirname, 'logs', process.env.WDIO_PRESET || 'misc'),
     reporters: ['spec', 'dot', 'junit'],
     runner: ['browser', {

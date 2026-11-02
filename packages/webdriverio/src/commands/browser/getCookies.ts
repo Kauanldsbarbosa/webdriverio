@@ -2,6 +2,9 @@ import logger from '@wdio/logger'
 import type { Cookie } from '@wdio/protocols'
 import type { remote } from 'webdriver'
 
+import { isBrowsingContext } from '../../session/browsingContext.js'
+import { cookieMatchesUrl, getCookiePartition, toBidiCookieFilter, windowCookieScope, type WindowCookieScope } from '../../utils/cookiePartition.js'
+
 const log = logger('webdriverio')
 
 /**
@@ -17,7 +20,7 @@ const log = logger('webdriverio')
             {name: 'test', value: '123'},
             {name: 'test2', value: '456'}
         ])
-        const testCookie = await browser.getCookies(['test'])
+        const testCookie = await browser.getCookies({ name: 'test' })
         console.log(testCookie); // outputs: [{ name: 'test', value: '123' }]
 
         const allCookies = await browser.getCookies()
@@ -37,25 +40,34 @@ const log = logger('webdriverio')
  *
  * @alias browser.getCookies
  * @param {remote.StorageCookieFilter}  filter  an object that allows to filter for cookies with specific attributes
- * @param {string|null} sourceOrigin  an optional source origin to fetch cookies for, if not provided it will default to the current page's origin, if explicitly set to null it will fetch cookies without a partition (only supported in BiDi)
+ * @param {string|null} sourceOrigin  an optional source origin to fetch cookies for, if not provided it will default to the current page's origin, if explicitly set to null it will fetch cookies without a partition (only supported in BiDi). With `wdio:experimentalBiDiCommands` and in a parallel test, the commands use the cookies of the window: without `sourceOrigin`, the cookies that the page sees (domain and path) or, with a `domain` in the filter, the cookies of that domain, with `sourceOrigin`, the WebDriver BiDi storage partition of that origin, and with null, all cookies of the window
  * @return {Cookie[]}                           requested cookies
  *
  */
 export async function getCookies(
-    this: WebdriverIO.Browser,
-    filter?: string | string[] | remote.StorageCookieFilter,
+    this: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
+    filter?: remote.StorageCookieFilter,
     sourceOrigin?: string | null
 ): Promise<Cookie[]> {
-    /**
-     * check if filter is a string array and let users know that this feature
-     * is deprecated and will be removed in an upcoming version of WebdriverIO
-     */
-    const usesMultipleFilter = Array.isArray(filter) && filter.length > 1
-    if (!this.isBidi || usesMultipleFilter) {
+    assertObjectCookieFilter(filter)
+
+    if (!this.isBidi) {
         return getCookiesClassic.call(this, filter)
     }
 
-    const cookieFilter = getCookieFilter(filter)
+    const scope = await windowCookieScope(this)
+    if (scope) {
+        return getWindowCookies(scope, filter, sourceOrigin)
+    }
+
+    if (isBrowsingContext(this)) {
+        return readBidiCookies(this.browser, {
+            ...(sourceOrigin === null ? {} : {
+                partition: { type: 'context', context: this.contextId }
+            }),
+            ...(typeof filter !== 'undefined' ? { filter: toBidiCookieFilter(filter) } : {})
+        }, filter)
+    }
 
     let url: URL
     try {
@@ -70,26 +82,50 @@ export async function getCookies(
     // In some cases, the forced origin in BiDi does not allow to find back the cookies, so by using null we can bypass the partition and filter by name only.
     const params: remote.StorageGetCookiesParameters = sourceOrigin === null
         ? {}
-        : {
-            partition: {
-                type: 'storageKey',
-                sourceOrigin: sourceOrigin || url.origin
-            }
-        }
+        : { partition: getCookiePartition(sourceOrigin || url.origin) }
 
-    if (typeof cookieFilter !== 'undefined') {
-        params.filter = cookieFilter
+    if (typeof filter !== 'undefined') {
+        params.filter = filter
     }
 
+    return readBidiCookies(this, params, filter)
+}
+
+async function getWindowCookies(
+    { browser, partition, userContext, url }: WindowCookieScope,
+    filter?: remote.StorageCookieFilter,
+    sourceOrigin?: string | null
+) {
+    const params: remote.StorageGetCookiesParameters = {
+        partition: sourceOrigin
+            ? { type: 'storageKey', sourceOrigin, ...(userContext ? { userContext } : {}) }
+            : partition,
+        ...(typeof filter !== 'undefined' ? { filter: toBidiCookieFilter(filter) } : {})
+    }
+    const cookies = await readBidiCookies(browser, params, filter, true)
+    /**
+     * null and an explicit origin read all cookies of their jar, and a filter with a domain names the
+     * cookies to read, whatever page is open
+     */
+    return sourceOrigin === null || sourceOrigin || filter?.domain ? cookies : cookies.filter(cookieMatchesUrl(url))
+}
+
+async function readBidiCookies (
+    browser: WebdriverIO.Browser,
+    params: remote.StorageGetCookiesParameters,
+    filter?: remote.StorageCookieFilter,
+    isolated = params.partition?.type === 'context'
+): Promise<Cookie[]> {
     try {
-        const { cookies } = await this.storageGetCookies(params)
-
-        // Fallback to classic if BiDi returns empty (common in hybrid/guest modes)
-        if (cookies.length === 0) {
+        const { cookies } = await browser.storageGetCookies(params)
+        /**
+         * A context partition already names the right tab. An empty result is
+         * authoritative. The classic fallback would read the focused window.
+         */
+        if (cookies.length === 0 && !isolated) {
             log.debug('BiDi getCookies returned empty, falling back to classic')
-            return getCookiesClassic.call(this, filter)
+            return getCookiesClassic.call(browser, filter)
         }
-
         return cookies.map((cookie) => ({
             ...cookie,
             value: cookie.value.type === 'base64'
@@ -97,61 +133,67 @@ export async function getCookies(
                 : cookie.value.value,
         }))
     } catch (err) {
+        if (isolated) {
+            throw err
+        }
         log.warn(`BiDi getCookies failed, falling back to classic: ${(err as Error).message}`)
-        return getCookiesClassic.call(this, filter)
+        return getCookiesClassic.call(browser, filter)
+    }
+}
+
+const REMOVED_COOKIE_FILTER =
+    'Passing a string or string array to `getCookies` was removed in WebdriverIO v10. ' +
+    'Use an object filter, for example `await browser.getCookies({ name: \'session\' })`.'
+
+function assertObjectCookieFilter(filter: unknown): asserts filter is remote.StorageCookieFilter | undefined {
+    if (typeof filter === 'undefined') {
+        return
+    }
+
+    if (typeof filter === 'string' || Array.isArray(filter)) {
+        throw new Error(REMOVED_COOKIE_FILTER)
+    }
+
+    if (typeof filter !== 'object' || filter === null) {
+        throw new Error('`getCookies` only accepts a cookie filter object.')
     }
 }
 
 /**
- * Legacy WebDriver Classic way to fetch cookies
+ * WebDriver Classic way to fetch cookies. BiDi sessions fall back to this
+ * when the browsing context has no origin or the BiDi call cannot be used.
  */
 async function getCookiesClassic(
     this: WebdriverIO.Browser,
-    names?: string | string[] | remote.StorageCookieFilter
+    filter?: remote.StorageCookieFilter
 ): Promise<Cookie[]> {
-    if (!names) {
+    if (!filter) {
         return this.getAllCookies()
     }
 
-    const usesMultipleFilter = Array.isArray(names) && names.length > 1
-    if (usesMultipleFilter) {
-        log.warn(
-            'Passing a string array as filter for `getCookies` is deprecated and its ' +
-            'support will be removed in an upcoming version of WebdriverIO!'
-        )
-        const allCookies = await this.getAllCookies()
-        return allCookies.filter(cookie => names.includes(cookie.name))
-    }
-
-    const filter = getCookieFilter(names)
     const allCookies = await this.getAllCookies()
+    const filterValue = getCookieValue(filter.value)
     return allCookies.filter(cookie => (
-        !filter ||
-        cookie.name && filter.name === cookie.name ||
-        cookie.value && filter.value?.value === cookie.value ||
-        cookie.path && filter.path === cookie.path ||
-        cookie.domain && filter.domain === cookie.domain ||
-        cookie.sameSite && filter.sameSite === cookie.sameSite ||
-        cookie.expiry && filter.expiry === cookie.expiry ||
-        typeof cookie.httpOnly === 'boolean' && filter.httpOnly === cookie.httpOnly ||
-        typeof cookie.secure === 'boolean' && filter.secure === cookie.secure
+        (filter.name === undefined || filter.name === cookie.name) &&
+        (filter.value === undefined || filterValue === cookie.value) &&
+        (filter.path === undefined || filter.path === cookie.path) &&
+        (filter.domain === undefined || filter.domain === cookie.domain) &&
+        (filter.sameSite === undefined || (typeof filter.sameSite === 'string'
+            ? filter.sameSite.toLowerCase() === cookie.sameSite?.toLowerCase()
+            : filter.sameSite === cookie.sameSite)) &&
+        (filter.expiry === undefined || filter.expiry === cookie.expiry) &&
+        (filter.httpOnly === undefined || filter.httpOnly === cookie.httpOnly) &&
+        (filter.secure === undefined || filter.secure === cookie.secure)
     ))
 }
 
-function getCookieFilter (names?: string | string[] | remote.StorageCookieFilter) {
-    if (!names) {
+function getCookieValue(value?: remote.NetworkBytesValue | null): string | undefined {
+    if (!value) {
         return
     }
 
-    if (Array.isArray(names) && names.length > 1) {
-        throw new Error('Multiple cookie name filters are not supported')
-    }
-
-    return (Array.isArray(names) ? names : [names]).map((filter) => {
-        if (typeof filter === 'string') {
-            log.warn('Passing string values into `getCookie` is deprecated and its support will be removed in an upcoming version of WebdriverIO!')
-            return { name: filter } as remote.StorageCookieFilter
-        }
-        return filter
-    })[0]
+    return value.type === 'base64'
+        ? Buffer.from(value.value, 'base64').toString('utf-8')
+        : value.value
 }
+

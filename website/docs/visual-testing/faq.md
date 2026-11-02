@@ -1,6 +1,7 @@
 ---
 id: faq
 title: FAQ
+description: "Find answers to common visual testing questions, such as updating baselines, fixing canvas installation errors and upgrading to v10."
 ---
 
 ### Do I need to use a `save(Screen/Element/FullPageScreen)` methods when I want to run `check(Screen/Element/FullPageScreen)`?
@@ -38,9 +39,17 @@ It could be that the error `Width and height cannot be negative` is thrown. 9 ou
 
 ### Installation of Canvas on Windows failed with Node-Gyp logs
 
-If you encounter issues with Canvas installation on Windows due to Node-Gyp errors, please note that this applies only to Version 4 and lower. To avoid these issues, consider updating to Version 5 or higher, which does not have these dependencies and uses [Jimp](https://github.com/jimp-dev/jimp) for image processing.
+If you encounter issues with Canvas installation on Windows due to Node-Gyp errors, please note that this applies only to Version 4 and lower. To avoid these issues, consider updating to Version 5 or higher, which does not have these dependencies. Version 5 to 9 used [Jimp](https://github.com/jimp-dev/jimp) for image processing; Version 10 and up use [fast-png](https://github.com/image-js/fast-png) and [Pixelmatch](https://github.com/mapbox/pixelmatch) with no native dependencies.
 
 If you still need to resolve the issues with Version 4, please check:
 
 -   the Node Canvas section in the [Getting Started](/docs/visual-testing#system-requirements) guide
 -   [this post](https://spin.atomicobject.com/2019/03/27/node-gyp-windows/) for Fixing Node-Gyp Issues on Windows. (Thanks to [IgorSasovets](https://github.com/IgorSasovets))
+
+### I upgraded to v11, why did a mismatch percentage change?
+
+In v11 the comparison engine is pixelmatch 8, which measures color differences in the OKLab color space with the HyAB distance instead of YIQ. The threshold scale (`0` to `1`) and the `ignore*` presets did not change, but the number of different pixels can change a little for the same images (about −3 % to +3 % on real screenshots). If a check depends on an exact mismatch percentage or a tight tolerance, check it again, and update the baseline with `--update-visual-baseline` only when the new result is correct. Some fixes can also change a baseline once, for example iOS element screenshots of elements larger than the viewport, which no longer have a black area. See the [v11 migration guide](https://github.com/webdriverio/visual-testing/blob/main/docs/v11-migration.md).
+
+### I upgraded to v10, why are my visual tests failing?
+
+The comparison engine changed from ResembleJS to [Pixelmatch](https://github.com/mapbox/pixelmatch) in v10. Pixelmatch uses a perceptual (YIQ) color model instead of raw RGB, so mismatch percentages differ from v9. Your tests haven't broken; the baselines just need to be regenerated once. Run your tests with `--update-visual-baseline` to accept the new values, or delete your baseline folder and let `autoSaveBaseline` recreate it.

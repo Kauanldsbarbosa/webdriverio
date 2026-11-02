@@ -1,6 +1,8 @@
+import fs from 'node:fs'
 import logger from '@wdio/logger'
 import type { EventEmitter } from 'node:events'
 
+import { specFilePath } from '@wdio/utils'
 import type { ReporterOptions, ParentSuite, TestEvent, SuiteEvent, JasmineOpts } from './types.js'
 
 const log = logger('@wdio/jasmine-framework')
@@ -8,10 +10,10 @@ const log = logger('@wdio/jasmine-framework')
 const STACKTRACE_FILTER = /(node_modules(\/|\\)(\w+)*|@wdio\/sync\/(build|src)|- - - - -)/g
 
 export default class JasmineReporter {
-    public startedSuite?: SuiteEvent
-
     private _cid: string
     private _specs: string[]
+    private _specFiles: Map<string, string>
+    private _onlySpecFile?: string
     private _jasmineOpts: JasmineOpts
     private _shouldCleanStack: boolean
     private _parent: ParentSuite[] = []
@@ -25,6 +27,10 @@ export default class JasmineReporter {
     ) {
         this._cid = params.cid
         this._specs = params.specs
+        const specFiles = params.specs.map(specFilePath)
+        // Node loads a spec file by its real path, the runner keeps the path of a link: name it as the runner does
+        this._specFiles = new Map(specFiles.flatMap((file) => [[realPath(file), file], [file, file]]))
+        this._onlySpecFile = specFiles.length === 1 ? specFiles[0] : undefined
         this._jasmineOpts = params.jasmineOpts
         this._shouldCleanStack = typeof params.cleanStack === 'boolean' ? params.cleanStack : true
     }
@@ -37,19 +43,19 @@ export default class JasmineReporter {
             ...suite
         }
 
-        this.startedSuite = newSuite
-
         let fullName = suite.description
         for (const parent of [...this._parent].reverse()) {
             fullName = parent.description + '.' + fullName
         }
         newSuite.fullName = fullName
 
-        this.emit('suite:start', newSuite)
+        const specFile = this.specFileOf(suite.filename)
+        this.emit('suite:start', newSuite, specFile)
         this._parent.push({
             description: suite.description,
             id: suite.id,
-            tests: 0
+            tests: 0,
+            specFile
         })
     }
 
@@ -147,7 +153,8 @@ export default class JasmineReporter {
          * in case there is a runtime error within one of the specs
          * create an empty test to attach the error to it
          */
-        if (parentSuite.tests === 0 && suite.failedExpectations && suite.failedExpectations.length) {
+        const hasSuiteFailure = Boolean(suite.failedExpectations && suite.failedExpectations.length)
+        if (parentSuite.tests === 0 && hasSuiteFailure) {
             const id = 'spec' + Math.random()
             this.specStarted({
                 id,
@@ -177,14 +184,30 @@ export default class JasmineReporter {
                 debugLogs: null,
                 filename: suite.filename
             })
+        } else if (hasSuiteFailure) {
+            /**
+             * a failing `afterAll` of a suite with specs is reported on the suite only
+             * (the reporters get it as a hook), count it so the run fails
+             */
+            this._failedCount++
         }
 
         this._parent.pop()
-        this.emit('suite:end', newSuite)
-        delete this.startedSuite
+        this.emit('suite:end', newSuite, this.specFileOf(suite.filename))
     }
 
-    emit (event: string, payload: SuiteEvent | TestEvent) {
+    jasmineDone (result: jasmine.JasmineDoneInfo) {
+        /**
+         * failures outside of any suite, e.g. a top level `afterAll`
+         */
+        if (result.failedExpectations && result.failedExpectations.length) {
+            this._failedCount++
+        }
+    }
+
+    emit (event: string, payload: SuiteEvent | TestEvent, suiteSpecFile?: string) {
+        const parent = this._parent.length ? this.getUniqueIdentifier(this._parent[this._parent.length - 1]) : null
+        const hookKind = (payload as TestEvent).hookKind
         const message = {
             cid: this._cid,
             uid: this.getUniqueIdentifier(payload),
@@ -193,7 +216,7 @@ export default class JasmineReporter {
             fullTitle: payload.fullName,
             pending: payload.status === 'pending',
             pendingReason: (payload as TestEvent).pendingReason,
-            parent: this._parent.length ? this.getUniqueIdentifier(this._parent[this._parent.length - 1]) : null,
+            parent,
             type: payload.type,
             // We maintain the single error property for backwards compatibility with reporters
             // However, any reporter wanting to make use of Jasmine's 'soft assertion' type expects
@@ -203,10 +226,35 @@ export default class JasmineReporter {
             duration: payload.duration || 0,
             specs: this._specs,
             start: payload.start,
-            file: payload.filename
+            file: payload.type === 'suite'
+                ? suiteSpecFile ?? (payload.filename && specFilePath(payload.filename))
+                : this.suiteFile,
+            // an all-hook runs in the suite that declares it; a top-level one has no suite event
+            ...(hookKind && { hookKind, ...(parent && { hookSuiteUid: parent }) })
         }
 
         this._reporter.emit(event, message)
+    }
+
+    /**
+     * the spec file of a suite that starts or ends in the current suite: Jasmine names the file
+     * that calls `describe()`, which can be a shared helper module; so the spec file of the
+     * parent suite, else the file of the suite when it is a spec file of the worker, else the
+     * one spec file of the worker
+     */
+    specFileOf (filename?: string) {
+        const file = filename ? specFilePath(filename) : undefined
+        return this._parent[this._parent.length - 1]?.specFile
+            ?? (file && this._specFiles.get(file))
+            ?? this._onlySpecFile
+    }
+
+    /**
+     * the spec file of the current tests and hooks (Jasmine names the file that calls `it()`,
+     * which is the WebdriverIO wrapper); none outside every suite
+     */
+    get suiteFile () {
+        return this._parent[this._parent.length - 1]?.specFile
     }
 
     getFailedCount () {
@@ -226,5 +274,13 @@ export default class JasmineReporter {
         stack = stack.filter((line) => !line.match(STACKTRACE_FILTER))
         error.stack = stack.join('\n')
         return error
+    }
+}
+
+function realPath (file: string) {
+    try {
+        return fs.realpathSync(file)
+    } catch {
+        return file
     }
 }

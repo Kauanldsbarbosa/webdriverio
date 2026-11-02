@@ -1,6 +1,7 @@
 ---
 id: timeouts
 title: Timeouts
+description: "Configure WebDriver session timeouts, WebdriverIO waitfor timeouts and test framework timeouts to keep tests reliable."
 ---
 
 Each command in WebdriverIO is an asynchronous operation. A request is fired to the Selenium server (or a cloud service like [Sauce Labs](https://saucelabs.com)), and its response contains the result once the action has completed or failed.
@@ -20,9 +21,9 @@ A session has an associated session script timeout that specifies a time to wait
 
 ```js
 await browser.setTimeout({ 'script': 60000 })
-await browser.executeAsync((done) => {
+await browser.execute(async () => {
     console.log('this should not fail')
-    setTimeout(done, 59000)
+    await new Promise((resolve) => setTimeout(resolve, 59000))
 })
 ```
 
@@ -36,7 +37,7 @@ You can set this timeout like so:
 await browser.setTimeout({ 'pageLoad': 10000 })
 ```
 
-> The `pageLoad` keyword is a part of the official WebDriver [specification](https://www.w3.org/TR/webdriver/#set-timeouts), but might not be [supported](https://github.com/seleniumhq/selenium-google-code-issue-archive/issues/687) for your browser (the previous name is `page load`).
+> `pageLoad` is the WebDriver [timeouts](https://www.w3.org/TR/webdriver/#set-timeouts) name. WebdriverIO v10 accepts that key only.
 
 ### Session Implicit Wait Timeout
 
@@ -71,6 +72,30 @@ await myElem.waitForDisplayed()
 
 // you can also overwrite the default timeout if needed
 await myElem.waitForDisplayed({ timeout: 10000 })
+```
+
+### An element that the page removed
+
+When the page removes or renders again an element, WebdriverIO finds it again with its selector and waits up to `waitforTimeout`. If it is there, the command runs on it. If not, the command fails with:
+
+- `message`: `Can't call <command> on element with selector "<selector>" because element wasn't found` (a `$$()` item: `… "<selector>" at index <n> …`; a removed parent: the message is about the parent)
+- `cause`: the stale element reference error of the driver
+
+`waitUntil` and `waitForEnabled` fail with their own error, which has this error as `cause`. `isDisplayed` and `isExisting` of the removed element do not wait: they give `false`. For a child of a removed parent, they wait and fail with this error.
+
+```ts title="test/specs/removed.e2e.ts"
+import { $, browser, expect } from '@wdio/globals'
+
+describe('a removed element', () => {
+    it('gives the error of an element that was not found again', async () => {
+        await browser.url('https://webdriver.io')
+        const title = await $('h1')
+        await browser.execute(() => document.querySelectorAll('h1').forEach((h1) => h1.remove()))
+
+        const error = await title.getText().then(() => null, (err: Error) => err)
+        expect(error?.message).toContain('because element wasn\'t found')
+    })
+})
 ```
 
 ## Framework related timeouts
@@ -153,3 +178,11 @@ export const config = {
 
 </TabItem>
 </Tabs>
+
+### Mocha timeouts and the WebdriverIO hooks
+
+A Mocha test or hook can change its own timeout with `this.timeout(ms)`. Use a `function`, not an arrow function, to get `this`. WebdriverIO follows the change, also `this.timeout(0)`, which turns the timeout off. With `mochaOpts.parallelMode`, only `mochaOpts.timeout` applies: `this.timeout()` in a test or hook throws, and a timeout of a suite or of `it(...).timeout()` is ignored, with a warning. See [Parallel Tests in a Spec File](./ParallelTests.md#hooks-and-timeouts).
+
+The timeout of a test includes the time of its `beforeTest` hook, as Mocha starts the timer before the hook. With the [retry option](./Retry.md#rerun-single-tests-in-jasmine-or-mocha) of WebdriverIO, all attempts of a test share one timeout.
+
+When a test or hook times out, WebdriverIO runs `afterTest` (or `afterHook`) before Mocha starts the next test, so that hook cannot run at the same time as the next test. Mocha waits for these hooks up to one more timeout of the test.

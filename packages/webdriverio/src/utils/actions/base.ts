@@ -1,5 +1,50 @@
 import { ELEMENT_KEY } from 'webdriver'
+import type { remote } from 'webdriver'
 import type { ElementReference } from '@wdio/protocols'
+import { getBrowserObject } from '@wdio/utils'
+
+import { foreignContextId, isBrowsingContext } from '../../session/browsingContext.js'
+import { getParallelContextStore } from '../../session/context.js'
+
+/**
+ * Moves whose duration came from the default rather than the caller. Tracked
+ * out of band so the Classic wire format stays unchanged.
+ */
+export const DEFAULT_DURATION_MOVES = new WeakSet<object>()
+
+/**
+ * Converts classic action sources to BiDi input sources: element origins become
+ * `{ type: 'element', sharedId }` references.
+ */
+export function toBidiActions<T extends { actions: object[] }>(sequence: T[]): remote.InputSourceActions[] {
+    return sequence.map((source) => ({
+        ...source,
+        actions: source.actions.map((rawAction) => {
+            const action = rawAction as { type?: string, duration?: number, origin?: ElementReference }
+            /**
+             * A pointer move into another navigable starts from the last
+             * top-level position. The default 100ms interpolation crosses
+             * the frame and fires mouse events an in-frame action does not.
+             * An instant move lands on the element. An explicit duration,
+             * including 100, stays.
+             */
+            const instant = action.type === 'pointerMove' && DEFAULT_DURATION_MOVES.has(rawAction)
+                ? { ...action, duration: 0 }
+                : action
+            const origin = instant.origin
+            if (!origin || typeof origin !== 'object' || !(ELEMENT_KEY in origin)) {
+                return instant
+            }
+            return {
+                ...instant,
+                origin: {
+                    type: 'element' as const,
+                    element: { sharedId: origin[ELEMENT_KEY] }
+                }
+            }
+        })
+    })) as unknown as remote.InputSourceActions[]
+}
 
 export type ActionType = 'key' | 'pointer' | 'wheel'
 export type KeyActionType = 'mouse' | 'pen' | 'touch'
@@ -31,11 +76,11 @@ export default class BaseAction {
     #id: string
     #type: ActionType
     #parameters: ActionParameters
-    #instance: WebdriverIO.Browser
+    #instance: WebdriverIO.Browser | WebdriverIO.BrowsingContext
     protected sequence: Sequence[] = []
 
     constructor(
-        protected instance: WebdriverIO.Browser,
+        protected instance: WebdriverIO.Browser | WebdriverIO.BrowsingContext,
         type: ActionType,
         params?: BaseActionParams
     ) {
@@ -94,6 +139,7 @@ export default class BaseAction {
         /**
          * transform chainable / not resolved elements into WDIO elements
          */
+        let originContext: string | undefined
         for (const seq of this.sequence) {
             /**
              * continue if we don't deal with origin or elements within
@@ -104,11 +150,18 @@ export default class BaseAction {
             }
 
             /**
-             * resolve promise element
+             * resolve promise element, and wait for a loaded element that wasn't
+             * on the page when it was looked up, as a command of the element does
              */
-            if (typeof seq.origin.then === 'function') {
-                await (seq.origin as WebdriverIO.Element).waitForExist()
+            const origin = seq.origin as WebdriverIO.Element
+            if (typeof seq.origin.then === 'function' || (typeof origin.waitForExist === 'function' && !origin.elementId)) {
+                await origin.waitForExist()
                 seq.origin = await seq.origin
+            }
+
+            const foreign = await foreignContextId(seq.origin as WebdriverIO.Element)
+            if (foreign) {
+                originContext = foreign
             }
 
             if (!seq.origin[ELEMENT_KEY]) {
@@ -118,9 +171,26 @@ export default class BaseAction {
             seq.origin = { [ELEMENT_KEY]: seq.origin[ELEMENT_KEY] }
         }
 
-        await this.#instance.performActions([this.toJSON()])
+        const browser = getBrowserObject(this.#instance)
+        const sequence = [this.toJSON()]
+        const contextId = isBrowsingContext(this.#instance)
+            ? this.#instance.contextId
+            : originContext ?? getParallelContextStore().getStore()
+        if (contextId) {
+            const actions = toBidiActions(sequence)
+            await browser.inputPerformActions({
+                context: contextId,
+                actions
+            })
+            if (!skipRelease) {
+                await browser.inputReleaseActions({ context: contextId })
+            }
+            return
+        }
+
+        await browser.performActions(sequence)
         if (!skipRelease) {
-            await this.#instance.releaseActions()
+            await browser.releaseActions()
         }
     }
 }

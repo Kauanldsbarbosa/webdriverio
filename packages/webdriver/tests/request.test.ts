@@ -7,6 +7,8 @@ import type { Options } from '@wdio/types'
 import { getGlobalDispatcher, ProxyAgent, Agent } from 'undici'
 
 import '../src/browser.js'
+import { createRequestSignal, isConnectionTimeoutSignal } from '../src/request/abort.js'
+import { WebDriverRequestError } from '../src/request/error.js'
 import { FetchRequest as WebFetchRequest } from '../src/request/web.js'
 import { FetchRequest, SESSION_DISPATCHERS } from '../src/request/node.js'
 import { environment } from '../src/environment.js'
@@ -16,8 +18,8 @@ vi.mock('fetch')
 vi.mock('undici', () => {
     return {
         fetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })),
-        Agent: vi.fn().mockImplementation(() => ({ close: vi.fn() })),
-        ProxyAgent: vi.fn().mockImplementation(() => ({ close: vi.fn() })),
+        Agent: vi.fn().mockImplementation(function () { return { close: vi.fn() } }),
+        ProxyAgent: vi.fn().mockImplementation(function () { return { close: vi.fn() } }),
         getGlobalDispatcher: vi.fn(),
         setGlobalDispatcher: vi.fn()
     }
@@ -142,7 +144,7 @@ describe('webdriver request', () => {
             expect((url! as URL).href)
                 .toBe('https://localhost:4445/session/foobar12345/element')
             expect([...(requestOptions.headers as unknown as Map<string, string>).keys()])
-                .toEqual(['accept', 'connection', 'content-length', 'content-type', 'foo', 'user-agent'])
+                .toEqual(['accept', 'content-type', 'foo', 'user-agent'])
             expect(requestOptions.signal?.aborted).toBeFalsy()
         })
 
@@ -203,7 +205,7 @@ describe('webdriver request', () => {
             expect(requestOptions.body).toEqual('{}')
         })
 
-        it('should add the Content-Length header when a request object has a body', async () => {
+        it('does not set Content-Length and keeps the default headers for a JSON body', async () => {
             const req = new WebFetchRequest('POST', webdriverPath, { foo: 'bar' })
             const { requestOptions } = await req.createOptions({
                 ...defaultOptions,
@@ -211,19 +213,7 @@ describe('webdriver request', () => {
                 logLevel: 'warn'
             })
             expect([...(requestOptions.headers as unknown as Map<string, string>).keys()])
-                .toEqual(['accept', 'connection', 'content-length', 'content-type', 'user-agent'])
-            expect((requestOptions.headers as unknown as Map<string, string>).get('Content-Length')).toBe('13')
-        })
-
-        it('should add Content-Length as well any other header provided in the request options if there is body in the request object', async () => {
-            const req = new WebFetchRequest('POST', webdriverPath, { foo: 'bar' })
-            const { requestOptions } = await req.createOptions({
-                ...defaultOptions, path: '/',
-                headers: { foo: 'bar' },
-                logLevel: 'warn'
-            })
-            expect((requestOptions.headers as unknown as Map<string, string>).get('foo')).toContain('bar')
-            expect((requestOptions.headers as unknown as Map<string, string>).get('Content-Length')).toBe('13')
+                .toEqual(['accept', 'content-type', 'user-agent'])
         })
 
         it('should add only the headers provided if the request body is empty', async () => {
@@ -234,7 +224,6 @@ describe('webdriver request', () => {
                 headers: { foo: 'bar' },
                 logLevel: 'warn'
             })
-            expect([...(requestOptions.headers as unknown as Map<string, string>).keys()]).not.toContain('content-length')
             expect((requestOptions.headers as unknown as Map<string, string>).get('foo')).toContain('bar')
         })
     })
@@ -262,6 +251,84 @@ describe('webdriver request', () => {
             }))
         })
 
+        it('should log the request body as plain object', async () => {
+            const onLogData = vi.fn()
+            const body = { foo: 'bar' }
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', body, undefined, false, { onLogData })
+
+            await req.makeRequest(defaultOptions, 'foobar-123')
+            expect(onLogData).toHaveBeenNthCalledWith(1, body)
+        })
+
+        it('should not throw a RangeError when logging large request bodies', async () => {
+            const onLogData = vi.fn()
+            /**
+             * `Object.keys` throws `RangeError: Too many properties to enumerate` beyond
+             * 2^24 properties, so the payload has to exceed that to cover the regression
+             */
+            const body = { file: 'x'.repeat(16_777_217) }
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', body, undefined, false, { onLogData })
+            req['_libRequest'] = vi.fn().mockResolvedValue({ statusCode: 200, body: { value: null } })
+
+            await expect(req.makeRequest(defaultOptions, 'foobar-123')).resolves.toBeTruthy()
+            expect(onLogData).toHaveBeenCalledTimes(1)
+            expect((onLogData.mock.calls[0][0] as { file: string }).file).toHaveLength(16_777_217)
+        })
+
+        it('should log the transformed body if transformRequest modifies it', async () => {
+            const onLogData = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', { password: 'secret' }, undefined, false, { onLogData })
+            const transformRequest = vi.fn().mockImplementation((requestOptions) => ({
+                ...requestOptions,
+                body: JSON.stringify({ password: '**REDACTED**' })
+            }))
+
+            await req.makeRequest({ ...defaultOptions, transformRequest }, 'foobar-123')
+            expect(onLogData).toHaveBeenNthCalledWith(1, { password: '**REDACTED**' })
+        })
+
+        it('should log the serialised value of a body that defines toJSON', async () => {
+            const onLogData = vi.fn()
+            const credential = { token: 'hunter2', toJSON: () => '**REDACTED**' }
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', { args: [credential] }, undefined, false, { onLogData })
+
+            await req.makeRequest(defaultOptions, 'foobar-123')
+            expect(onLogData).toHaveBeenNthCalledWith(1, { args: ['**REDACTED**'] })
+        })
+
+        it('should log a non JSON body as is', async () => {
+            const onLogData = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', { foo: 'bar' }, undefined, false, { onLogData })
+            const transformRequest = vi.fn().mockImplementation((requestOptions) => ({
+                ...requestOptions,
+                body: '<compressed payload>'
+            }))
+            req['_libRequest'] = vi.fn().mockResolvedValue({ statusCode: 200, body: { value: null } })
+
+            await req.makeRequest({ ...defaultOptions, transformRequest }, 'foobar-123')
+            expect(onLogData).toHaveBeenNthCalledWith(1, '<compressed payload>')
+        })
+
+        it('should log a binary body as is', async () => {
+            const onLogData = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', { foo: 'bar' }, undefined, false, { onLogData })
+            const body = new Uint8Array([1, 2, 3])
+            const transformRequest = vi.fn().mockImplementation((requestOptions) => ({ ...requestOptions, body }))
+            req['_libRequest'] = vi.fn().mockResolvedValue({ statusCode: 200, body: { value: null } })
+
+            await req.makeRequest({ ...defaultOptions, transformRequest }, 'foobar-123')
+            expect(onLogData).toHaveBeenCalledTimes(1)
+            expect(onLogData.mock.calls[0][0]).toBe(body)
+        })
+
+        it('should not log an empty request body', async () => {
+            const onLogData = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element', {}, undefined, false, { onLogData })
+
+            await req.makeRequest(defaultOptions, 'foobar-123')
+            expect(onLogData).not.toHaveBeenCalled()
+        })
+
         it('should short circuit if request throws a stale element exception', async () => {
             const onResponse = vi.fn()
             const onPerformance = vi.fn()
@@ -280,6 +347,62 @@ describe('webdriver request', () => {
             expect(onPerformance).toHaveBeenNthCalledWith(1, expect.objectContaining({ success: false }))
             expect(vi.mocked(warn).mock.calls).toHaveLength(1)
             expect(vi.mocked(warn).mock.calls).toEqual([['Request encountered a stale element - terminating request']])
+        })
+
+        it('should not retry errors a retry cannot fix', async () => {
+            const onRetry = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element/:elementId/click', {}, undefined, false, { onRetry })
+            const url = new URL('/session/foobar-123/element/intercepted-elem/click', baseUrl)
+            const calls = () => vi.mocked(globalThis.fetch).mock.calls.filter(([uri]) => String(uri).includes('intercepted-elem')).length
+            const before = calls()
+            const error = await req['_request'](url, { body: JSON.stringify({}) }, undefined, 3).catch((err: Error) => err)
+            expect(error.name).toBe('element click intercepted')
+            expect(onRetry).not.toHaveBeenCalled()
+            expect(calls() - before).toBe(1)
+        })
+
+        it('should not retry a well-formed W3C error response', async () => {
+            const onRetry = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/execute/sync', {}, undefined, false, { onRetry })
+            const url = new URL('/session/foobar-123/execute/sync', baseUrl)
+            const fetchMock = vi.mocked(globalThis.fetch)
+            fetchMock.mockClear()
+            fetchMock.mockImplementationOnce(async () => Response.json(
+                { value: { error: 'javascript error', message: 'boom' } },
+                { status: 500 }
+            ))
+            const error = await req['_request'](url, { body: JSON.stringify({ script: 'throw 1' }) }, undefined, 3).catch((err: Error) => err)
+            expect(error.name).toBe('javascript error')
+            expect(onRetry).not.toHaveBeenCalled()
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+        })
+
+        it('should not expose masked values in the error message', async () => {
+            const req = new WebFetchRequest('POST', 'session/:sessionId/element/:elementId/value', {}, undefined, false, {})
+            req.maskedBody = { text: '**MASKED**' }
+            const url = new URL('/session/foobar-123/element/some-elem-123/value', baseUrl)
+            vi.mocked(globalThis.fetch).mockImplementationOnce(async () => Response.json(
+                { value: { error: 'invalid element state', message: 'nope' } },
+                { status: 400 }
+            ))
+            const error = await req['_request'](url, { body: JSON.stringify({ text: 'mySecretPassword' }) }, undefined, 0).catch((err: Error) => err)
+            expect(error.message).toContain('**MASKED**')
+            expect(error.message).not.toContain('mySecretPassword')
+        })
+
+        it('should not retry an invalid session id by error name', async () => {
+            const onRetry = vi.fn()
+            const req = new WebFetchRequest('POST', 'session/:sessionId/url', {}, undefined, false, { onRetry })
+            const url = new URL('/session/foobar-123/url', baseUrl)
+            const fetchMock = vi.mocked(globalThis.fetch)
+            fetchMock.mockClear()
+            fetchMock.mockImplementationOnce(async () => Response.json(
+                { value: { error: 'invalid session id', message: 'gone' } },
+                { status: 404 }
+            ))
+            const error = await req['_request'](url, { body: JSON.stringify({}) }, undefined, 3).catch((err: Error) => err)
+            expect(error.name).toBe('invalid session id')
+            expect(fetchMock).toHaveBeenCalledTimes(1)
         })
 
         it('should not fail code due to an empty server response', async () => {
@@ -438,6 +561,115 @@ describe('webdriver request', () => {
                 expect(onRetry).toBeCalledTimes(retryCnt)
             })
 
+            it('should retry a request aborted by "connectionRetryTimeout"', async () => {
+                const onRetry = vi.fn()
+                const req = new WebFetchRequest('POST', '/abortTimeout', {}, undefined, true, { onRetry })
+                const result = await req.makeRequest({
+                    protocol: 'https',
+                    hostname: 'localhost',
+                    port: 4445,
+                    path: '/',
+                    connectionRetryCount: 7,
+                    connectionRetryTimeout: 10000,
+                    logLevel: 'warn'
+                }, 'foobar').then(
+                    (res) => res,
+                    (e) => e
+                )
+
+                expect(result).toEqual({ value: {} })
+                expect(onRetry).toBeCalledTimes(5)
+                expect(onRetry).toBeCalledWith({
+                    error: expect.objectContaining({ code: 'ETIMEDOUT' }),
+                    retryCount: expect.any(Number)
+                })
+
+                /**
+                 * every attempt needs its own signal, sharing one would make each
+                 * retry abort immediately
+                 */
+                const signals = vi.mocked(fetch).mock.calls.map(([, opts]) => opts!.signal)
+                expect(signals).toHaveLength(6)
+                expect(new Set(signals).size).toBe(6)
+            })
+
+            it('should keep honouring a signal supplied by "transformRequest" across retries', async () => {
+                const controller = new AbortController()
+                const transformRequest = vi.fn().mockImplementation((requestOptions) => ({
+                    ...requestOptions,
+                    signal: controller.signal
+                }))
+                const req = new WebFetchRequest('POST', '/abortTimeout', {}, undefined, true)
+                const result = await req.makeRequest({
+                    protocol: 'https',
+                    hostname: 'localhost',
+                    port: 4445,
+                    path: '/',
+                    connectionRetryCount: 7,
+                    connectionRetryTimeout: 10000,
+                    transformRequest,
+                    logLevel: 'warn'
+                }, 'foobar').then(
+                    (res) => res,
+                    (e) => e
+                )
+
+                expect(result).toEqual({ value: {} })
+
+                /**
+                 * each attempt composes a fresh timeout with the caller's signal,
+                 * so aborting it still cancels a retried request
+                 */
+                const signals = vi.mocked(fetch).mock.calls.map(([, opts]) => opts!.signal)
+                expect(signals).toHaveLength(6)
+                expect(signals.every((signal) => !signal!.aborted)).toBe(true)
+
+                controller.abort()
+                expect(signals.every((signal) => signal!.aborted)).toBe(true)
+            })
+
+            it('classifies an AbortError from the timeout signal as ETIMEDOUT', async () => {
+                const signal = createRequestSignal(15)
+                await new Promise<void>((resolve) => {
+                    if (signal.aborted) {
+                        resolve()
+                        return
+                    }
+                    signal.addEventListener('abort', () => resolve(), { once: true })
+                })
+
+                /**
+                 * Chrome and Edge 103 to 123 reject a timed-out fetch with
+                 * AbortError. The signal is what marks it as our timeout.
+                 */
+                expect(isConnectionTimeoutSignal(signal)).toBe(true)
+                const error = new WebDriverRequestError(
+                    new DOMException('The operation was aborted.', 'AbortError'),
+                    new URL('https://localhost/session'),
+                    { method: 'POST', signal }
+                )
+                expect(error.code).toBe('ETIMEDOUT')
+                expect(error.message).toContain('Request timed out')
+            })
+
+            it('does not classify a caller abort as a connection timeout', () => {
+                const controller = new AbortController()
+                const signal = createRequestSignal(60_000, controller.signal)
+                controller.abort()
+
+                expect(signal.aborted).toBe(true)
+                expect(isConnectionTimeoutSignal(signal)).toBe(false)
+                const reason = signal.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException('The operation was aborted.', 'AbortError')
+                const error = new WebDriverRequestError(reason, new URL('https://localhost/session'), {
+                    method: 'GET',
+                    signal
+                })
+                expect(error.code).toBeUndefined()
+                expect(error.message).not.toContain('Request timed out')
+            })
+
             it('should use error from "getRequestError" helper', async () => {
                 const onRetry = vi.fn()
                 const onRequest = vi.fn()
@@ -557,6 +789,44 @@ describe('webdriver request', () => {
             expect(SESSION_DISPATCHERS.size).toBe(0)
         })
 
+        it('should keep the session dispatcher while a failed DELETE /session/:sessionId can be retried', async () => {
+            const sessionId = 'retry-delete-session-id'
+            const deleteSessionRequest = new FetchRequest('DELETE', `/session/${sessionId}`, {})
+            const { fetch } = vi.mocked(await import('undici'))
+            fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                text: async () => JSON.stringify({ value: { error: 'unknown error', message: 'grid hiccup' } })
+            } as any)
+            fetch.mockResolvedValueOnce({
+                ok: true,
+                status: 200,
+                text: async () => JSON.stringify({ value: null })
+            } as any)
+
+            await deleteSessionRequest.makeRequest({ ...defaultOptions, connectionRetryCount: 1 }, sessionId)
+            expect(fetch).toHaveBeenCalledTimes(2)
+            // the retry still reached the server through the same dispatcher
+            expect(fetch.mock.calls[1][1]).toHaveProperty('dispatcher', fetch.mock.calls[0][1]!.dispatcher)
+            expect(SESSION_DISPATCHERS.has(sessionId)).toBe(false)
+        })
+
+        it('should cleanup the session dispatcher when DELETE /session/:sessionId fails on every attempt', async () => {
+            const sessionId = 'failed-delete-session-id'
+            const deleteSessionRequest = new FetchRequest('DELETE', `/session/${sessionId}`, {})
+            const { fetch } = vi.mocked(await import('undici'))
+            fetch.mockResolvedValue({
+                ok: false,
+                status: 500,
+                text: async () => JSON.stringify({ value: { error: 'unknown error', message: 'grid hiccup' } })
+            } as any)
+
+            await deleteSessionRequest.makeRequest({ ...defaultOptions, connectionRetryCount: 0 }, sessionId).catch((e) => e)
+            expect(SESSION_DISPATCHERS.has(sessionId)).toBe(false)
+            fetch.mockReset()
+            fetch.mockImplementation((async () => ({ ok: true, status: 200, json: async () => ({}) })) as any)
+        })
+
         it('should not cleanup session dispatcher on non delete session DELETE requests', async () => {
             const sessionId = 'other-delete-session-id'
             const deleteCookieRequest = new FetchRequest('DELETE', `/session/${sessionId}/cookie`, {})
@@ -600,7 +870,7 @@ describe('webdriver request', () => {
         it('should fall back to environment variables if no global dispatcher is set', async () => {
             // Mock getGlobalDispatcher to return a default Agent (meaning no custom global dispatcher)
             const defaultAgent = { type: 'default-agent', close: vi.fn(), constructor: { name: 'Agent' } }
-            vi.mocked(Agent).mockReturnValue(defaultAgent as any)
+            vi.mocked(Agent).mockImplementation(function () { return defaultAgent as any })
             vi.mocked(getGlobalDispatcher).mockReturnValue(defaultAgent as any)
 
             // Set proxy environment variable
@@ -620,7 +890,7 @@ describe('webdriver request', () => {
         it('should use environment proxy unless excluded by NO_PROXY', async () => {
             // Mock getGlobalDispatcher to return a default Agent
             const defaultAgent = { type: 'default-agent', close: vi.fn(), constructor: { name: 'Agent' } }
-            vi.mocked(Agent).mockReturnValue(defaultAgent as any)
+            vi.mocked(Agent).mockImplementation(function () { return defaultAgent as any })
             vi.mocked(getGlobalDispatcher).mockReturnValue(defaultAgent as any)
 
             environment.value.variables.PROXY_URL = 'http://proxy.example.com:8080'
@@ -646,6 +916,47 @@ describe('webdriver request', () => {
             expect(Agent).toHaveBeenCalledTimes(1) // Once for global dispatcher mock, once for actual dispatcher
         })
 
+        it('should not verify certificates if strictSSL is disabled', async () => {
+            const defaultAgent = { type: 'default-agent', close: vi.fn(), constructor: { name: 'Agent' } }
+            vi.mocked(Agent).mockImplementation(function () { return defaultAgent as any })
+            vi.mocked(getGlobalDispatcher).mockReturnValue(defaultAgent as any)
+            vi.mocked(Agent).mockClear()
+
+            const req = new FetchRequest('GET', '/test', {})
+            await req.createOptions({ ...defaultOptions, strictSSL: false })
+            expect(Agent).toHaveBeenCalledWith(expect.objectContaining({
+                connect: { rejectUnauthorized: false }
+            }))
+
+            environment.value.variables.PROXY_URL = 'http://proxy.example.com:8080'
+            await req.createOptions({ ...defaultOptions, strictSSL: false })
+            expect(ProxyAgent).toHaveBeenCalledWith(expect.objectContaining({
+                requestTls: { rejectUnauthorized: false },
+                proxyTls: { rejectUnauthorized: false }
+            }))
+        })
+
+        it('should verify certificates by default', async () => {
+            const defaultAgent = { type: 'default-agent', close: vi.fn(), constructor: { name: 'Agent' } }
+            vi.mocked(Agent).mockImplementation(function () { return defaultAgent as any })
+            vi.mocked(getGlobalDispatcher).mockReturnValue(defaultAgent as any)
+            vi.mocked(Agent).mockClear()
+
+            const req = new FetchRequest('GET', '/test', {})
+            await req.createOptions({ ...defaultOptions, strictSSL: true })
+            expect(vi.mocked(Agent).mock.calls[0][0]).not.toHaveProperty('connect')
+
+            // the option is not set at all
+            expect(defaultOptions).not.toHaveProperty('strictSSL')
+            await req.createOptions(defaultOptions)
+            expect(vi.mocked(Agent).mock.calls[1][0]).not.toHaveProperty('connect')
+
+            environment.value.variables.PROXY_URL = 'http://proxy.example.com:8080'
+            await req.createOptions(defaultOptions)
+            expect(vi.mocked(ProxyAgent).mock.calls.at(-1)![0]).not.toHaveProperty('requestTls')
+            expect(vi.mocked(ProxyAgent).mock.calls.at(-1)![0]).not.toHaveProperty('proxyTls')
+        })
+
         it('should handle getGlobalDispatcher errors gracefully', async () => {
             // Mock getGlobalDispatcher to throw an error
             vi.mocked(getGlobalDispatcher).mockImplementation(() => {
@@ -669,7 +980,7 @@ describe('webdriver request', () => {
         it('should not use proxy if neither global dispatcher nor env vars are set', async () => {
             // Mock getGlobalDispatcher to return a default Agent
             const defaultAgent = { type: 'default-agent', close: vi.fn(), constructor: { name: 'Agent' } }
-            vi.mocked(Agent).mockReturnValue(defaultAgent as any)
+            vi.mocked(Agent).mockImplementation(function () { return defaultAgent as any })
             vi.mocked(getGlobalDispatcher).mockReturnValue(defaultAgent as any)
 
             // Ensure no proxy environment variables are set

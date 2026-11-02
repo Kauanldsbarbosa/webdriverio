@@ -1,4 +1,4 @@
-name: Testrunner Multiremote Tests
+name: Testrunner Multi-remote Tests
 
 on:
   workflow_call:
@@ -6,10 +6,11 @@ on:
     # https://docs.github.com/en/actions/using-workflows/reusing-workflows
 
 jobs:
-  multiremote_check:
-    name: Testrunner Multiremote Tests (${{ matrix.os }})
+  multi_remote_check:
+    name: Testrunner Multi-remote Tests (${{ matrix.os }})
     permissions:
       contents: read
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -17,7 +18,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: ⬇️ Checkout Code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: 🧑‍🔧 Get Core Dependencies
         uses: ./.github/workflows/actions/get-core-dependencies
@@ -29,14 +30,14 @@ jobs:
           path: .
           filename: webdriverio-build.zip
 
-      - name: Testrunner Multiremote Tests
-        run: pnpm run test:e2e:multiremote
+      - name: Testrunner Multi-remote Tests
+        run: pnpm run test:e2e:multi-remote
         shell: bash
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: e2e-testrunner-multiremote-tests-logs
+          name: e2e-testrunner-multi-remote-tests-logs-${{ matrix.os }}
           path: e2e/wdio/*.log
 
       - name: Check Git Context

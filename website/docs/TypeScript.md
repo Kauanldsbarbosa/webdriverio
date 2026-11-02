@@ -1,6 +1,7 @@
 ---
 id: typescript
 title: TypeScript Setup
+description: "Write WebdriverIO tests in TypeScript with tsx, set up tsconfig.json and add type definitions for frameworks, services and custom commands."
 ---
 
 You can write tests using [TypeScript](http://www.typescriptlang.org) to get auto-completion and type safety.
@@ -69,10 +70,12 @@ For instance, if you decide to use the Mocha framework, you need to install `@ty
 ```json title="tsconfig.json"
 {
     "compilerOptions": {
-        "types": ["node", "@wdio/globals/types", "@wdio/jasmine-framework"]
+        "types": ["node", "jasmine", "@wdio/globals/types", "@wdio/jasmine-framework"]
     }
 }
 ```
+
+`jasmine` loads `@types/jasmine`, which gives `jasmine`, `spyOn` and `expectAsync`. With `@wdio/jasmine-framework`, the global `expect` returns `void` for Jasmine sync matchers and a `Promise` for WebdriverIO matchers and Jasmine async matchers. `expectAsync` also has the WebdriverIO matchers. The `expect` export of `expect-webdriverio` keeps its Jest matchers.
 
 </TabItem>
 <TabItem value="cucumber">

@@ -30,7 +30,6 @@ describe('elem.react$', () => {
                 { some: 'props' },
                 true,
                 {
-                    ELEMENT: elem.elementId,
                     [ELEMENT_KEY]: elem.elementId
                 },
             ])
@@ -53,21 +52,8 @@ describe('elem.react$', () => {
             {},
             {},
             {
-                ELEMENT: elem.elementId,
                 [ELEMENT_KEY]: elem.elementId
             },
         ])
-    })
-
-    it('should call getElement with React flag true', async () => {
-        const browser = await remote({
-            baseUrl: 'http://foobar.com',
-            capabilities: {
-                browserName: 'foobar'
-            }
-        })
-
-        const elem = await browser.react$('SomeCmp')
-        expect(elem.isReactElement).toBe(true)
     })
 })

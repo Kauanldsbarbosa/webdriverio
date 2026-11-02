@@ -1,5 +1,5 @@
 import type { Options, Reporters } from '@wdio/types'
-import type { NormalizedPackageJson } from 'read-pkg-up'
+import type { NormalizedPackageJson } from 'read-package-up'
 import type { SUPPORTED_PACKAGE_MANAGERS } from 'create-wdio/utils'
 
 export type PM = typeof SUPPORTED_PACKAGE_MANAGERS[number]
@@ -29,6 +29,12 @@ export interface RunCommandArguments {
     configPath: string
     updateSnapshots?: Options.Testrunner['updateSnapshots']
     tsConfigPath?: string
+    cpuProf?: boolean
+    heapProf?: boolean
+    /**
+     * `wdio run --debug=agent` pauses `browser.debug()` and failing tests.
+     */
+    debug?: 'agent'
 
     /**
      * @internal
@@ -42,6 +48,7 @@ export interface ReplCommandArguments {
     udid: string
     option: string
     capabilities: string
+    session?: string
 }
 
 export interface InstallCommandArguments {

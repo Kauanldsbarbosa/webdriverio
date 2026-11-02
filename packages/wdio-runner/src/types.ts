@@ -1,21 +1,14 @@
-import type { Capabilities, Services, Workers } from '@wdio/types'
-import type { getConfig, matchers } from 'expect-webdriverio'
-import type { AddCommandFunction, CustomCommandOptions, Instances } from 'webdriverio'
+import type { AnyRunnerToBrowserMessage, Capabilities, Services } from '@wdio/types'
+import type { getDefaultOptions, wdioCustomMatchers } from 'expect-webdriverio'
+import type { AddCommandFunction, CustomCommandOptions } from 'webdriverio'
 
 import type BaseReporter from './reporter.js'
 
 /**
  * Represents a custom command stored by the protocol stub before the session starts.
- * Supports both:
- * - options object format: [name, fn, CustomCommandOptions]
- * - deprecated positional format: [name, fn, attachToElement, proto?, instances?]
+ * Both `addCommand` and `overwriteCommand` are stored as `[name, fn, options]`.
  */
-export type CustomStubCommand =
-    | CustomStubCommandWithOptions
-    | LegacyCustomStubCommand
-export type CustomStubCommandWithOptions = [string, AddCommandFunction<boolean>, CustomCommandOptions<boolean>]
-/** @deprecated use CustomStubCommandWithOptions, to remove in v10 */
-export type LegacyCustomStubCommand = [string, AddCommandFunction<boolean>, boolean?, Record<string, unknown>?, Record<string, Instances>?]
+export type CustomStubCommand = [string, AddCommandFunction<boolean>, CustomCommandOptions<boolean>]
 
 export type BeforeArgs = Parameters<Required<Services.HookFunctions>['before']>
 export type AfterArgs = Parameters<Required<Services.HookFunctions>['after']>
@@ -25,13 +18,17 @@ export type AfterSessionArgs = Parameters<Required<Services.HookFunctions>['afte
 interface Args extends Partial<WebdriverIO.Config> {
     ignoredWorkerServices?: string[]
     watch?: boolean
+    /**
+     * `wdio run --debug=agent`
+     */
+    debug?: 'agent'
 }
 
 export type RunParams = {
     cid: string
     args: Args
     specs: string[]
-    caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities
+    caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities
     configFile: string
     retries: number
 }
@@ -41,16 +38,17 @@ export interface TestFramework {
         cid: string,
         config: WebdriverIO.Config,
         specs: string[],
-        capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities,
+        capabilities: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities,
         reporter: BaseReporter
     ) => TestFramework
     run (): Promise<number>
     hasTests (): boolean
     setupExpect?: (
         wdioExpect: ExpectWebdriverIO.Expect,
-        wdioMatchers: typeof matchers,
-        getExpectConfig: typeof getConfig
-    ) => void
+        wdioMatchers: typeof wdioCustomMatchers,
+        getExpectConfig: typeof getDefaultOptions
+    ) => void | Promise<void>
+    setBrowser?: (browser: WebdriverIO.Browser) => void
 }
 
 export interface SessionStartedMessage {
@@ -58,13 +56,12 @@ export interface SessionStartedMessage {
     name: 'sessionStarted'
     content: {
         sessionId: string
-        isW3C: boolean
         protocol: string
         hostname: string
         port: number
         path: string
         headers: Record<string, string>
-        isMultiremote: boolean
+        isMultiRemote: boolean
         injectGlobals: boolean
         capabilities: WebdriverIO.Capabilities
     },
@@ -92,11 +89,27 @@ export interface SessionEndedMessage {
     cid: string
 }
 
+export interface WorkerTimingsMessage {
+    origin: 'worker'
+    name: 'workerTimings'
+    cid?: string
+    content: {
+        setup?: number
+        execution?: number
+        teardown?: number
+        total?: number
+    }
+}
+
 export interface WorkerResponseMessage {
     origin: 'worker'
     name: 'workerResponse',
     args: {
+        /**
+         * Communicator routing id, matching the id the browser runner assigned
+         * when it forwarded the browser message. Not the id inside `message.value`.
+         */
         id: number
-        message: Workers.SocketMessage
+        message: AnyRunnerToBrowserMessage
     }
 }

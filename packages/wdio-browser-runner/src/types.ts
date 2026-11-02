@@ -2,10 +2,18 @@ import type { ConfigEnv, InlineConfig } from 'vite'
 import type { Workers } from '@wdio/types'
 import type { MochaOpts } from '@wdio/mocha-framework'
 import type { IstanbulPluginOptions } from 'vite-plugin-istanbul'
+import type { remote } from 'webdriver'
 
 declare global {
     interface Window {
         __wdioEnv__: Environment
+        /**
+         * time (ms since epoch) when Mocha started to run the tests of the spec,
+         * set right before `mocha.run()`. Errors after this time belong to the
+         * tests: Mocha reports them, the runner must not end the spec for them.
+         */
+        __wdioTestsStartedAt__?: number
+        __wdioNetworkIntercepts__?: Map<string | symbol, remote.NetworkUrlPattern[] | undefined>
         wdioDebugContinue: (value: unknown) => void
     }
 }
@@ -41,7 +49,7 @@ export interface CoverageOptions extends Omit<IstanbulPluginOptions, 'cypress' |
      */
     perFile?: boolean
     /**
-     * Clean coverage results before running tests.
+     * Clean coverage results before running tests. Only applies when `enabled` is `true`.
      *
      * @default true
      */
@@ -138,4 +146,4 @@ export interface Environment {
     injectGlobals: boolean
 }
 
-export type MockFactoryWithHelper = (importOriginal: <T = unknown>() => Promise<T>) => unknown
+export type MockFactoryWithHelper = (originalModule: Readonly<Record<string, unknown>>) => unknown

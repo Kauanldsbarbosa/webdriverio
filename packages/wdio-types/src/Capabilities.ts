@@ -102,7 +102,7 @@ export interface W3CCapabilities {
     firstMatch: WebdriverIO.Capabilities[]
 }
 export type RequestedStandaloneCapabilities = W3CCapabilities | WebdriverIO.Capabilities
-export type RequestedMultiremoteCapabilities = {
+export type RequestedMultiRemoteCapabilities = {
     [instanceName: string]: WebDriverIOOptions & WithRequestedCapabilities
 }
 
@@ -115,17 +115,17 @@ export type RemoteConfig = WebDriverOptions & WithRequestedCapabilities
  * Configuration object for the `webdriverio` package
  */
 export type WebdriverIOConfig = WebDriverIOOptions & WithRequestedCapabilities
-export type WebdriverIOMultiremoteConfig = WebDriverIOOptions & { capabilities: RequestedMultiremoteCapabilities }
+export type WebdriverIOMultiRemoteConfig = WebDriverIOOptions & { capabilities: RequestedMultiRemoteCapabilities }
 
 /**
  * A type referencing all possible capability types when using Testrunner
  * e.g. everything a user can provide in the `capabilities` property
  */
-export type TestrunnerCapabilities = RequestedStandaloneCapabilities[] | RequestedMultiremoteCapabilities | RequestedMultiremoteCapabilities[]
+export type TestrunnerCapabilities = RequestedStandaloneCapabilities[] | RequestedMultiRemoteCapabilities | RequestedMultiRemoteCapabilities[]
 
 /**
  * The capabilities that will be resolved within a worker instance, e.g. either
- * a single set of capabilities or a single multiremote instance
+ * a single set of capabilities or a single multi-remote instance
  */
 export type ResolvedTestrunnerCapabilities = WebdriverIO.Capabilities | Record<string, WebdriverIO.Capabilities>
 
@@ -148,7 +148,7 @@ export interface WithRequestedCapabilities {
      *   }
      * })
      *
-     * // multiremote session
+     * // multi-remote session
      * const browser = remote({
      *   capabilities: {
      *     browserA: {
@@ -207,18 +207,18 @@ export interface WithRequestedTestrunnerCapabilities {
 }
 
 /**
- * The `capabilities` property is a required property when using the `remote` method to initiate a multiremote session.
+ * The `capabilities` property is a required property when using the `remote` method to initiate a multi-remote session.
  */
-export interface WithRequestedMultiremoteCapabilities {
+export interface WithRequestedMultiRemoteCapabilities {
     /**
-     * Defines the capabilities for each Multiremote client. Check out the
+     * Defines the capabilities for each multi-remote client. Check out the
      * documentation on [Capabilities](https://webdriver.io/docs/capabilities) for more details.
      *
      * @example
      * ```
      * // wdio.conf.js
      * export const config = {
-     *   // multiremote example
+     *   // multi-remote example
      *   capabilities: {
      *     browserA: {
      *       browserName: 'chrome',
@@ -233,7 +233,7 @@ export interface WithRequestedMultiremoteCapabilities {
      *   }
      * })
      * ```
-     * // or with parallel multiremote sessions
+     * // or with parallel multi-remote sessions
      * ```
      * // wdio.conf.js
      * export const config = {
@@ -275,7 +275,7 @@ export interface WithRequestedMultiremoteCapabilities {
      * })
      * ```
      */
-    capabilities: RequestedMultiremoteCapabilities | RequestedMultiremoteCapabilities[]
+    capabilities: RequestedMultiRemoteCapabilities | RequestedMultiRemoteCapabilities[]
 }
 
 export interface VendorExtensions extends EdgeCapabilities, AppiumCapabilities, WebdriverIOCapabilities,
@@ -351,6 +351,16 @@ export interface WebdriverIOCapabilities {
     'wdio:edgedriverOptions'?: WebdriverIO.EdgedriverOptions
 
     /**
+     * Electron version for Electron applications. When specified, WebdriverIO downloads the
+     * Chromedriver bundled with that Electron release instead of using Chrome for Testing.
+     * With `browserVersion` also set, WebdriverIO uses the Chromedriver for that version
+     * instead when the download fails or `CHROMEDRIVER_CDNURL` is set.
+     *
+     * @example '33.2.1'
+     */
+    'wdio:electronVersion'?: string
+
+    /**
     * Maximum number of total parallel running workers (per capability)
     */
     'wdio:maxInstances'?: number
@@ -360,7 +370,7 @@ export interface WebdriverIOCapabilities {
     * pattern to match multiple files at once or wrap a glob or set of
     * paths into an array to run them within a single worker process.
     */
-    'wdio:specs'?: string[]
+    'wdio:specs'?: (string | string[])[]
 
     /**
      * Exclude specs from test execution.
@@ -373,6 +383,14 @@ export interface WebdriverIOCapabilities {
      * the WebDriver protocol only.
      */
     'wdio:enforceWebDriverClassic'?: boolean
+
+    /**
+     * If flag is set to `true` WebdriverIO runs element commands over
+     * WebDriver BiDi script evaluation instead of WebDriver Classic
+     * endpoints. Required for `parallelMode` in the mocha and cucumber
+     * frameworks. Experimental.
+     */
+    'wdio:experimentalBiDiCommands'?: boolean
 }
 
 export interface ChromeOptions {
@@ -615,12 +633,12 @@ export interface AppiumCapabilities {
      * + xctrace device name, which comes from 'xcrun xctrace list devices' command. (since Xcode 12)
      *
      * ### For Android, this capability is currently ignored, though it remains required.
-     * Note: This document is written with appium 1.22.1 release, this behavior may changed later.
+     * Note: historically documented against Appium 1.22.1; prefer current Appium 3 driver docs for platform-specific behavior.
      */
     'appium:deviceName'?: string
     /**
      * The absolute local path or remote http URL to a .ipa file (IOS), .app folder (IOS Simulator), .apk file (Android)
-     * or [.apks file (Android App Bundle)](https://github.com/appium/appium-uiautomator2-driver/blob/master/docs/android-appbundle.md),
+     * or [.apks file (Android App Bundle)](https://appium.github.io/appium-uiautomator2-driver/latest/guides/appbundle/),
      * or a .zip file containing one of these.
      *
      * Appium will attempt to install this app binary on the appropriate device first.
@@ -672,7 +690,7 @@ export interface AppiumCapabilities {
 /**
  * Appium Android Only Capabilities
  *
- * @see https://github.com/appium/appium-uiautomator2-driver#capabilities
+ * @see https://appium.github.io/appium-uiautomator2-driver/latest/reference/capabilities/
  */
 export interface AppiumAndroidCapabilities {
     'appium:appiumVersion'?: string
@@ -704,6 +722,7 @@ export interface AppiumAndroidCapabilities {
     'appium:chromedriverExecutable'?: string
     'appium:chromedriverArgs'?: string[]
     'appium:chromedriverExecutableDir'?: string
+    'appium:chromedriverForwardBiDi'?: boolean
     'appium:chromedriverChromeMappingFile'?: string
     'appium:chromedriverUseSystemExecutable'?: boolean
     'appium:autoWebviewTimeout'?: number
@@ -1347,28 +1366,12 @@ export interface SauceLabsCapabilities {
     tunnelName?: string
 
     /**
-     * Specify a Sauce Connect tunnel name to establish connectivity with a Sauce Labs test platform. This is an alias for tunnelName.
-     * @see https://docs.saucelabs.com/dev/test-configuration-options/#tunnelidentifier
-     * @deprecated
-     */
-    tunnelIdentifier?: string
-
-    /**
      * If the tunnelName you've specified to establish connectivity with a Sauce Labs test platform is a shared tunnel,
      * and you are not the user who created the tunnel, you must identify the Sauce Labs user who did create the tunnel in order to use it for your test.
      * @see https://docs.saucelabs.com/secure-connections/sauce-connect/setup-configuration/basic-setup/#using-tunnel-names
      * @see https://docs.saucelabs.com/dev/test-configuration-options/#tunnelowner
      */
     tunnelOwner?: string
-
-    /**
-     * If the tunnelName (or tunnelIdentifier) you've specified to establish connectivity with a Sauce Labs test platform is a shared tunnel,
-     * and you are not the user who created the tunnel, you must identify the Sauce Labs user who did create the tunnel in order to use it for your test.
-     * This is an alias for tunnelOwner.
-     * @see https://docs.saucelabs.com/dev/test-configuration-options/#parenttunnel
-     * @deprecated
-     */
-    parentTunnel?: string
 
     /**
      * Use this to disable video recording. By default, Sauce Labs records a video of every test you run.

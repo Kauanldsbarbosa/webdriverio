@@ -1,6 +1,7 @@
 ---
 id: interactive-test-rerunning
 title: Interactive Test Rerunning & Visualization
+description: "Watch tests run with live browser previews and per-command screenshots, then rerun single tests or suites from the DevTools UI."
 ---
 
 Watch your tests execute in real-time with live browser previews and automatic screenshots captured after each WebDriver command. The UI displays a complete visual timeline of your test execution, showing the exact browser state at each step.
@@ -12,13 +13,19 @@ After your initial test run completes, click on any test case or suite in the De
 - **Live browser preview** - See your application's current state during test execution
 - **Command timeline** - View detailed logs with timestamps for each action
 - **Interactive rerunning** - Click any test or suite to re-execute it instantly
-- **Same-session execution** - Tests rerun in the same browser session for faster feedback
+- **Same dashboard window** - Reruns spawn a fresh test process and stream into the existing dashboard window, without opening new tabs
 - **Scrollable history** - Review any point in test execution
 
 ## Demo
 
-### 🛠️ Test Rerunner & Snapshot
-![Test Rerunner & Snapshot Demo](/img/devtools/test-rerunner.gif)
+### ▶️ Test Runner
+![Test Runner Demo](/img/devtools/test-runner.gif)
+
+### 🛠️ Test Rerunner
+![Test Rerunner Demo](/img/devtools/test-rerunner.gif)
 
 ### 🛑 Stop Test Runner
 ![Stop Test Runner Demo](/img/devtools/stop-runner.gif)
+
+### ⚡ Actions, Snapshot & Command Logs
+![Actions, Snapshot & Command Logs Demo](/img/devtools/actions-command-logs.gif)

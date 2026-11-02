@@ -1,11 +1,12 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import inquirer from 'inquirer'
-import { buildTauriBanner, configHelperSuccessMessage, CONFIG_HELPER_SERENITY_BANNER, SUPPORTED_CONFIG_FILE_EXTENSION, CONFIG_HELPER_INTRO, getResolvedPurpose, isNuxtProject, SUPPORTED_PACKAGES } from '../constants.js'
-import type { ParsedAnswers } from '../types.js'
+import { buildTauriBanner, buildDioxusBanner, buildDevtoolsBanner, configHelperSuccessMessage, CONFIG_HELPER_SERENITY_BANNER, SUPPORTED_CONFIG_FILE_EXTENSION, CONFIG_HELPER_INTRO, getResolvedPurpose, isNuxtProject, SUPPORTED_PACKAGES } from '../constants.js'
+import type { ParsedAnswers, Questionnair } from '../types.js'
 import { createPackageJSON, setupTypeScript, npmInstall, createWDIOConfig, createWDIOScript, runAppiumInstaller, convertPackageHashToObject, getAnswers, getPathForFileGeneration, getProjectProps, getProjectRoot, getSerenityPackages } from '../utils.js'
+import { writeAgentSupport } from './agent.js'
 
-export async function runConfigCommand(parsedAnswers: ParsedAnswers, npmTag: string) {
+export async function runConfigCommand(parsedAnswers: ParsedAnswers, npmTag: string, yes = false) {
     console.log('\n')
 
     await createPackageJSON(parsedAnswers)
@@ -21,21 +22,32 @@ export async function runConfigCommand(parsedAnswers: ParsedAnswers, npmTag: str
     if (parsedAnswers.serenityAdapter) {
         extraInfoParts.push(CONFIG_HELPER_SERENITY_BANNER)
     }
+    if (parsedAnswers.services?.includes('devtools')) {
+        extraInfoParts.push(buildDevtoolsBanner(Boolean(parsedAnswers.npmInstall)))
+    }
     if (parsedAnswers.purpose === 'tauri') {
         extraInfoParts.push(buildTauriBanner(
             parsedAnswers.rawAnswers.tauriDriverProvider,
             parsedAnswers.rawAnswers.tauriUseFrontendPlugin
         ))
     }
+    if (parsedAnswers.purpose === 'dioxus') {
+        extraInfoParts.push(buildDioxusBanner(
+            parsedAnswers.rawAnswers.dioxusDriverProvider
+        ))
+    }
     console.log(
         configHelperSuccessMessage({
             projectRootDir: parsedAnswers.projectRootDir,
-            runScript: parsedAnswers.serenityAdapter ? 'serenity' : 'wdio',
+            runScript: 'wdio',
             extraInfo: extraInfoParts.join('\n')
         }),
     )
 
-    await runAppiumInstaller(parsedAnswers)
+    await runAppiumInstaller(parsedAnswers, yes)
+    if (parsedAnswers.rawAnswers?.agentSupport) {
+        writeAgentSupport(parsedAnswers.projectRootDir)
+    }
 }
 
 /**
@@ -58,18 +70,9 @@ export async function missingConfigurationPrompt(command: string, configPath: st
         default: false
     })
 
-    /**
-     * don't exit if running unit tests
-     */
     if (!config) {
-        /* istanbul ignore next */
         console.log(`No WebdriverIO configuration found in "${process.cwd()}"`)
-
-        /* istanbul ignore next */
-        if (!process.env.WDIO_UNIT_TESTS) {
-            process.exit(0)
-        }
-        return configPath
+        process.exit(0)
     }
 
     const parsedAnswers = await parseAnswers(false)
@@ -77,9 +80,51 @@ export async function missingConfigurationPrompt(command: string, configPath: st
     return configPath
 }
 
-export const parseAnswers = async function (yes: boolean): Promise<ParsedAnswers> {
+/**
+ * Resolve where the generated WDIO TypeScript config should live.
+ * Never overwrite an existing root `tsconfig.json` — when that would happen
+ * (for example a direct-child spec glob like `e2e/*.ts`), fall back to a
+ * dedicated `tsconfig.e2e.json` / `tsconfig.wdio.json`.
+ */
+export function resolveTsConfigFilePath({
+    projectRootDir,
+    hasRootTSConfig,
+    specs,
+    runnerShort
+}: {
+    projectRootDir: string
+    hasRootTSConfig: boolean
+    specs?: string
+    runnerShort: string
+}) {
+    const rootTsConfigPath = path.resolve(projectRootDir, 'tsconfig.json')
+    const dedicatedTsConfigPath = path.resolve(
+        projectRootDir,
+        `tsconfig.${runnerShort === 'local' ? 'e2e' : 'wdio'}.json`
+    )
+
+    if (!hasRootTSConfig) {
+        return rootTsConfigPath
+    }
+
+    if (!specs) {
+        return dedicatedTsConfigPath
+    }
+
+    const specPathWithoutGlobs = specs
+        .split(path.sep)
+        .filter((segment) => !segment.includes('*'))
+        .join(path.sep)
+    const candidate = path.resolve(projectRootDir, path.dirname(specPathWithoutGlobs), 'tsconfig.json')
+
+    return path.resolve(candidate) === rootTsConfigPath
+        ? dedicatedTsConfigPath
+        : candidate
+}
+
+export const parseAnswers = async function (yes: boolean, flagAnswers: Partial<Questionnair> = {}): Promise<ParsedAnswers> {
     console.log(CONFIG_HELPER_INTRO)
-    const answers = await getAnswers(yes)
+    const answers = await getAnswers(yes, flagAnswers)
     const frameworkPackage = convertPackageHashToObject(answers.framework)
     const runnerPackage = convertPackageHashToObject(answers.runner || SUPPORTED_PACKAGES.runner[0].value)
     const servicePackages = answers.services.map((service) => convertPackageHashToObject(service))
@@ -104,26 +149,12 @@ export const parseAnswers = async function (yes: boolean): Promise<ParsedAnswers
      * find relative paths between tests and pages
      */
     const hasRootTSConfig = await fs.access(path.resolve(projectRootDir, 'tsconfig.json')).then(() => true, () => false)
-    const tsConfigFilePath = !hasRootTSConfig
-        /**
-         * if no tsconfig.json exists in project, create one
-         */
-        ? path.resolve(projectRootDir, 'tsconfig.json')
-        /**
-         * otherwise make it dependent on whether the user wants to autogenerate files
-         */
-        : answers.specs
-            /**
-             * if we have autogenerated spec files, put the tsconfig one above the spec file dir
-             */
-            ? path.resolve(
-                path.dirname(answers.specs.split(path.sep).filter((s) => !s.includes('*')).join(path.sep)),
-                'tsconfig.json'
-            )
-            /**
-             * if no spec files are auto generated, create a wdio tsconfig and let the user deal with it
-             */
-            : path.resolve(projectRootDir, `tsconfig.${runnerPackage.short === 'local' ? 'e2e' : 'wdio'}.json`)
+    const tsConfigFilePath = resolveTsConfigFilePath({
+        projectRootDir,
+        hasRootTSConfig,
+        specs: answers.specs,
+        runnerShort: runnerPackage.short
+    })
     const parsedPaths = getPathForFileGeneration(answers, projectRootDir)
     const isUsingTypeScript = answers.isUsingTypeScript
     const wdioConfigFilename = `wdio.conf.${isUsingTypeScript ? 'ts' : 'js'}`

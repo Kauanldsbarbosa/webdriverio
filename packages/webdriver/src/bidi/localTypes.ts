@@ -10,7 +10,7 @@
  * ```
  *
  * from the project root. You can find the scripts that generates this file in
- * ./scripts/bidi/**
+ * ./infra/bidiCodegen/**
  */
 
 export type Message = CommandResponse | ErrorResponse | Event
@@ -40,7 +40,7 @@ export type EventData = BrowsingContextEvent | InputEvent | LogEvent | NetworkEv
 export type Extensible = Record<string, unknown>
 export type JsInt = number
 export type JsUint = number
-export type ErrorCode = 'invalid argument' | 'invalid selector' | 'invalid session id' | 'invalid web extension' | 'move target out of bounds' | 'no such alert' | 'no such network collector' | 'no such element' | 'no such frame' | 'no such handle' | 'no such history entry' | 'no such intercept' | 'no such network data' | 'no such node' | 'no such request' | 'no such script' | 'no such storage partition' | 'no such user context' | 'no such web extension' | 'session not created' | 'unable to capture screen' | 'unable to close browser' | 'unable to set cookie' | 'unable to set file input' | 'unavailable network data' | 'underspecified storage partition' | 'unknown command' | 'unknown error' | 'unsupported operation'
+export type ErrorCode = 'invalid argument' | 'invalid selector' | 'invalid session id' | 'invalid web extension' | 'move target out of bounds' | 'no such alert' | 'no such network collector' | 'no such element' | 'no such frame' | 'no such handle' | 'no such history entry' | 'no such intercept' | 'no such network data' | 'no such node' | 'no such request' | 'no such screencast' | 'no such script' | 'no such storage partition' | 'no such user context' | 'no such web extension' | 'session not created' | 'unable to capture screen' | 'unable to close browser' | 'unable to set cookie' | 'unable to set file input' | 'unavailable network data' | 'underspecified storage partition' | 'unknown command' | 'unknown error' | 'unsupported operation'
 export type SessionResult = SessionEndResult | SessionNewResult | SessionStatusResult | SessionSubscribeResult | SessionUnsubscribeResult
 
 export interface SessionCapabilitiesRequest {
@@ -55,6 +55,18 @@ export type SessionCapabilityRequest = Extensible & {
     platformName?: string;
     proxy?: SessionProxyConfiguration;
     unhandledPromptBehavior?: SessionUserPromptHandler;
+}
+
+export type SessionCapabilityResponse = Extensible & {
+    acceptInsecureCerts: boolean;
+    browserName: string;
+    browserVersion: string;
+    platformName: string;
+    setWindowRect: boolean;
+    userAgent: string;
+    proxy?: SessionProxyConfiguration;
+    unhandledPromptBehavior?: SessionUserPromptHandler;
+    webSocketUrl?: string;
 }
 
 export type SessionProxyConfiguration = SessionAutodetectProxyConfiguration | SessionDirectProxyConfiguration | SessionManualProxyConfiguration | SessionPacProxyConfiguration | SessionSystemProxyConfiguration
@@ -107,17 +119,7 @@ export interface SessionStatusResult {
 
 export interface SessionNewResult {
     sessionId: string;
-    capabilities: {
-        acceptInsecureCerts: boolean;
-        browserName: string;
-        browserVersion: string;
-        platformName: string;
-        setWindowRect: boolean;
-        userAgent: string;
-        proxy?: SessionProxyConfiguration;
-        unhandledPromptBehavior?: SessionUserPromptHandler;
-        webSocketUrl?: string;
-    };
+    capabilities: SessionCapabilityResponse;
 }
 
 export type SessionEndResult = EmptyResult
@@ -160,12 +162,12 @@ export interface BrowserGetUserContextsResult {
 export type BrowserRemoveUserContextResult = EmptyResult
 export type BrowserSetClientWindowStateResult = BrowserClientWindowInfo
 export type BrowserSetDownloadBehaviorResult = EmptyResult
-export type BrowsingContextResult = BrowsingContextActivateResult | BrowsingContextCaptureScreenshotResult | BrowsingContextCloseResult | BrowsingContextCreateResult | BrowsingContextGetTreeResult | BrowsingContextHandleUserPromptResult | BrowsingContextLocateNodesResult | BrowsingContextNavigateResult | BrowsingContextPrintResult | BrowsingContextReloadResult | BrowsingContextSetBypassCspResult | BrowsingContextSetViewportResult | BrowsingContextTraverseHistoryResult
+export type BrowsingContextResult = BrowsingContextActivateResult | BrowsingContextCaptureScreenshotResult | BrowsingContextCloseResult | BrowsingContextCreateResult | BrowsingContextGetTreeResult | BrowsingContextHandleUserPromptResult | BrowsingContextLocateNodesResult | BrowsingContextNavigateResult | BrowsingContextPrintResult | BrowsingContextReloadResult | BrowsingContextSetBypassCspResult | BrowsingContextSetViewportResult | BrowsingContextStartScreencastResult | BrowsingContextStopScreencastResult | BrowsingContextTraverseHistoryResult
 export type BrowsingContextEvent = BrowsingContextContextCreated | BrowsingContextContextDestroyed | BrowsingContextDomContentLoaded | BrowsingContextDownloadEnd | BrowsingContextDownloadWillBegin | BrowsingContextFragmentNavigated | BrowsingContextHistoryUpdated | BrowsingContextLoad | BrowsingContextNavigationAborted | BrowsingContextNavigationCommitted | BrowsingContextNavigationFailed | BrowsingContextNavigationStarted | BrowsingContextUserPromptClosed | BrowsingContextUserPromptOpened
 export type BrowsingContextBrowsingContext = string
 export type BrowsingContextInfoList = BrowsingContextInfo[]
 
-export interface BrowsingContextInfo {
+export interface BrowsingContextBaseInfo {
     children: BrowsingContextInfoList | null;
     clientWindow: BrowserClientWindow;
     context: BrowsingContextBrowsingContext;
@@ -175,6 +177,7 @@ export interface BrowsingContextInfo {
     parent?: BrowsingContextBrowsingContext | null;
 }
 
+export type BrowsingContextInfo = BrowsingContextBaseInfo
 export type BrowsingContextLocator = BrowsingContextAccessibilityLocator | BrowsingContextCssLocator | BrowsingContextContextLocator | BrowsingContextInnerTextLocator | BrowsingContextXPathLocator
 
 export interface BrowsingContextAccessibilityLocator {
@@ -211,6 +214,7 @@ export interface BrowsingContextXPathLocator {
 }
 
 export type BrowsingContextNavigation = string
+export type BrowsingContextDownload = string
 
 export interface BrowsingContextBaseNavigationInfo {
     context: BrowsingContextBrowsingContext;
@@ -257,11 +261,28 @@ export interface BrowsingContextPrintResult {
 export type BrowsingContextReloadResult = BrowsingContextNavigateResult
 export type BrowsingContextSetBypassCspResult = EmptyResult
 export type BrowsingContextSetViewportResult = EmptyResult
+
+export interface BrowsingContextStartScreencastResult {
+    screencast: BrowsingContextScreencast;
+    path: string;
+}
+
+export type BrowsingContextScreencast = string
+
+export interface BrowsingContextStopScreencastResult {
+    path: string;
+    error?: string;
+}
+
 export type BrowsingContextTraverseHistoryResult = EmptyResult
 
 export interface BrowsingContextContextCreated {
     method: 'browsingContext.contextCreated';
-    params: BrowsingContextInfo;
+    params: BrowsingContextContextCreatedParameters;
+}
+
+export type BrowsingContextContextCreatedParameters = BrowsingContextBaseInfo & {
+    hasPlannedNavigation: boolean;
 }
 
 export interface BrowsingContextContextDestroyed {
@@ -307,6 +328,7 @@ export interface BrowsingContextDownloadWillBegin {
 }
 
 export type BrowsingContextDownloadWillBeginParams = BrowsingContextBaseNavigationInfo & {
+    download: BrowsingContextDownload;
     suggestedFilename: string;
 }
 
@@ -319,10 +341,12 @@ export type BrowsingContextDownloadEndParams = (BrowsingContextDownloadCanceledP
 
 export type BrowsingContextDownloadCanceledParams = BrowsingContextBaseNavigationInfo & {
     status: 'canceled';
+    download: BrowsingContextDownload;
 }
 
 export type BrowsingContextDownloadCompleteParams = BrowsingContextBaseNavigationInfo & {
     status: 'complete';
+    download: BrowsingContextDownload;
     filepath: string | null;
 }
 
@@ -368,16 +392,19 @@ export interface BrowsingContextUserPromptOpenedParameters {
     defaultValue?: string;
 }
 
-export type EmulationResult = EmulationSetForcedColorsModeThemeOverrideResult | EmulationSetGeolocationOverrideResult | EmulationSetLocaleOverrideResult | EmulationSetScreenOrientationOverrideResult | EmulationSetScriptingEnabledResult | EmulationSetScrollbarTypeOverrideResult | EmulationSetTimezoneOverrideResult | EmulationSetTouchOverrideResult | EmulationSetUserAgentOverrideResult
+export type EmulationResult = EmulationSetForcedColorsModeThemeOverrideResult | EmulationSetGeolocationOverrideResult | EmulationSetLocaleOverrideResult | EmulationSetMediaFeaturesOverrideResult | EmulationSetScreenOrientationOverrideResult | EmulationSetScriptingEnabledResult | EmulationSetScrollbarTypeOverrideResult | EmulationSetTextLayoutModeOverrideResult | EmulationSetTimezoneOverrideResult | EmulationSetTouchOverrideResult | EmulationSetUserAgentOverrideResult | EmulationSetViewportMetaOverrideResult
 export type EmulationSetForcedColorsModeThemeOverrideResult = EmptyResult
 export type EmulationSetGeolocationOverrideResult = EmptyResult
 export type EmulationSetLocaleOverrideResult = EmptyResult
+export type EmulationSetMediaFeaturesOverrideResult = EmptyResult
 export type EmulationSetNetworkConditionsResult = EmptyResult
 export type EmulationSetScreenSettingsOverrideResult = EmptyResult
 export type EmulationSetScreenOrientationOverrideResult = EmptyResult
 export type EmulationSetUserAgentOverrideResult = EmptyResult
+export type EmulationSetViewportMetaOverrideResult = EmptyResult
 export type EmulationSetScriptingEnabledResult = EmptyResult
 export type EmulationSetScrollbarTypeOverrideResult = EmptyResult
+export type EmulationSetTextLayoutModeOverrideResult = EmptyResult
 export type EmulationSetTimezoneOverrideResult = EmptyResult
 export type EmulationSetTouchOverrideResult = EmptyResult
 export type NetworkResult = NetworkAddDataCollectorResult | NetworkAddInterceptResult | NetworkContinueRequestResult | NetworkContinueResponseResult | NetworkContinueWithAuthResult | NetworkDisownDataResult | NetworkFailRequestResult | NetworkGetDataResult | NetworkProvideResponseResult | NetworkRemoveDataCollectorResult | NetworkRemoveInterceptResult | NetworkSetCacheBehaviorResult | NetworkSetExtraHeadersResult
@@ -577,15 +604,15 @@ export interface ScriptChannelProperties {
     ownership?: ScriptResultOwnership;
 }
 
-export type ScriptEvaluateResult = ScriptEvaluateResultSuccess | ScriptEvaluateResultException
+export type ScriptEvaluationResult = ScriptEvaluationResultSuccess | ScriptEvaluationResultException
 
-export interface ScriptEvaluateResultSuccess {
+export interface ScriptEvaluationResultSuccess {
     type: 'success';
     result: ScriptRemoteValue;
     realm: ScriptRealm;
 }
 
-export interface ScriptEvaluateResultException {
+export interface ScriptEvaluationResultException {
     type: 'exception';
     exceptionDetails: ScriptExceptionDetails;
     realm: ScriptRealm;
@@ -650,7 +677,7 @@ export interface ScriptUndefinedValue {
 }
 
 export interface ScriptNullValue {
-    type: null;
+    type: 'null';
 }
 
 export interface ScriptStringValue {
@@ -916,7 +943,8 @@ export interface ScriptAddPreloadScriptResult {
 }
 
 export type ScriptDisownResult = EmptyResult
-export type ScriptCallFunctionResult = ScriptEvaluateResult
+export type ScriptCallFunctionResult = ScriptEvaluationResult
+export type ScriptEvaluateResult = ScriptEvaluationResult
 
 export interface ScriptGetRealmsResult {
     realms: ScriptRealmInfo[];

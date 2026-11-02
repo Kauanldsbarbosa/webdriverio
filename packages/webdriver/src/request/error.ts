@@ -1,6 +1,35 @@
 import { transformCommandLogResult } from '@wdio/utils'
 
+import { isConnectionTimeoutSignal } from './abort.js'
 import { REG_EXPS } from './constants.js'
+
+/**
+ * `Error.cause` is an ES2022 property. Read it without naming it on `Error`,
+ * so this file still type-checks at the browser bundle's ES2021 lib.
+ */
+function errorCause (err: object): unknown {
+    if (!('cause' in err)) {
+        return undefined
+    }
+    return (err as { cause?: unknown }).cause
+}
+
+/**
+ * The request body is the JSON string that was sent to the driver. Tests and
+ * custom `transformRequest` hooks may also hand over a plain object.
+ */
+function parseRequestBody (body: unknown): Record<string, unknown> | undefined {
+    if (typeof body === 'string') {
+        try {
+            body = JSON.parse(body)
+        } catch {
+            return undefined
+        }
+    }
+    return body && typeof body === 'object' && !Array.isArray(body)
+        ? body as Record<string, unknown>
+        : undefined
+}
 
 abstract class WebDriverError extends Error {
     abstract url: URL
@@ -27,9 +56,9 @@ abstract class WebDriverError extends Error {
     }
 
     #getExecCmdArgs(requestOptions: RequestInit): string {
-        const { body: cmdJson } = requestOptions as unknown as { body: Record<string, unknown> }
+        const cmdJson = parseRequestBody(requestOptions.body)
 
-        if (typeof cmdJson !== 'object') {
+        if (!cmdJson) {
             return ''
         }
 
@@ -67,22 +96,32 @@ export class WebDriverRequestError extends WebDriverError {
         this.url = url
         this.opts = opts
 
-        const errorCode = typeof err.cause === 'object' && err.cause && 'code' in err.cause && typeof err.cause.code === 'string'
-            ? err.cause.code
+        /**
+         * A request that exceeds `connectionRetryTimeout` aborts our signal.
+         * Node reports that as `TimeoutError`. Chrome and Edge 103 to 123
+         * report `AbortError` instead, and older browsers have no
+         * `AbortSignal.timeout`, so the signal itself is the source of truth.
+         */
+        const cause = errorCause(err)
+        const isAbortTimeout = err.name === 'TimeoutError' || isConnectionTimeoutSignal(this.opts.signal)
+        const errorCode = typeof cause === 'object' && cause && 'code' in cause && typeof cause.code === 'string'
+            ? cause.code
             : 'code' in err && typeof err.code === 'string'
                 ? err.code
-                : undefined
+                : isAbortTimeout
+                    ? 'ETIMEDOUT'
+                    : undefined
         if (errorCode) {
             this.code = errorCode
-            this.message = errorCode === 'UND_ERR_CONNECT_TIMEOUT'
+            this.message = errorCode === 'UND_ERR_CONNECT_TIMEOUT' || isAbortTimeout
                 ? 'Request timed out! Consider increasing the "connectionRetryTimeout" option.'
                 : 'Request failed with error code ' + errorCode
         }
 
-        if (typeof err.cause === 'object' && err.cause) {
-            this.statusCode = 'statusCode' in err.cause && typeof err.cause.statusCode === 'number'
-                ? err.cause.statusCode : undefined
-            this.body = 'body' in err.cause ? err.cause.body : undefined
+        if (typeof cause === 'object' && cause) {
+            this.statusCode = 'statusCode' in cause && typeof cause.statusCode === 'number'
+                ? cause.statusCode : undefined
+            this.body = 'body' in cause ? cause.body : undefined
         }
 
         this.message = this.computeErrorMessage()
@@ -131,9 +170,9 @@ export class WebDriverResponseError extends WebDriverError {
          *  message: ''
          */
         if (typeof errorMessage === 'string' && errorMessage.includes('invalid locator')) {
-            const requestOptions = opts.body as unknown as { using: string; value: string }
+            const requestBody = parseRequestBody(opts.body)
             errorMessage = (
-                `The selector "${requestOptions.value}" used with strategy "${requestOptions.using}" is invalid!`
+                `The selector "${requestBody?.value}" used with strategy "${requestBody?.using}" is invalid!`
             )
         }
 

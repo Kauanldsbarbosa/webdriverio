@@ -20,9 +20,6 @@
     <a href="https://bestpractices.coreinfrastructure.org/en/projects/5589">
         <img alt="OpenSSF Best Practices" src="https://bestpractices.coreinfrastructure.org/projects/5589/badge">
     </a>
-    <a title="Crowdin" target="_blank" href="https://translate.webdriver.io/project/webdriver-io">
-        <img src="https://badges.crowdin.net/webdriver-io/localized.svg">
-    </a>
     <br />
     <a href="https://discord.webdriver.io">
         <img alt="Support Channel" src="https://img.shields.io/discord/1097401827202445382?color=%234FB898&label=Join%20us%20on%20Discord">
@@ -51,7 +48,8 @@
 WebdriverIO is a test automation framework, for e2e as well as unit and component testing in the browser, that allows you to run tests based on the [WebDriver](https://w3c.github.io/webdriver/webdriver-spec.html) and [WebDriver BiDi](https://github.com/w3c/webdriver-bidi) as well as [Appium](https://appium.io/) automation technology. It provides support for your favorite BDD/TDD test framework and will run your tests locally or in the cloud using Sauce Labs, BrowserStack, TestingBot or TestMu AI (Formerly LambdaTest).
 
 ## :woman_technologist: :man_technologist: Contributing
-Do you like WebdriverIO and want to help make it better? Awesome! Have a look into our [Contributor Documentation](CONTRIBUTING.md) to get started and find out what contributions can be and how to make them.
+
+Do you like WebdriverIO and want to help make it better? Awesome! Have a look into our [Contributor Documentation](CONTRIBUTING.md) to get started and find out what contributions can be and how to make them. AI coding agents should start with [`AGENTS.md`](AGENTS.md).
 
 ### Getting started with GitHub Codespaces
 
@@ -83,11 +81,11 @@ The maintainers of WebdriverIO and thousands of other packages are working with 
 
 This repository contains some of the core packages of the WebdriverIO project. There are many wonderful [curated resources](https://github.com/webdriverio-community/awesome-webdriverio) the WebdriverIO community has put together.
 
-__Did you build a WebdriverIO service or reporter?__ That's awesome! Please add it to our configuration wizard and docs (e.g. like in [this example commit](https://github.com/webdriverio/webdriverio/commit/3cb5937b968dfe93cf78871589019736a6c98d9e)) as well as to our [awesome-webdriverio](https://github.com/webdriverio-community/awesome-webdriverio) list. Thank you! 🙏 ❤️
+**Did you build a WebdriverIO service or reporter?** That's awesome! Please add it to our configuration wizard and docs (e.g. like in [this example commit](https://github.com/webdriverio/webdriverio/commit/3cb5937b968dfe93cf78871589019736a6c98d9e)) as well as to our [awesome-webdriverio](https://github.com/webdriverio-community/awesome-webdriverio) list. Thank you! 🙏 ❤️
 
 ### Core
 
-- [webdriver](https://github.com/webdriverio/webdriverio/tree/main/packages/webdriver) - A Node.js bindings implementation for the W3C WebDriver and Mobile JSONWire Protocol
+- [webdriver](https://github.com/webdriverio/webdriverio/tree/main/packages/webdriver) - A Node.js bindings implementation for the W3C WebDriver and WebDriver Bidi protocols
 - [webdriverio](https://github.com/webdriverio/webdriverio/blob/main/packages/webdriverio) - Next-gen browser and mobile automation test framework for Node.js
 - [@wdio/cli](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-cli) - A WebdriverIO testrunner command line interface
 
@@ -106,15 +104,17 @@ __Did you build a WebdriverIO service or reporter?__ That's awesome! Please add 
 
 - [@wdio/allure-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-allure-reporter) - A WebdriverIO reporter plugin to create Allure Test Reports
 - [@wdio/concise-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-concise-reporter) - A WebdriverIO reporter plugin to create concise test reports
+- [@wdio/cucumberjs-json-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-cucumberjs-json-reporter) - A WebdriverIO reporter that creates CucumberJS JSON files
 - [@wdio/dot-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-dot-reporter) - A WebdriverIO plugin to report in dot style
+- [@wdio/html-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-html-reporter) - A WebdriverIO reporter that creates an HTML report
 - [@wdio/junit-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-junit-reporter) - A WebdriverIO reporter that creates test results in XML format
 - [@wdio/spec-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-spec-reporter) - A WebdriverIO plugin to report in spec style
 - [@wdio/sumologic-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-sumologic-reporter) - A WebdriverIO reporter that sends test results to Sumologic for data analyses
+- [@wdio/video-reporter](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-video-reporter) - A WebdriverIO reporter that makes videos of failed tests and has optional Allure integration
 
 ### Services
 
 - [@wdio/appium-service](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-appium-service) - A WebdriverIO service to start & stop Appium Server
-- [@wdio/browserstack-service](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-browserstack-service) - A WebdriverIO service that can be used to use BrowserStack Test Observability which is a reporting, debugging, and test suite quality tracking tool for any test running anywhere. The service also helps for a better integration with the BrowserStack grid if you're running tests on the grid.
 - [@wdio/lighthouse-service](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-lighthouse-service) - A WebdriverIO service that integrates Google Lighthouse commands to use it for automate tests
 - [@wdio/firefox-profile-service](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-firefox-profile-service) - A WebdriverIO service that lets you define your Firefox profile in your wdio.conf.js
 - [@wdio/sauce-service](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-sauce-service) - A WebdriverIO service that provides a better integration into Sauce Labs
@@ -152,9 +152,16 @@ Adapters that bring the WebdriverIO DevTools UI to test suites running outside W
 
 These packages are not released to NPM and used to work on this codebase.
 
-- [@wdio/compiler](https://github.com/webdriverio/webdriverio/tree/main/infa/compiler) - Esbuild script to
+- [@wdio/compiler](https://github.com/webdriverio/webdriverio/tree/main/infra/compiler) - Esbuild script to
 compile the source code all of all packages
-- [@wdio/lerna-patch](https://github.com/webdriverio/webdriverio/tree/main/infa/lernaPatch) - This sub-package is being used to patch Lerna to not run `pnpm install` after it prepared all packages for release
+- [@wdio/lerna-patch](https://github.com/webdriverio/webdriverio/tree/main/infra/lernaPatch) - This sub-package is being used to patch Lerna to not run `pnpm install` after it prepared all packages for release
+- [@wdio/repo-tools](https://github.com/webdriverio/webdriverio/tree/main/infra/repo-tools) - Typed helpers for docs discovery, scoped package tests, and CI lane selection
+- [@wdio/repo-utils](https://github.com/webdriverio/webdriverio/tree/main/infra/utils) - Shared helpers and protocol metadata used by other infra packages
+- [@wdio/bidi-codegen](https://github.com/webdriverio/webdriverio/tree/main/infra/bidiCodegen) - Generate WebDriver Bidi TypeScript types and protocol definitions from the W3C CDDL spec
+- [@wdio/docs](https://github.com/webdriverio/webdriverio/tree/main/infra/docs) - Generate the documentation website
+- [@wdio/release](https://github.com/webdriverio/webdriverio/tree/main/infra/release) - Changelog generation, GitHub releases, annotated tags, and PR backports
+- [@wdio/create-package](https://github.com/webdriverio/webdriverio/tree/main/infra/createPackage) - Scaffold a new reporter, service, runner, or framework package
+- [@wdio/depcheck](https://github.com/webdriverio/webdriverio/tree/main/infra/depcheck) - Check sub-packages for missing dependencies
 
 ## :handshake: Project Governance
 
@@ -178,13 +185,13 @@ We are immensely grateful to our exclusive Premium Sponsor for their invaluable 
 
 <p align="center">
     <a href="https://www.browserstack.com/automation-webdriverio"><img src="https://webdriver.io/img/sponsors/browserstack_black.svg" alt="BrowserStack" /></a>
+    &nbsp; &nbsp; &nbsp;
+    <a href="https://momentic.ai/"><img src="https://webdriver.io/img/sponsors/momentic_black.svg" alt="Momentic" width="400" /></a>
 </p>
 
 ### 🥇 Gold Sponsor
 
 <p align="center">
-    <a href="https://www.jetify.com/"><img src="https://webdriver.io/img/sponsors/jetify_black.png" width="250" alt="Jetify" /></a>
-    &nbsp; &nbsp; &nbsp;
     <a href="https://www.lambdatest.com/"><img src="https://webdriver.io/img/sponsors/lambdatest_black.svg" width="300" alt="Lambdatest" /></a>
 </p>
 
@@ -201,6 +208,7 @@ We are immensely grateful to our exclusive Premium Sponsor for their invaluable 
 <p align="center">
     <a href="https://eslint.org/"><img src="https://eslint.org/assets/images/logo/eslint-logo-color.png" alt="Eslint" /></a>
     <a href="https://www.gridlastic.com/webdriverio.html"><img src="https://webdriver.io/img/sponsors/gridlastic.png" width="200" alt="Gridlastic" /></a>
+    <a href="https://www.rapidproxy.io/?ref=webdriverio"><img src="https://webdriver.io/img/sponsors/rapidproxy.png" width="200" alt="Rapidproxy" /></a>
 </p>
 
 ## :page_facing_up: License
@@ -212,10 +220,13 @@ We are immensely grateful to our exclusive Premium Sponsor for their invaluable 
 Show the world you're using webdriver.io → [![tested with webdriverio](https://img.shields.io/badge/tested%20with-webdriver.io-%23ea5906)](https://webdriver.io/)
 
 ###### GitHub markup
+
 ```
 [![tested with webdriver.io](https://img.shields.io/badge/tested%20with-webdriver.io-%23ea5906)](https://webdriver.io/)
 ```
+
 ###### HTML
+
 ```
 <a href="https://webdriver.io/">
     <img alt="WebdriverIO" src="https://img.shields.io/badge/tested%20with-webdriver.io-%23ea5906">
@@ -223,6 +234,7 @@ Show the world you're using webdriver.io → [![tested with webdriverio](https:/
 ```
 
 ## :clap:  Supporters
+
 [![Stargazers repo roster for WebdriverIO](https://reporoster.com/stars/webdriverio/webdriverio)](https://github.com/webdriverio/webdriverio/stargazers)
 [![Forkers repo roster for WebdriverIO](https://reporoster.com/forks/webdriverio/webdriverio)](https://github.com/webdriverio/webdriverio/network/members)
 <p align="center"><a href="https://github.com/webdriverio/webdriverio#nastyox"><img src="https://randojs.com/images/barsSmall.gif" alt="Animated footer bars" width="100%"/></a></p>

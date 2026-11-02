@@ -2,6 +2,7 @@ import { ELEMENT_KEY } from 'webdriver'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 import type { ElementReference } from '@wdio/protocols'
+import { WDIO_CHAINABLE, setWdioKind } from '@wdio/utils'
 import {
     getElementFromResponse,
     parseCSS,
@@ -43,9 +44,15 @@ describe('utils', () => {
             expect(getElementFromResponse()).toBe(null)
         })
 
-        it('should find element from JSONWireProtocol response', () => {
-            // @ts-ignore depcrecated functionality
-            expect(getElementFromResponse({ ELEMENT: 'foobar' })).toBe('foobar')
+        it('ignores a legacy element id field', () => {
+            expect(getElementFromResponse({ ELEMENT: 'foobar' } as unknown as ElementReference)).toBe(null)
+        })
+
+        it('uses the W3C element id when a legacy element id field is also present', () => {
+            expect(getElementFromResponse({
+                ELEMENT: 'legacy',
+                'element-6066-11e4-a52e-4f735466cecf': 'w3c'
+            } as unknown as ElementReference)).toBe('w3c')
         })
 
         it('should find element from W3C response', () => {
@@ -390,6 +397,7 @@ describe('utils', () => {
             constructor({ elementId, ...otherProps }: any) {
                 this.elementId = elementId
                 Object.keys(otherProps).forEach((key) => this[key] = otherProps[key])
+                setWdioKind(this, 'element')
             }
         }
 
@@ -404,8 +412,8 @@ describe('utils', () => {
                 anotherProp: 'abc'
             })
 
-            expect(verifyArgsAndStripIfElement([fakeObj, 'abc', 123])).toMatchObject([
-                { [ELEMENT_KEY]: 'foo-bar', ELEMENT: 'foo-bar' },
+            expect(verifyArgsAndStripIfElement([fakeObj, 'abc', 123])).toEqual([
+                { [ELEMENT_KEY]: 'foo-bar' },
                 'abc',
                 123
             ])
@@ -418,8 +426,8 @@ describe('utils', () => {
                 anotherProp: 'abc'
             })
 
-            expect(verifyArgsAndStripIfElement(fakeObj)).toMatchObject(
-                { [ELEMENT_KEY]: 'foo-bar', ELEMENT: 'foo-bar' }
+            expect(verifyArgsAndStripIfElement(fakeObj)).toEqual(
+                { [ELEMENT_KEY]: 'foo-bar' }
             )
             expect(verifyArgsAndStripIfElement('foo')).toEqual('foo')
         })
@@ -433,6 +441,22 @@ describe('utils', () => {
             })
 
             expect(() => verifyArgsAndStripIfElement(fakeObj)).toThrow('The element with selector "div" you are trying to pass into the execute method wasn\'t found')
+        })
+
+        it('reads the wdio.kind brand, not the class name', () => {
+            class Element {
+                elementId = 'foo-bar'
+            }
+            const notAnElement = new Element()
+            expect(verifyArgsAndStripIfElement(notAnElement)).toBe(notAnElement)
+        })
+
+        it('does not strip a chainable element that is not loaded yet', () => {
+            /**
+             * the chain proxy of `$()` is a promise
+             */
+            const chainable = Object.defineProperty(setWdioKind({ elementId: 'foo-bar', then: () => {} }, 'element'), WDIO_CHAINABLE, { value: true })
+            expect(verifyArgsAndStripIfElement(chainable)).toBe(chainable)
         })
     })
 

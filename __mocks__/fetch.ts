@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 /**
  * This flag helps to indicate that WebdriverIO is running in a unit test environment.
@@ -7,8 +7,9 @@ import { vi } from 'vitest'
  * the process or enter code sections that are hard to mock out.
  */
 process.env.WDIO_UNIT_TESTS = '1'
-globalThis.WDIO_RESQ_SCRIPT = ''
+globalThis.WDIO_REACT_SCRIPT = ''
 globalThis.WDIO_FAKER_SCRIPT = ''
+globalThis.WDIO_A11Y_SCRIPT = ''
 
 const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf'
 const SHADOW_ELEMENT_KEY = 'shadow-6066-11e4-a52e-4f735466cecf'
@@ -18,6 +19,23 @@ let manualMockResponse: any
 const path = '/session'
 
 const customResponses = new Set<{ pattern, response }>()
+/**
+ * simulates the cumulative effect of "wheel" scroll actions performed via
+ * `POST .../actions`, so a later `scrollIntoView` measurement (`execute/sync`
+ * evaluating `getBoundingClientRect` + `scrollX`) reflects the scroll a real
+ * browser would have applied, instead of always reporting the same
+ * unscrolled position.
+ */
+let simulatedScroll = { x: 0, y: 0 }
+
+// this file is a `setupFiles` entry, so this hook applies to every test in every file:
+// reset the module-level mock state above automatically, so no individual test file has
+// to remember to do it (and can't forget to, leaking state into later tests)
+beforeEach(() => {
+    customResponses.clear()
+    simulatedScroll = { x: 0, y: 0 }
+})
+
 const defaultSessionId = 'foobar-123'
 let sessionId = defaultSessionId
 const genericElementId = 'some-elem-123'
@@ -43,10 +61,9 @@ const transformPropertyWithMockFunction = (collection: any[]) => {
     })
 }
 
-const requestMock: any = vi.fn().mockImplementation((uri, params) => {
+const requestMock: any = vi.fn().mockImplementation(async (uri, params) => {
     let value: any = {}
-    let jsonwpMode = false
-    let sessionResponse: any = {
+    const sessionResponse: any = {
         sessionId,
         capabilities: {
             browserName: 'mockBrowser',
@@ -76,18 +93,6 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
             status: 422,
             statusText: 'Unprocessable Entity'
         })
-    }
-
-    if (
-        body &&
-        body.capabilities &&
-        body.capabilities.alwaysMatch.jsonwpMode
-    ) {
-        jsonwpMode = true
-        sessionResponse = {
-            sessionId,
-            browserName: 'mockBrowser'
-        }
     }
 
     if (
@@ -142,6 +147,25 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
     }
 
     switch (uri.pathname) {
+    case `${path}/${sessionId}/actions`:
+        // accumulate any "wheel" scroll deltas so a later scrollIntoView
+        // measurement reflects the resulting scroll position
+        for (const action of body?.actions ?? []) {
+            if (action.type !== 'wheel') {
+                continue
+            }
+            for (const tick of action.actions ?? []) {
+                if (tick.type !== 'scroll') {
+                    continue
+                }
+                simulatedScroll = {
+                    x: simulatedScroll.x + (tick.deltaX || 0),
+                    y: simulatedScroll.y + (tick.deltaY || 0)
+                }
+            }
+        }
+        value = null
+        break
     case path:
         value = sessionResponse
 
@@ -275,9 +299,9 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
     case `/session/${sessionId}/execute`:
     case `/session/${sessionId}/execute/sync`: {
         const script = Function(body.script)
-        const args = transformPropertyWithMockFunction(body.args.map((arg: any) => (arg && (arg.ELEMENT || arg[ELEMENT_KEY])) || arg))
+        const args = transformPropertyWithMockFunction(body.args.map((arg: any) => (arg && arg[ELEMENT_KEY]) || arg))
         let result: any = null
-        if (body.script.includes('resq')) {
+        if (body.script.includes('__wdioReact')) {
             if (body.script.includes('react$$')) {
                 result = [
                     { [ELEMENT_KEY]: genericElementId },
@@ -311,6 +335,18 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
             result = body.args[0][ELEMENT_KEY] === genericElementId
                 ? { [ELEMENT_KEY]: 'some-next-elem' }
                 : {}
+        } else if (body.script.includes('getBoundingClientRect') && body.script.includes('scrollX')) {
+            // scrollIntoView: combined rect + viewport + scroll metrics. `scroll`
+            // reflects any wheel actions simulated so far (see the `/actions` case)
+            // so a post-scroll re-measurement doesn't look identical to the first.
+            result = {
+                elemRect: { x: 15, y: 20, height: 30, width: 50 },
+                viewport: { width: 600, height: 800 },
+                scroll: { ...simulatedScroll },
+                // this default fixture models a simple, unobstructed page: the element is
+                // always genuinely visible/painted, matching the pre-`isPainted` mock behavior
+                isPainted: true
+            }
         } else if (body.script.includes('scrollX')) {
             result = [0, 0]
         } else if (body.script.includes('function isFocused')) {
@@ -329,10 +365,20 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
         value = Boolean(result) || result === false || result === 0 || result === null ? result : {}
         break
     } case `/session/${sessionId}/execute/async`: {
+        if (body.script.includes('waitToLoadReact')) {
+            value = null
+            break
+        }
         const script = Function(body.script)
-        let result
-        script.call(this, ...body.args, (_result: any) => result = _result)
-        value = result ?? {}
+        const pending = Symbol('pending')
+        let result: any = pending
+        script.call(this, ...body.args, (_result: any) => { result = _result })
+        // An async script can `await` several times before calling the callback.
+        // Drain microtasks until it does, and stop if it is waiting on a timer.
+        for (let i = 0; i < 20 && result === pending; i++) {
+            await Promise.resolve()
+        }
+        value = result === pending ? {} : (result ?? {})
         break
     } case `${path}/${sessionId}/element/${genericElementId}/elements`:
         value = [
@@ -407,12 +453,38 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
         return Promise.reject(timeoutError)
     }
 
+    if (uri.pathname.endsWith('abortTimeout')) {
+        if (params?.signal?.aborted) {
+            return Promise.reject(params.signal.reason)
+        }
+
+        if (requestMock.retryCnt < 5) {
+            ++requestMock.retryCnt
+            return Promise.reject(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+            )
+        }
+    }
+
     if (uri.pathname.startsWith(`/session/${sessionId}/element/`) && uri.pathname.includes('/attribute/')) {
         value = `${uri.pathname.substring(uri.pathname.lastIndexOf('/') + 1)}-value`
     }
 
     if (uri.pathname.endsWith('sumoerror')) {
         return Promise.reject(new Error('ups'))
+    }
+
+    /**
+     * Simulate a click that something else on the page would receive
+     */
+    if (uri.pathname === `/session/${sessionId}/element/intercepted-elem/click`) {
+        ++requestMock.retryCnt
+        return Response.json({
+            value: {
+                error: 'element click intercepted',
+                message: 'element click intercepted: Other element would receive the click: <div class="banner">'
+            }
+        }, { status: 400 })
     }
 
     /**
@@ -536,9 +608,6 @@ const requestMock: any = vi.fn().mockImplementation((uri, params) => {
     }
 
     let response: any = { value }
-    if (jsonwpMode) {
-        response = { value, sessionId, status: 0 }
-    }
 
     if (uri.pathname.startsWith('/grid')) {
         response = response.value
@@ -561,6 +630,21 @@ requestMock.customResponseFor = (pattern: RegExp, response: any) => {
         customResponses.delete(existingEntry)
     }
     customResponses.add({ pattern, response })
+}
+/**
+ * `customResponseFor` registrations are otherwise permanent for the lifetime of this
+ * module - call this (e.g. in an `afterEach`) to undo a temporary override once a test
+ * is done with it, so it doesn't leak into later tests.
+ */
+requestMock.resetCustomResponses = () => {
+    customResponses.clear()
+}
+/**
+ * resets the scroll position simulated for `wheel` actions (see `simulatedScroll`) -
+ * call this (e.g. in an `afterEach`) so it doesn't leak between tests.
+ */
+requestMock.resetSimulatedScroll = () => {
+    simulatedScroll = { x: 0, y: 0 }
 }
 
 requestMock.getSessionId = () => sessionId

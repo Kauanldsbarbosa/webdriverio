@@ -1,9 +1,9 @@
 import type { Capabilities, Services, FunctionProperties, ThenArg } from '@wdio/types'
-import type { Browser as PuppeteerBrowser } from 'puppeteer-core/lib/esm/puppeteer/api/Browser.js'
+import type { Browser as PuppeteerBrowser } from 'puppeteer-core'
 
 import CommandHandler from './commands.js'
 import type Auditor from './auditor.js'
-import { setUnsupportedCommand, getLighthouseDriver } from './utils.js'
+import { getAuditablePuppeteerPage, setUnsupportedCommand } from './utils.js'
 import { DEFAULT_THROTTLE_STATE, NETWORK_STATES } from './constants.js'
 import type { DevtoolsConfig, EnablePerformanceAuditsOptions, PWAAudits } from './types.js'
 
@@ -14,7 +14,7 @@ export default class DevToolsService implements Services.ServiceInstance {
     constructor (private _options: DevtoolsConfig) {}
 
     async before (
-        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiremoteCapabilities,
+        caps: Capabilities.RequestedStandaloneCapabilities | Capabilities.RequestedMultiRemoteCapabilities,
         specs: string[],
         browser: WebdriverIO.Browser | WebdriverIO.MultiRemoteBrowser
     ) {
@@ -54,12 +54,8 @@ export default class DevToolsService implements Services.ServiceInstance {
             throw new Error(`CPU throttling rate needs to be typeof number but was "${typeof cpuThrottling}"`)
         }
 
-        if (this._command.length === 1) {
-            this._command[0].enablePerformanceAudits({ networkThrottling, cpuThrottling, cacheEnabled, formFactor })
-        } else {
-            for (const c of this._command) {
-                c.enablePerformanceAudits({ networkThrottling, cpuThrottling, cacheEnabled, formFactor })
-            }
+        for (const c of this._command) {
+            c.enablePerformanceAudits({ networkThrottling, cpuThrottling, cacheEnabled, formFactor })
         }
     }
 
@@ -67,12 +63,8 @@ export default class DevToolsService implements Services.ServiceInstance {
      * custom command to disable performance audits
      */
     _disablePerformanceAudits () {
-        if (this._command.length === 1) {
-            this._command[0].disablePerformanceAudits()
-        } else {
-            for (const c of this._command) {
-                c.disablePerformanceAudits()
-            }
+        for (const c of this._command) {
+            c.disablePerformanceAudits()
         }
     }
 
@@ -81,12 +73,8 @@ export default class DevToolsService implements Services.ServiceInstance {
         cpuThrottling: number = DEFAULT_THROTTLE_STATE.cpuThrottling,
         cacheEnabled: boolean = DEFAULT_THROTTLE_STATE.cacheEnabled
     ) {
-        if (this._command.length === 1) {
-            this._command[0].setThrottlingProfile(networkThrottling, cpuThrottling, cacheEnabled)
-        } else {
-            for (const c of this._command) {
-                c.setThrottlingProfile(networkThrottling, cpuThrottling, cacheEnabled)
-            }
+        for (const c of this._command) {
+            c.setThrottlingProfile(networkThrottling, cpuThrottling, cacheEnabled)
         }
     }
 
@@ -121,36 +109,13 @@ export default class DevToolsService implements Services.ServiceInstance {
             }
 
             const url = await (browser as WebdriverIO.Browser).getUrl()
-            const target = url !== 'data:,'
-                ? await puppeteer.waitForTarget(
-                    async (t) => (
-                        t.url().includes(url) &&
-                        !t.url().includes('BiDi-CDP Mapper') &&
-                        Boolean(await t.page())
-                    )
-                )
-                : await puppeteer.waitForTarget(
-                    async (t) => (
-                        t.type() === 'page' ||
-                        // @ts-expect-error
-                        Boolean(t._getTargetInfo().browserContextId) &&
-                        !!(await t.page())
-                    )
-                )
-
-            if (!target) {
-                throw new Error('No page target found')
-            }
-
-            const page = await target.page()
+            const page = await getAuditablePuppeteerPage(puppeteer, url)
             if (!page) {
                 throw new Error('No page found')
             }
 
-            const session = await target.createCDPSession()
-            const driver = await getLighthouseDriver(session, target)
-
-            const cmd = new CommandHandler(session, page, driver, this._options, browser)
+            const session = await page.target().createCDPSession()
+            const cmd = new CommandHandler(session, page, this._options, browser)
             await cmd._initCommand()
             this._command.push(cmd)
         }
@@ -166,7 +131,7 @@ export default class DevToolsService implements Services.ServiceInstance {
 export * from './types.js'
 
 type CommandHandlerCommands = FunctionProperties<CommandHandler>
-type AuditorCommands = Omit<FunctionProperties<Auditor>, '_audit' | '_auditPWA' | 'updateCommands'>
+type AuditorCommands = Omit<FunctionProperties<Auditor>, 'updateCommands'>
 
 /**
  * ToDo(Christian): use key remapping with TS 4.1

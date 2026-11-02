@@ -3,6 +3,7 @@ import { sleep } from '@wdio/utils'
 import type { Options } from '@wdio/types'
 
 import  { WebDriverResponseError, WebDriverRequestError } from './error.js'
+import { clearAbortTimer, createRequestSignal } from './abort.js'
 import { RETRYABLE_STATUS_CODES, RETRYABLE_ERROR_CODES } from './constants.js'
 import type { WebDriverResponse, RequestLibResponse, RequestOptions, RequestEventHandler } from './types.js'
 
@@ -10,32 +11,100 @@ import { isSuccessfulResponse } from '../utils.js'
 import { DEFAULTS } from '../constants.js'
 import pkg from '../../package.json' with { type: 'json' }
 
-import './polyfill.js'
-
+/**
+ * Errors that repeating the same request can't fix. The interaction errors
+ * are handled by the element commands themselves (wait until clickable,
+ * scroll, refetch), so a retry here only delays that by seconds.
+ */
 const ERRORS_TO_EXCLUDE_FROM_RETRY = [
     'detached shadow root',
-    'move target out of bounds'
+    'move target out of bounds',
+    'element click intercepted',
+    'element not interactable',
+    'invalid element state',
+    /**
+     * Well-formed W3C errors the driver answers deterministically. Repeating
+     * the request gives the same answer and re-runs its side effects.
+     * `unknown error` stays retryable, it is what a Grid or proxy sends when
+     * it hiccups.
+     */
+    'invalid argument',
+    'invalid cookie domain',
+    'invalid selector',
+    'invalid session id',
+    'javascript error',
+    'no such alert',
+    'no such cookie',
+    'no such element',
+    'no such frame',
+    'no such shadow root',
+    'no such window',
+    'script timeout',
+    'session not created',
+    'timeout',
+    'unable to capture screen',
+    'unable to set cookie',
+    'unexpected alert open',
+    'unknown command',
+    'unknown method',
+    'unsupported operation'
 ]
 
 const DEFAULT_HEADERS = {
     'Content-Type': 'application/json; charset=utf-8',
-    'Connection': 'keep-alive',
     'Accept': 'application/json',
     'User-Agent': 'webdriver/' + pkg.version
 }
 
 const log = logger('webdriver')
 
+function hasLoggableBody (body: BodyInit | Record<string, unknown>): boolean {
+    if (typeof body === 'string') {
+        return body.length > 0
+    }
+
+    if (body instanceof URLSearchParams || body instanceof FormData) {
+        return !(body as URLSearchParams).keys().next().done
+    }
+
+    if (body instanceof Blob) {
+        return body.size > 0
+    }
+
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+        return body.byteLength > 0
+    }
+
+    return Object.keys(body).length > 0
+}
+
+function toLoggableBody (body: BodyInit): BodyInit | Record<string, unknown> {
+    if (typeof body !== 'string') {
+        return body
+    }
+
+    try {
+        return JSON.parse(body)
+    } catch {
+        return body
+    }
+}
+
 export abstract class WebDriverRequest {
     protected abstract fetch(url: URL, opts: RequestInit): Promise<Response>
 
     body?: Record<string, unknown>
+    /**
+     * body with sensitive values replaced, shown in errors instead of `body`
+     */
+    maskedBody?: Record<string, unknown>
     method: string
     endpoint: string
     isHubCommand: boolean
     requiresSessionId: boolean
     eventHandler: RequestEventHandler
     abortSignal?: AbortSignal
+    connectionRetryTimeout = DEFAULTS.connectionRetryTimeout.default!
     constructor (
         method: string,
         endpoint: string,
@@ -53,6 +122,13 @@ export abstract class WebDriverRequest {
         this.abortSignal = abortSignal
     }
 
+    /**
+     * errors carry the request options, they must never expose masked values
+     */
+    private errorOptions (opts: RequestInit): RequestInit {
+        return this.maskedBody ? { ...opts, body: JSON.stringify(this.maskedBody) } : opts
+    }
+
     async makeRequest (options: RequestOptions, sessionId?: string) {
         const { url, requestOptions } = await this.createOptions(options, sessionId)
         this.eventHandler.onRequest?.(requestOptions)
@@ -60,14 +136,11 @@ export abstract class WebDriverRequest {
     }
 
     async createOptions (options: RequestOptions, sessionId?: string, isBrowser: boolean = false): Promise<{ url: URL; requestOptions: RequestInit; }> {
-        const timeout = options.connectionRetryTimeout || DEFAULTS.connectionRetryTimeout.default as number
+        this.connectionRetryTimeout = options.connectionRetryTimeout || DEFAULTS.connectionRetryTimeout.default!
         const requestOptions: RequestInit = {
             method: this.method,
             redirect: 'follow',
-            signal: AbortSignal.any([
-                AbortSignal.timeout(timeout),
-                ...(this.abortSignal ? [this.abortSignal] : [])
-            ])
+            signal: this.abortSignal
         }
 
         const requestHeaders: HeadersInit = new Headers({
@@ -82,8 +155,6 @@ export abstract class WebDriverRequest {
          */
         if (this.body && (Object.keys(this.body).length || this.method === 'POST')) {
             requestOptions.body = JSON.stringify(this.body)
-            const contentLength = new TextEncoder().encode(requestOptions.body).length
-            requestHeaders.set('Content-Length', `${contentLength}`)
         }
 
         /**
@@ -131,11 +202,11 @@ export abstract class WebDriverRequest {
                 throw new WebDriverRequestError(
                     new Error(`Failed to fetch ${url.href}: ${(err as Error).message || err || 'Unknown error'}`),
                     url,
-                    opts
+                    this.errorOptions(opts)
                 )
             }
 
-            throw new WebDriverRequestError(err, url, opts)
+            throw new WebDriverRequestError(err, url, this.errorOptions(opts))
         }
     }
 
@@ -147,12 +218,19 @@ export abstract class WebDriverRequest {
                 body: rawBody ? JSON.parse(rawBody) : {},
             } satisfies Options.RequestLibResponse
         } catch {
-            throw new Error(`Could not parse response body: "${rawBody}"`, {
-                cause: {
+            /**
+             * `Error` `cause` is ES2022. Chrome 90, the oldest browser this
+             * bundle still runs in, does not accept the second argument.
+             */
+            const error = new Error(`Could not parse response body: "${rawBody}"`)
+            Object.defineProperty(error, 'cause', {
+                configurable: true,
+                value: {
                     statusCode: response.status,
                     body: rawBody
                 }
             })
+            throw error
         }
     }
 
@@ -164,15 +242,24 @@ export abstract class WebDriverRequest {
         retryCount = 0
     ): Promise<WebDriverResponse> {
         log.info(`[${fullRequestOptions.method}] ${(url as URL).href}`)
-
-        if (fullRequestOptions.body && Object.keys(fullRequestOptions.body).length) {
-            this.eventHandler.onLogData?.(fullRequestOptions.body)
+        const loggableBody = fullRequestOptions.body && toLoggableBody(fullRequestOptions.body)
+        if (loggableBody && hasLoggableBody(loggableBody)) {
+            this.eventHandler.onLogData?.(loggableBody)
         }
 
-        const { ...requestLibOptions } = fullRequestOptions
+        /**
+         * every attempt gets its own timeout, a retry must not inherit the
+         * already aborted signal of the attempt before it
+         */
+        const signal = createRequestSignal(this.connectionRetryTimeout, fullRequestOptions.signal)
+        const requestLibOptions = {
+            ...fullRequestOptions,
+            signal
+        }
         const startTime = performance.now()
         let response = await this._libRequest(url!, requestLibOptions)
             .catch((err: WebDriverRequestError) => err)
+            .finally(() => clearAbortTimer(signal))
         const durationMillisecond = performance.now() - startTime
 
         /**
@@ -185,7 +272,7 @@ export abstract class WebDriverRequest {
              * stop retrying if totalRetryCount was exceeded or there is no reason to
              * retry, e.g. if sessionId is invalid
              */
-            if (retryCount >= totalRetryCount || error.message.includes('invalid session id')) {
+            if (retryCount >= totalRetryCount || error.name === 'invalid session id') {
                 log.error(error.message)
                 this.eventHandler.onResponse?.({ error })
                 this.eventHandler.onPerformance?.({ request: fullRequestOptions, durationMillisecond, success: false, error, retryCount })
@@ -249,7 +336,7 @@ export abstract class WebDriverRequest {
             return response.body as WebDriverResponse<unknown>
         }
 
-        const error = new WebDriverResponseError(response, url, fullRequestOptions)
+        const error = new WebDriverResponseError(response, url, this.errorOptions(fullRequestOptions))
 
         /**
          * hub commands don't follow standard response formats
@@ -284,6 +371,8 @@ export abstract class WebDriverRequest {
          * it likely does not changes anything and the error is handled within the command.
          */
         if (ERRORS_TO_EXCLUDE_FROM_RETRY.includes(error.name)) {
+            this.eventHandler.onResponse?.({ error })
+            this.eventHandler.onPerformance?.({ request: fullRequestOptions, durationMillisecond, success: false, error, retryCount })
             throw error
         }
 

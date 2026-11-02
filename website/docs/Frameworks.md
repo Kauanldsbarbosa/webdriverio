@@ -1,9 +1,10 @@
 ---
 id: frameworks
 title: Frameworks
+description: "Configure Mocha, Jasmine, Cucumber.js or Vitest as the test framework for the WDIO testrunner, or integrate third-party frameworks like Serenity/JS."
 ---
 
-WebdriverIO Runner has built-in support for [Mocha](http://mochajs.org/), [Jasmine](http://jasmine.github.io/), and [Cucumber.js](https://cucumber.io/). You can also integrate it with 3rd-party open-source frameworks, such as [Serenity/JS](#using-serenityjs).
+WebdriverIO Runner has built-in support for [Mocha](http://mochajs.org/), [Jasmine](http://jasmine.github.io/), [Cucumber.js](https://cucumber.io/), and [Vitest](#using-vitest). You can also integrate it with 3rd-party open-source frameworks, such as [Serenity/JS](#using-serenityjs).
 
 :::tip Integrating WebdriverIO with test frameworks
 To integrate WebdriverIO with a test framework, you need an adapter package available on NPM.
@@ -35,7 +36,7 @@ describe('my awesome website', () => {
 })
 ```
 
-WebdriverIO supports Mocha's `BDD` (default), `TDD`, and `QUnit` [interfaces](https://mochajs.org/#interfaces).
+WebdriverIO v10 ships [Mocha 12](https://mochajs.org/) and supports Mocha's `BDD` (default), `TDD`, and `QUnit` [interfaces](https://mochajs.org/#interfaces).
 
 If you like to write your specs in TDD style, set the `ui` property in your `mochaOpts` config to `tdd`. Now your test files should be written like this:
 
@@ -60,7 +61,7 @@ it('should test something', (done) => {
 
 ### Mocha Options
 
-The following options can be applied in your `wdio.conf.js` to configure your Mocha environment. __Note:__ not all options are supported, e.g. applying the `parallel` option will cause an error as the WDIO testrunner has its own way to run tests in parallel. You can pass these framework options as arguments, e.g.:
+The following options can be applied in your `wdio.conf.js` to configure your Mocha environment. __Note:__ not all Mocha options are supported. `parallel` still belongs to Mocha's own worker pool and will error here — the WDIO testrunner already parallelizes specs across capabilities and workers. To run the tests of one spec file at the same time, use [`parallelMode`](#parallelmode). Mocha 12's CLI also moved off yargs onto Node's `util.parseArgs`; that only affects a direct `mocha` invocation, not `mochaOpts` passed through `wdio`. You can pass these framework options as arguments, e.g.:
 
 ```sh
 wdio run wdio.conf.ts --mochaOpts.grep "my test" --mochaOpts.bail --no-mochaOpts.checkLeaks
@@ -79,94 +80,140 @@ This will pass along the following Mocha options:
 The following Mocha options are supported:
 
 #### require
+
+<Option type="string|string[]" default="[]">
+
 The `require` option is useful when you want to add or extend some basic functionality (WebdriverIO framework option).
 
-Type: `string|string[]`<br />
-Default: `[]`
-
-#### compilers
-Use the given module(s) to compile files. Compilers will be included before requires (WebdriverIO framework option).
-
-Type: `string[]`<br />
-Default: `[]`
+</Option>
 
 #### allowUncaught
+
+<Option type="boolean" default="false">
+
 Propagate uncaught errors.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### bail
+
+<Option type="boolean" default="false">
+
 Bail after first test failure.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### checkLeaks
+
+<Option type="boolean" default="false">
+
 Check for global variable leaks.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### delay
+
+<Option type="boolean" default="false">
+
 Delay root suite execution.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
+
+#### failHookAffectedTests
+
+<Option type="boolean" default="true">
+
+Report each test skipped by a failing `before` or `beforeEach` hook as a failure. WebdriverIO enables this so a broken setup hook is visible on every spec it skipped. Set it to `false` to report only the hook.
+
+</Option>
 
 #### fgrep
+
+<Option type="string" default="null">
+
 Test filter given string.
 
-Type: `string`<br />
-Default: `null`
+</Option>
 
 #### forbidOnly
+
+<Option type="boolean" default="false">
+
 Tests marked `only` fail the suite.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### forbidPending
+
+<Option type="boolean" default="false">
+
 Pending tests fail the suite.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### fullTrace
+
+<Option type="boolean" default="false">
+
 Full stacktrace upon failure.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### global
+
+<Option type="string[]" default="[]">
+
 Variables expected in global scope.
 
-Type: `string[]`<br />
-Default: `[]`
+</Option>
 
 #### grep
-Test filter given regular expression.
 
-Type: `RegExp|string`<br />
-Default: `null`
+<Option type="RegExp|string" default="null">
+
+Test filter given regular expression. Mocha 12 accepts modern RegExp flags in this filter (for example `s` or `d`).
+
+</Option>
 
 #### invert
+
+<Option type="boolean" default="false">
+
 Invert test filter matches.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
+
+#### maxParallelContexts
+
+<Option type="number" default="os.cpus().length">
+
+Number of tests that run at the same time when [`parallelMode`](#parallelmode) is set. See [Parallel Tests in a Spec File](./ParallelTests.md#options).
+
+</Option>
+
+#### parallelMode
+
+<Option type="'contexts' | 'userContexts'" default="undefined">
+
+Run the tests of a spec file at the same time, each in its own WebDriver BiDi browsing context. `'contexts'` shares cookies and storage between tests, `'userContexts'` isolates them. Requires the `'wdio:experimentalBiDiCommands': true` capability. `bail` and `retries` are not supported in this mode. See [Parallel Tests in a Spec File](./ParallelTests.md).
+
+</Option>
 
 #### retries
+
+<Option type="number" default="0">
+
 Number of times to retry failed tests.
 
-Type: `number`<br />
-Default: `0`
+</Option>
 
 #### timeout
+
+<Option type="number" default="30000">
+
 Timeout threshold value (in ms).
 
-Type: `number`<br />
-Default: `30000`
+</Option>
 
 ## Using Jasmine
 
@@ -176,7 +223,7 @@ First, install the adapter package from NPM:
 npm install @wdio/jasmine-framework --save-dev
 ```
 
-You can then configure your Jasmine environment by setting a `jasmineOpts` property in your config. A list of all options can be found on the [Jasmine project website](https://jasmine.github.io/api/3.5/Configuration.html).
+You can then configure your Jasmine environment by setting a `jasmineOpts` property in your config. A list of all options can be found on the [Jasmine project website](https://jasmine.github.io/api/edge/Configuration.html).
 
 ### Jasmine Options
 
@@ -186,77 +233,152 @@ The following options can be applied in your `wdio.conf.js` to configure your Ja
 wdio run wdio.conf.ts --jasmineOpts.grep "my test" --jasmineOpts.failSpecWithNoExpectations --no-jasmineOpts.random
 ```
 
-This will pass along the following Mocha options:
+This will pass along the following Jasmine options:
 
 ```ts
 {
-    grep: ['my-test'],
-    bail: true
-    checkLeacks: false
+    grep: 'my test',
+    failSpecWithNoExpectations: true,
+    random: false
 }
 ```
 
 The following Jasmine options are supported:
 
 #### defaultTimeoutInterval
+
+<Option type="number" default="60000">
+
 Default Timeout Interval for Jasmine operations.
 
-Type: `number`<br />
-Default: `60000`
+</Option>
 
 #### helpers
+
+<Option type="string[]" default="[]">
+
 Array of filepaths (and globs) relative to spec_dir to include before jasmine specs.
 
-Type: `string[]`<br />
-Default: `[]`
+</Option>
 
 #### requires
+
+<Option type="string[]" default="[]">
+
 The `requires` option is useful when you want to add or extend some basic functionality.
 
-Type: `string[]`<br />
-Default: `[]`
+</Option>
 
 #### random
-Whether to randomize spec execution order.
 
-Type: `boolean`<br />
-Default: `true`
+<Option type="boolean" default="false">
+
+Whether to randomize spec execution order. Jasmine's own default is `true`, but WebdriverIO runs the specs in order unless you set this option.
+
+</Option>
 
 #### seed
+
+<Option type="Function" default="null">
+
 Seed to use as the basis of randomization. Null causes the seed to be determined randomly at the start of execution.
 
-Type: `Function`<br />
-Default: `null`
+</Option>
 
 #### failSpecWithNoExpectations
+
+<Option type="boolean" default="false">
+
 Whether to fail the spec if it ran no expectations. By default a spec that ran no expectations is reported as passed. Setting this to true will report such spec as a failure.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### oneFailurePerSpec
-Whether to cause specs to only have one expectation failure.
 
-Type: `boolean`<br />
-Default: `false`
+<Option type="boolean" default="false">
+
+Stop a spec at its first failed expectation. A failed sync matcher stops the spec at once, and an awaited async matcher stops it when its promise settles. The other specs continue to run.
+
+</Option>
 
 #### specFilter
+
+<Option type="Function" default="(spec) => true">
+
 Function to use to filter specs.
 
-Type: `Function`<br />
-Default: `(spec) => true`
+</Option>
 
 #### grep
+
+<Option type="string|Regexp" default="null">
+
 Only run tests matching this string or regexp. (Only applicable if no custom `specFilter` function is set)
 
-Type: `string|Regexp`<br />
-Default: `null`
+</Option>
 
 #### invertGrep
+
+<Option type="boolean" default="false">
+
 If true it inverts the matching tests and only runs tests that don't match with the expression used in `grep`. (Only applicable if no custom `specFilter` function is set)
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
+
+#### stopOnSpecFailure
+
+<Option type="boolean" default="false">
+
+Stop the spec file at its first failed spec (`it`): the other specs of the file do not run, also in other `describe` blocks. Other spec files run in their own workers and continue.
+
+</Option>
+
+#### cleanStack
+
+<Option type="boolean" default="true">
+
+Remove the lines of `node_modules` packages from the stack traces of failures.
+
+</Option>
+
+#### expectationResultHandler
+
+<Option type="Function" default="null">
+
+Called with `(passed, assertion)` for each expectation, for example to take a screenshot when an expectation fails. If the function throws for a passed expectation, the expectation fails with that error.
+
+</Option>
+
+### Assertions
+
+With Jasmine, the global `expect` combines Jasmine's matchers and the [WebdriverIO matchers](/docs/api/expect-webdriverio):
+
+- Jasmine's matchers (`toBe`, `toEqual`, `toHaveBeenCalled`, …) and the matchers that you add with `jasmine.addMatchers` are synchronous. They return `undefined`, so you do not need `await`.
+- WebdriverIO matchers, Jasmine's async matchers (`toBeResolved`, `toBeRejectedWith`, …) and the matchers that you add with `jasmine.addAsyncMatchers` return a promise. Always `await` them.
+
+Use `expect()` for both kinds: it sends each matcher to Jasmine's `expect` or `expectAsync` for you. `await expectAsync($('#logo')).toBeDisplayed()` also works. For TypeScript, `@wdio/jasmine-framework` in `types` also gives `expectAsync()` the WebdriverIO matchers.
+
+```js
+it('checks the page', async () => {
+    expect([1, 2]).toHaveSize(2)                                   // Jasmine, sync
+    await expect($('#logo')).toHaveSize({ width: 32, height: 32 }) // WebdriverIO, async
+    await expect(loadData()).toBeResolved()                        // Jasmine async matcher
+})
+```
+
+`toHaveSize` exists in both libraries. The WebdriverIO matcher runs on WebdriverIO values: an element, an element array or `Element[]` (for example the result of `$$().filter()`), a multi-remote element, a browser, a browsing context, a mock, the `some()` wrapper, or a promise such as a chainable `$()`. Jasmine's matcher runs on every other value.
+
+The asymmetric matchers of both libraries work, in Jasmine and in WebdriverIO matchers: `jasmine.any()`, `jasmine.objectContaining()`, `jasmine.stringMatching()`, … and `expect.any()`, `expect.stringContaining()`, `expect.oneOf()`, `expect.multiRemote()`, `expect.not.stringContaining()`, …. To use `some()`, import it:
+
+```js
+import { some } from 'expect-webdriverio/api'
+
+await expect(some($$('li'))).toHaveAttribute('data-state', 'on')
+```
+
+The Jest parts of `expect` are not available with Jasmine: Jest-only matchers such as `toStrictEqual` or `toHaveLength`, and `expect.soft()`. To add a custom matcher, use `expect.extend()` in a spec file or the `before` hook (see [Custom Matchers](/docs/custommatchers)), or `jasmine.addMatchers` for a sync matcher and `jasmine.addAsyncMatchers` for an async matcher.
+
+For TypeScript, add `jasmine` to `types`, see [TypeScript Setup](/docs/typescript).
 
 ## Using Cucumber
 
@@ -268,7 +390,7 @@ npm install @wdio/cucumber-framework --save-dev
 
 If you want to use Cucumber, set the `framework` property to `cucumber` by adding `framework: 'cucumber'` to the [config file](configurationfile) .
 
-Options for Cucumber can be given in the config file with `cucumberOpts`. Check out the whole list of options [here](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-cucumber-framework#cucumberopts-options).
+Options for Cucumber can be given in the config file with `cucumberOpts`. Check out the whole list of options [here](https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-cucumber-framework#cucumberopts-options). The adapter uses Cucumber 13. `tagExpression` has been removed; filter with `tags`. See the [v10 migration guide](v10-migration#cucumber).
 
 To get up and running quickly with Cucumber, have a look on our [`cucumber-boilerplate`](https://github.com/webdriverio/cucumber-boilerplate) project that comes with all the step definitions you need to get stared, and you'll be writing feature files right away.
 
@@ -292,16 +414,20 @@ This command sets the `tags` option in `cucumberOpts` to `@smoke`, ensuring that
 :::
 
 #### backtrace
+
+<Option type="Boolean" default="false">
+
 Show full backtrace for errors.
 
-Type: `Boolean`<br />
-Default: `true`
+</Option>
 
 #### requireModule
+
+<Option type="string[]" default="[]">
+
 Require modules prior to requiring any support files.
 
-Type: `string[]`<br />
-Default: `[]`<br />
+</Option>
 Example:
 
 ```js
@@ -321,22 +447,28 @@ cucumberOpts: {
  ```
 
 #### failFast
+
+<Option type="boolean" default="false">
+
 Abort the run on first failure.
 
-Type: `boolean`<br />
-Default: `false`
+</Option>
 
 #### name
+
+<Option type="RegExp[]" default="[]">
+
 Only execute the scenarios with name matching the expression (repeatable).
 
-Type: `RegExp[]`<br />
-Default: `[]`
+</Option>
 
 #### require
+
+<Option type="string[]" default="[]">
+
 Require files containing your step definitions before executing features. You can also specify a glob to your step definitions.
 
-Type: `string[]`<br />
-Default: `[]`
+</Option>
 Example:
 
 ```js
@@ -346,10 +478,12 @@ cucumberOpts: {
 ```
 
 #### import
+
+<Option type="String[]" default="[]">
+
 Paths to where your support code is, for ESM.
 
-Type: `String[]`<br />
-Default: `[]`
+</Option>
 Example:
 
 ```js
@@ -359,98 +493,165 @@ cucumberOpts: {
 ```
 
 #### strict
-Fail if there are any undefined or pending steps.
 
-Type: `boolean`<br />
-Default: `false`
+<Option type="boolean" default="true">
+
+Fail the run on a pending step. The default is `true`, as in Cucumber. The reporters still show the step as pending (Cucumber shows it as a warning), and the worker logs a warning that names the scenarios with a pending step or hook. An undefined step fails the run also without `strict`, unless [`ignoreUndefinedDefinitions`](#ignoreundefineddefinitions) is `true`.
+
+</Option>
 
 #### tags
-Only execute the features or scenarios with tags matching the expression.
+
+<Option type="String" default="">
+
+Only execute the features or scenarios with tags matching the expression. A feature file with no matching scenario is reported as skipped and starts no browser session.
 Please see the [Cucumber documentation](https://docs.cucumber.io/cucumber/api/#tag-expressions) for more details.
 
-Type: `String`<br />
-Default: ``
+</Option>
 
 #### timeout
+
+<Option type="Number" default="60000">
+
 Timeout in milliseconds for step definitions.
 
-Type: `Number`<br />
-Default: `30000`
+</Option>
 
 #### retry
+
+<Option type="Number" default="0">
+
 Specify the number of times to retry failing test cases.
 
-Type: `Number`<br />
-Default: `0`
+</Option>
 
 #### retryTagFilter
-Only retries the features or scenarios with tags matching the expression (repeatable). This option requires '--retry' to be specified.
 
-Type: `RegExp`
+<Option type="String">
+
+Only retry the scenarios with tags matching the tag expression. Requires [`retry`](#retry).
+
+</Option>
 
 #### language
+
+<Option type="String" default="en">
+
 Default language for your feature files
 
-Type: `String`<br />
-Default: `en`
+</Option>
 
 #### order
-Run tests in defined / random order
 
-Type: `String`<br />
-Default: `defined`
+<Option type="String" default="defined">
+
+Run the scenarios in the order of the feature files (`'defined'`) or in a random order (`'random'`). With `'random:<seed>'`, for example `'random:42'`, a random order is the same in each run. With `'random'`, the log shows the seed of the run (`Random order using seed: 42`).
+
+</Option>
 
 #### format
-Name and output file path of formatter to use.
-WebdriverIO primarily supports only the [Formatters](https://github.com/cucumber/cucumber-js/blob/main/docs/formatters.md) that writes output to a file.
 
-Type: `string[]`<br />
+<Option type="string[]">
+
+Name and output file path of formatter to use.
+WebdriverIO primarily supports only the [Formatters](https://github.com/cucumber/cucumber-js/blob/main/docs/formatters.md) that writes output to a file. Formatters don't run with [`parallelMode`](#parallelmode-1).
+
+</Option>
 
 #### formatOptions
+
+<Option type="object">
+
 Options to be provided to formatters
 
-Type: `object`<br />
+</Option>
 
 #### tagsInTitle
+
+<Option type="Boolean" default="false">
+
 Add cucumber tags to feature or scenario name
 
-Type: `Boolean`<br />
-Default: `false`
-
+</Option>
 ***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
 
 #### ignoreUndefinedDefinitions
-Treat undefined definitions as warnings.
 
-Type: `Boolean`<br />
-Default: `false`
+<Option type="Boolean" default="false">
 
+Report an undefined step as pending, with ` (undefined step)` at the end of its title, and do not fail the run for it.
+
+</Option>
 ***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
 
 #### failAmbiguousDefinitions
-Treat ambiguous definitions as errors.
 
-Type: `Boolean`<br />
-Default: `false`
+<Option type="Boolean" default="false">
 
+Report an ambiguous step (a step that matches more than one step definition) as failed, with the list of the matching step definitions. With `false`, the step is reported as skipped, with the list as its reason. In both cases, the run fails. Exception: without `parallelMode`, the run passes with `ignoreUndefinedDefinitions: true` and `failAmbiguousDefinitions: false`.
+
+</Option>
 ***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
 
-#### tagExpression
-Only execute the features or scenarios with tags matching the expression.
-Please see the [Cucumber documentation](https://docs.cucumber.io/cucumber/api/#tag-expressions) for more details.
+#### profiles
 
-Type: `String`<br />
-Default: ``
+<Option type="string[]" default="[]">
 
-***Please note that this option would be deprecated in future. Use [`tags`](#tags) config property instead***
+The profiles of the Cucumber configuration file to use.
 
-#### profile
-Specify the profile to use.
+</Option>
+Cucumber merges the values in this order: Cucumber's defaults, then the profiles or the configuration file (without [`file`](#file), Cucumber's default file in the working folder, for example `cucumber.js`), then `cucumberOpts`. So a value in `cucumberOpts` wins over the profile, and a profile value wins over Cucumber's default. `tags` and `retryTagFilter` of both are joined with `and`, and lists (for example `require`, `import`, `name`) are added together. A folder in the `require` or `import` of a profile is not loaded (use a glob). The `paths`, `requireModule` and `loader` of a profile or configuration file are not used: the feature files come from `specs`, the modules from `cucumberOpts.requireModule`, and the worker logs a warning. `parallel` and `shard` of a profile are not used either (WebdriverIO runs the workers), and a profile does not turn on `publish`: set it in `cucumberOpts`.
 
-Type: `string[]`<br />
-Default: `[]`
+#### file
 
-***Kindly take note that only specific values (worldParameters, name, retryTagFilter) are supported within profiles, as `cucumberOpts` takes precedence. Additionally, when using a profile, make sure that the mentioned values are not declared within `cucumberOpts`.***
+<Option type="string | false" default="undefined">
+
+Path of the Cucumber configuration file to load (absolute, or from the working folder), or `false` to load none. Without it, Cucumber looks for its default configuration files.
+
+</Option>
+
+#### dryRun
+
+<Option type="Boolean" default="false">
+
+Run no step and no hook: Cucumber only matches each step with its step definitions, so undefined and ambiguous steps are still reported. The run does not fail.
+
+</Option>
+
+#### worldParameters
+
+<Option type="object" default="{}">
+
+Parameters for your World, as `this.parameters`.
+
+</Option>
+
+#### scenarioLevelReporter
+
+<Option type="Boolean" default="false">
+
+Report each scenario as one test. Its steps and hooks are not reported. A `BeforeAll` / `AfterAll` is still reported, as a hook of the feature.
+
+</Option>
+***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
+
+#### parallelMode
+
+<Option type="'contexts' | 'userContexts'" default="undefined">
+
+Run the scenarios of a feature file at the same time, each in its own WebDriver BiDi browsing context. `'contexts'` shares cookies and storage between scenarios, `'userContexts'` isolates them. Requires the `'wdio:experimentalBiDiCommands': true` capability. See [Parallel Tests in a Spec File](./ParallelTests.md).
+
+</Option>
+***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
+
+#### maxParallelContexts
+
+<Option type="number" default="os.cpus().length">
+
+Number of scenarios that run at the same time when [`parallelMode`](#parallelmode-1) is set. See [Parallel Tests in a Spec File](./ParallelTests.md#options).
+
+</Option>
+***Please note that this is a @wdio/cucumber-framework specific option and not recognized by cucumber-js itself***<br/>
 
 ### Skipping tests in cucumber
 
@@ -460,7 +661,7 @@ Note that if you want to skip a test using regular cucumber test filtering capab
 
 were condition is an optional combination of capabilities properties with their values that when **all** matched with cause the tagged scenario or feature to be skipped. Of course you can add several tags to scenarios and features to skip a tests under several different conditions.
 
-You can also use the '@skip' annotation to skip tests without changing `tagExpression'. In this case the skipped tests will be displayed in the test report.
+You can also use the '@skip' annotation to skip tests without changing `tags`. In this case the skipped tests will be displayed in the test report.
 
 Here you have some examples of this syntax:
 - `@skip` or `@skip()`: will always skip the tagged item
@@ -519,6 +720,149 @@ export const config = {
 ```
 
 Please note that `./reports/` is the directory where `cucumber message` reports will be stored.
+
+## Using Vitest
+
+`@wdio/vitest-framework` runs specs written in [Vitest](https://vitest.dev/) syntax (`describe`, `test`, `test.concurrent`, `test.extend`) through the WDIO testrunner. Vitest schedules the tests, so the testrunner starts no WDIO workers. `wdio.conf.ts` stays the source of truth for specs, capabilities, connection options and hooks. Use it when you want Vitest's API, especially [fixtures](pageobjects#page-objects-as-fixtures) and `test.concurrent`. Otherwise Mocha is the default choice.
+
+First, install the adapter package and `vitest` from NPM. `vitest` is a peer dependency, so your project and the adapter share one copy. `expect-webdriverio` is installed with the adapter:
+
+```bash npm2yarn
+npm install @wdio/vitest-framework vitest --save-dev
+```
+
+Then set `framework: 'vitest'` in your [config file](configurationfile):
+
+```ts title="wdio.conf.ts"
+export const config: WebdriverIO.Config = {
+    framework: 'vitest',
+    specs: ['./test/specs/**/*.spec.ts'],
+    baseUrl: 'https://the-internet.herokuapp.com',
+    capabilities: [{ browserName: 'chrome', webSocketUrl: true, 'wdio:experimentalBiDiCommands': true }],
+    vitestOpts: {
+        parallelMode: 'userContexts'
+    }
+}
+```
+
+Run it like any other WDIO project:
+
+```sh
+npx wdio run wdio.conf.ts
+```
+
+Vitest globals are enabled at runtime, and `browser`, `driver`, `$`, `$$` and `expect` are globals as well. Import `describe`, `test` and the hooks from `vitest`, so TypeScript knows their types:
+
+```ts title="test/specs/login.spec.ts"
+import { describe, test } from 'vitest'
+
+describe('login page', () => {
+    test('shows the form', async () => {
+        await browser.url('/login')
+        await expect($('#login')).toBeDisplayed()
+    })
+})
+```
+
+The global `expect` is the WebdriverIO [assertion library](assertion) (`expect-webdriverio`), which replaces Vitest's own `expect`. `waitforTimeout` and `waitforInterval` from the config set its defaults. Never `import { expect } from 'vitest'`. That `expect` has no WebdriverIO matchers such as `toBeDisplayed`.
+
+For TypeScript, add `@wdio/vitest-framework` to `types` so `vitestOpts` is typed. It also provides the Vitest globals (`describe`, `test` and the hooks) without imports, see [TypeScript Setup](/docs/typescript):
+
+```json title="tsconfig.json"
+{
+    "compilerOptions": {
+        "types": ["node", "@wdio/globals/types", "@wdio/vitest-framework"]
+    }
+}
+```
+
+### How Vitest runs your specs
+
+- Every capability becomes one Vitest project, named `<browserName>-<index>`, for example `chrome-0`.
+- Every spec file gets its own browser session. The session starts in `beforeAll` and is deleted in `afterAll`.
+- The WDIO hooks `beforeSession`, `before`, `after` and `afterSession` run once per spec file, and `beforeTest` and `afterTest` once per test. Worker services (for example Sauce Labs, BrowserStack or Appium) are initialized like in the WDIO runner, so their hooks run too.
+- The console output comes from Vitest. File reporters from `wdio.conf.ts`, such as `junit`, `allure` or `json`, receive the Vitest results. Every spec file and capability is reported as one job. Skipped and `todo` tests are reported as pending.
+- `maxInstances` (or `wdio:maxInstances` per capability) sets Vitest's `maxWorkers`, and `bail` sets Vitest's `bail`.
+- `runnerEnv` is passed to the Vitest workers as Vitest's `env`, with `NODE_ENV` defaulting to `test`. `vitestOpts.env` is merged on top and wins. `NODE_OPTIONS` in `runnerEnv` only reaches the worker's `process.env`, because Vitest has already forked the worker. Node flags such as `--import` do not apply to it.
+
+### Concurrent tests
+
+`test.concurrent` runs the tests of one spec file at the same time, each in its own browser window (browsing context). Every command in the test, including the ones in your page objects and fixtures, targets that window. The window is closed when the test ends, also when it fails. This needs [`parallelMode`](#parallelmode-2), a WebDriver BiDi session (`webSocketUrl: true`) and the `'wdio:experimentalBiDiCommands': true` capability. Without that capability, commands use classic WebDriver and cannot target the test's window. It changes how element commands are implemented in every test of the session, see [Behavior changes of the BiDi element commands](./ParallelTests.md#behavior-changes-of-the-bidi-element-commands).
+
+```ts title="test/specs/checkout.spec.ts"
+import { describe, test } from 'vitest'
+
+describe('checkout', () => {
+    test.concurrent('guest', async () => {
+        await browser.url('/checkout')
+        await expect($('h1')).toHaveText('Checkout')
+    })
+
+    test.concurrent('member', async () => {
+        await browser.url('/checkout?member=1')
+        await expect($('h1')).toHaveText('Checkout')
+    })
+})
+```
+
+Without `parallelMode`, `test.concurrent` fails with:
+
+```
+test.concurrent needs vitestOpts.parallelMode ('contexts' | 'userContexts'): concurrent tests would share one window
+```
+
+Without the capability, it fails with:
+
+```
+test.concurrent with vitestOpts.parallelMode needs the 'wdio:experimentalBiDiCommands': true capability, so commands run in the window of their test
+```
+
+### Vitest Options
+
+Set them in `vitestOpts` in your `wdio.conf.ts`.
+
+#### parallelMode
+
+Runs `test.concurrent` tests at the same time, each in its own browsing context. Requires a WebDriver BiDi session and the `'wdio:experimentalBiDiCommands': true` capability.
+
+- `'contexts'`: windows share the default user context, so cookies, `localStorage` and service workers are shared across concurrent tests.
+- `'userContexts'`: each test gets its own user context, so storage is isolated per test. Pick this when tests log in or change cookies. `browser.mock()` remains session-wide in both modes.
+
+Type: `'contexts' | 'userContexts'`<br />
+Default: `undefined`
+
+#### maxParallelContexts
+
+Maximum number of `test.concurrent` tests that run at once. Maps to Vitest's `maxConcurrency` and only applies when `parallelMode` is set.
+
+Type: `number`<br />
+Default: `os.cpus().length`
+
+#### Other Vitest options
+
+All other keys are passed to Vitest's [`test` config](https://vitest.dev/config/) and override this framework's defaults, for example `testTimeout` (default `60000`), `hookTimeout` (default: `connectionRetryTimeout`, else `120000`, because `beforeAll` starts the session), `retry` or `reporters`. With `retry`, every attempt is reported to the WDIO reporters: the failed ones as retries, the last one as the test result.
+
+The framework controls some keys itself:
+
+- `include` is always the specs resolved from `wdio.conf.ts` (respecting `--spec` and `exclude`), so `vitestOpts.include` is ignored.
+- `pool` is always `'forks'`.
+- `setupFiles` from `vitestOpts` runs after the framework's own setup file instead of replacing it.
+- A `vitest.config.ts` file is not read. Put Vitest options in `vitestOpts`.
+
+### Limitations
+
+- Multi-remote capabilities are not supported yet.
+- `expect.poll` is not available, because the global `expect` comes from `expect-webdriverio`.
+- `switchWindow` and `switchFrame` throw in a WebDriver BiDi session, which `parallelMode` requires. Inside concurrent tests, `getWindowSize`, `setWindowSize`, `throttleCPU`, `throttleNetwork` and classic window and frame protocol commands such as `switchToWindow` also throw, because they change session-wide state.
+- The hooks `beforeSuite`, `afterSuite`, `beforeHook`, `afterHook`, `beforeAssertion`, `afterAssertion`, `onWorkerStart` and `onWorkerEnd` are not run, in `wdio.conf.ts` or in services.
+- `hook:start` / `hook:end` events are sent per hook kind and attempt, not per hook: one pair for all `beforeEach` hooks and one for all `afterEach` hooks, with no duration. A failed hook ends with `state: 'fail'` and its error. A failing `beforeAll` / `afterAll` is reported separately, see below. Reporter runtime API calls made inside a `beforeEach` / `afterEach` hook are attributed to the test, not to the hook.
+- `--watch`, `--repeat` and per-capability `wdio:specs` / `wdio:exclude` are not supported yet. The testrunner stops with an error instead of ignoring them.
+- WebDriver commands are not sent to the WDIO reporters, because the reporters run in the launcher and the commands run in the Vitest workers. Allure therefore shows no WebDriver steps and no automatic screenshots (`disableWebdriverStepsReporting` and `disableWebdriverScreenshotsReporting` have no effect), the video reporter records nothing, and the HTML reporter shows no automatic screenshots. Attach screenshots explicitly, for example `allure.addAttachment('screenshot', Buffer.from(await browser.takeScreenshot(), 'base64'), 'image/png')` in `afterTest` or `afterEach`. The `beforeCommand` / `afterCommand` hooks of `wdio.conf.ts` and of worker services still run. Calls of the HTML reporter (`ReportEvents.logMessage`, `logScreenshot` and `videoCapture`) are relayed, so their logs, screenshots and videos reach the report; WebDriver commands still do not.
+- Top-level config changes made in `onPrepare` do not reach the specs, because each Vitest worker parses the config file again. Changes to capabilities do reach them.
+- Reporter runtime APIs such as `addStep` and `addAttachment` from `@wdio/allure-reporter` or `addProperty` from `@wdio/junit-reporter` work from tests and `beforeEach` / `afterEach` hooks. Calls in `beforeAll` / `afterAll` are dropped. With exactly one Allure reporter in the final reporter list (after `onPrepare` ran), the launcher tells the Vitest workers its results folder, they write Allure attachments there and only the path travels to the launcher. Otherwise attachments are sent through the launcher.
+- A failing `beforeAll` or `afterAll` is reported to WDIO reporters as a failed hook, so the JUnit reporter adds a failing testcase for it. Other `beforeAll` / `afterAll` results are not reported.
+- Soft assertions (`expect.soft` from `expect-webdriverio`) fail the test at its end unless `autoAssertOnTestEnd` is `false`. `expect-webdriverio` tracks one current test per worker, so in `test.concurrent` tests the failures can be attributed to the wrong test. Use Vitest's own `expect.soft` from the test context there.
+- Soft assertions outside a test (in `beforeAll` or `afterAll`) are not asserted: their failures are dropped.
 
 ## Using Serenity/JS
 
@@ -592,7 +936,6 @@ export const config: WebdriverIOConfig = {
         // see Cucumber configuration options below
     },
 
-
     // ... or Jasmine runner
     jasmineOpts: {
         // see Jasmine configuration options below
@@ -638,7 +981,6 @@ export const config = {
     cucumberOpts: {
         // see Cucumber configuration options below
     },
-
 
     // ... or Jasmine runner
     jasmineOpts: {
@@ -739,3 +1081,4 @@ To learn more about the Screenplay Pattern, check out:
 - [The Screenplay Pattern](https://serenity-js.org/handbook/design/screenplay-pattern/?pk_campaign=wdio8&pk_source=webdriver.io)
 - [Web testing with Serenity/JS](https://serenity-js.org/handbook/web-testing/?pk_campaign=wdio8&pk_source=webdriver.io)
 - ["BDD in Action, Second Edition"](https://www.manning.com/books/bdd-in-action-second-edition)
+

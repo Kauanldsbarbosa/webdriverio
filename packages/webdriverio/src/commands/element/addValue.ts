@@ -1,3 +1,5 @@
+import { getBrowserObject } from '@wdio/utils'
+import { bidiAddMaskedValue, bidiAddValue, isBidiCommandsEnabled } from '../../utils/bidi/elementCommands.js'
 import type { InputOptions } from '../../types.js'
 import { CommandRuntimeOptions } from 'webdriver'
 
@@ -37,15 +39,21 @@ export function addValue (
     options?: InputOptions
 ) {
     /**
-     * The JSONWireProtocol allowed array values and use of special characters when adding a value to an input.
-     * With the W3C protocol this was not possible anymore. This is a type check to ensure users are aware of
-     * this transition.
+     * `elementSendKeys` accepts a string. Reject other types so callers use
+     * the `keys` command for special characters.
      */
     if (!VALID_TYPES.includes(typeof value)) {
         throw new Error(
             'The setValue/addValue command only take string or number values. ' +
             'If you like to use special characters, use the "keys" command.'
         )
+    }
+
+    const browser = getBrowserObject(this) as WebdriverIO.Browser
+    if (isBidiCommandsEnabled(browser)) {
+        return options?.mask
+            ? bidiAddMaskedValue(this, value.toString())
+            : bidiAddValue(this, value.toString())
     }
 
     if (options) {

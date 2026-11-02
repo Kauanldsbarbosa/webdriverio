@@ -1,12 +1,12 @@
 {
   "name": "@wdio/reporter",
-  "version": "9.27.2",
+  "version": "10.1.0",
   "description": "A WebdriverIO utility to help reporting all events",
   "author": "Christian Bromann <mail@bromann.dev>",
   "homepage": "https://github.com/webdriverio/webdriverio/tree/main/packages/wdio-reporter",
   "license": "MIT",
   "engines": {
-    "node": ">=18.20.0"
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1"
   },
   "repository": {
     "type": "git",
@@ -35,19 +35,17 @@
       "require": "./build/index.cjs"
     }
   },
-  "typeScriptVersion": "3.8.3",
+  "typeScriptVersion": "6.0.3",
   "dependencies": {
-    "@types/node": "^20.1.0",
-    "@wdio/logger": "workspace:*",
+    "@types/node": "^22.20.4",
     "@wdio/types": "workspace:*",
-    "diff": "^8.0.2",
+    "diff": "^9.0.0",
     "object-inspect": "^1.12.0"
   },
   "devDependencies": {
     "@types/diff": "^8.0.0",
     "@types/object-inspect": "^1.8.1",
-    "@types/supports-color": "^8.1.1",
     "@types/tmp": "^0.2.3",
-    "tmp": "^0.2.1"
+    "tmp": "^0.2.7"
   }
 }

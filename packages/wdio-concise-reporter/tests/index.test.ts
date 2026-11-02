@@ -1,212 +1,218 @@
 import path from 'node:path'
-import { describe, expect, it, beforeAll, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import ConciseReporter from '../src/index.js'
-import {
-    RUNNER,
-    SUITE_UIDS,
-    SUITES,
-    SUITES_NO_TESTS,
-    REPORT,
-} from './fixtures.js'
-const reporter = new ConciseReporter({})
+import { RUNNER, SUITES, REPORT } from './fixtures.js'
 
 vi.mock('chalk')
 vi.mock('@wdio/reporter', () => import(path.join(process.cwd(), '__mocks__', '@wdio/reporter')))
-vi.mock('@wdio/logger', () => import(path.join(process.cwd(), '__mocks__', '@wdio/logger')))
+
+function conciseReport (environment: string, body: string) {
+    return `yellow ========= Your concise report ==========
+${environment}
+${body}
+`
+}
 
 describe('ConciseReporter', () => {
-    let tmpReporter: ConciseReporter
+    let printReporter: ConciseReporter
 
     beforeEach(() => {
-        tmpReporter = new ConciseReporter({})
-    })
-
-    describe('on create', () => {
-        it('should verify initial properties', () => {
-            expect(Array.isArray(reporter['_suiteUids'])).toBe(true)
-            expect(reporter['_suiteUids'].length).toBe(0)
-            expect(Array.isArray(reporter['_suites'])).toBe(true)
-            expect(reporter['_suites'].length).toBe(0)
-            expect(reporter['_stateCounts']).toEqual({
-                failed : 0
-            })
-        })
-    })
-
-    describe('onSuiteStart', () => {
-        beforeAll(() => {
-            reporter.onSuiteStart(SUITES[0] as any)
-        })
-
-        it('should add to suiteUids', () => {
-            expect(reporter['_suiteUids'].length).toBe(1)
-            expect(reporter['_suiteUids'][0]).toBe('Foo test1')
-        })
-    })
-
-    describe('onTestFail', () => {
-        beforeAll(() => {
-            reporter.onTestFail()
-        })
-
-        it('should increase stateCounts.failed by 1', () => {
-            expect(reporter['_stateCounts'].failed).toBe(1)
-        })
-    })
-
-    describe('onSuiteEnd', () => {
-        beforeAll(() => {
-            reporter.onSuiteEnd(SUITES[0] as any)
-        })
-
-        it('should add the suite to the suites array', () => {
-            expect(reporter['_suites'].length).toBe(1)
-            expect(reporter['_suites'][0]).toBe(SUITES[0])
-        })
+        printReporter = new ConciseReporter({})
+        printReporter.write = vi.fn()
     })
 
     describe('onRunnerEnd', () => {
-        it('should call printReport method', () => {
-            reporter.printReport = vi.fn()
-            reporter.onRunnerEnd(RUNNER as any)
-            expect(vi.mocked(reporter.printReport).mock.calls.length).toBe(1)
-            expect(vi.mocked(reporter.printReport).mock.calls[0][0]).toEqual(RUNNER)
-        })
-    })
-
-    describe('printReport', () => {
-        let printReporter: ConciseReporter
-
-        beforeEach(() => {
-            printReporter = new ConciseReporter({})
-            printReporter.write = vi.fn()
-        })
-
-        it('should print the report to the console', () => {
-            printReporter['_suiteUids'] = SUITE_UIDS
-            printReporter['_suites'] = SUITES as any
-            printReporter['_stateCounts'] = {
-                failed : 1
+        it('should print the concise report for a failed run', () => {
+            for (const suite of SUITES) {
+                printReporter.onSuiteStart(suite as any)
+            }
+            printReporter.onTestFail()
+            for (const suite of SUITES) {
+                printReporter.onSuiteEnd(suite as any)
             }
 
-            printReporter.printReport(RUNNER as any)
+            printReporter.onRunnerEnd(RUNNER as any)
 
-            expect(printReporter.write).toBeCalledWith(REPORT)
+            expect(printReporter.write).toHaveBeenCalledTimes(1)
+            expect(printReporter.write).toHaveBeenCalledWith(REPORT)
         })
 
-        it('should print default report because there are no failed tests', () => {
-            printReporter['_suiteUids'] = SUITE_UIDS
-            printReporter['_suites'] = SUITES_NO_TESTS as any
+        it('should print the no-tests report when nothing ran', () => {
+            printReporter.onRunnerEnd(RUNNER as any)
 
-            printReporter.printReport(RUNNER as any)
-
-            expect(vi.mocked(printReporter.write).mock.calls.length).toBe(1)
-        })
-    })
-
-    describe('getCountDisplay', () => {
-        it('should return failing count', () => {
-            tmpReporter['_stateCounts'].failed = 0
-            let result = tmpReporter.getCountDisplay()
-            expect(result).toBe('❌ Failed to setup tests, no tests found')
-
-            tmpReporter.counts.tests = 1
-            result = tmpReporter.getCountDisplay()
-            expect(result).toBe('✅ All went well!')
-
-            tmpReporter['_stateCounts'].failed = 1
-            result = tmpReporter.getCountDisplay()
-            expect(result).toBe('❌ Test failed (1):')
-
-            tmpReporter['_stateCounts'].failed = 2
-            result = tmpReporter.getCountDisplay()
-            expect(result).toBe('❌ Tests failed (2):')
-        })
-    })
-
-    describe('getFailureDisplay', () => {
-        it('should return failing results', () => {
-            tmpReporter.getOrderedSuites = vi.fn(() => SUITES) as any
-            tmpReporter['_suites'] = SUITES as any
-
-            const result = tmpReporter.getFailureDisplay()
-
-            expect(result.length).toBe(2)
-            expect(result[0]).toBe('  Fail : red a failed test')
-            expect(result[1]).toBe('    AssertionError [ERR_ASSERTION] : yellow \'Google\' == \'Google2\'')
+            expect(printReporter.write).toHaveBeenCalledTimes(1)
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'chrome',
+                '❌ Failed to setup tests, no tests found'
+            ))
         })
 
-        it('should return no results', () => {
-            tmpReporter.getOrderedSuites = vi.fn(() => SUITES_NO_TESTS) as any
-            tmpReporter['_suites'] = SUITES_NO_TESTS as any
+        // Mocha `failHookAffectedTests: false`: a failed root before() reports no test
+        it('prints only the failed hook when a hook failed and no test ran', () => {
+            printReporter.onHookEnd({ uid: 'h1', title: '"before all" hook in "{root}"', error: { type: 'Error', message: 'before fails' } } as any)
+            printReporter.onRunnerEnd(RUNNER as any)
 
-            const result = tmpReporter.getFailureDisplay()
-
-            expect(result.length).toBe(0)
-        })
-    })
-
-    describe('getOrderedSuites', () => {
-        it('should return the suites in order based on uids', () => {
-            // @ts-expect-error
-            tmpReporter.foo = 'hellooo'
-            tmpReporter['_suiteUids'] = ['5', '3', '8']
-            tmpReporter['_suites'] = [{ uid : '3' }, { uid : '5' }] as any
-
-            const result = tmpReporter.getOrderedSuites()
-
-            expect(result.length).toBe(2)
-            expect(result[0]).toEqual({ uid : '5' })
-            expect(result[1]).toEqual({ uid : '3' })
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'chrome',
+                [
+                    '❌ Hook failed (1):',
+                    '  Fail : red "before all" hook in "{root}"',
+                    '    Error : yellow before fails'
+                ].join('\n')
+            ))
         })
 
-        it('should return no suites', () => {
-            expect(tmpReporter.getOrderedSuites().length).toBe(0)
-        })
-    })
+        it('names the browser of each instance of a multi-remote run', () => {
+            printReporter.onRunnerEnd({
+                ...RUNNER,
+                isMultiRemote: true,
+                capabilities: { myChrome: { browserName: 'chrome' }, myPhone: { platformName: 'iOS', deviceName: 'iPhone 17' } }
+            } as any)
 
-    describe('getEnviromentCombo', () => {
-        it('should return desktop combo', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                browserName: 'chrome',
-                browserVersion: '50',
-                platformName: 'Windows 8.1'
-            })).toBe('chrome (v50) on Windows 8.1')
-        })
-
-        it('should return mobile combo', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                deviceName: 'iPhone 6 Plus',
-                ['appium:platformVersion']: '9.2',
-                platformName: 'iOS'
-            })).toBe('iPhone 6 Plus on iOS 9.2')
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'chrome, iPhone 17',
+                '❌ Failed to setup tests, no tests found'
+            ))
         })
 
-        it('should return mobile combo executing an app', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                deviceName: 'iPhone 6 Plus',
-                ['appium:platformVersion']: '9.2',
-                platformName: 'iOS',
-                ['appium:app']: 'sauce-storage:myApp.app'
-            })).toBe('iPhone 6 Plus on iOS 9.2 executing myApp.app')
+        it('names a remote app URL by its file name, without credentials and token', () => {
+            const app = 'https://user:secret@storage.example.com/apps/my.apk?token=abc123'
+            printReporter.onRunnerEnd({
+                ...RUNNER,
+                isMultiRemote: true,
+                capabilities: { a: { platformName: 'Android', 'appium:app': app }, b: { browserName: 'chrome' } }
+            } as any)
+            printReporter.onRunnerEnd({ ...RUNNER, capabilities: { platformName: 'Android', 'appium:app': app } } as any)
+
+            const written = (printReporter.write as any).mock.calls.map((call: string[]) => call[0]).join('')
+            expect(written).toContain('my.apk, chrome')
+            expect(written).toContain('my.apk on Android')
+            expect(written).not.toMatch(/secret|abc123/)
         })
 
-        it('should return mobile combo executing a browser', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                deviceName: 'iPhone 6 Plus',
-                ['appium:platformVersion']: '9.2',
-                platformName: 'iOS',
-                browserName: 'Safari'
-            })).toBe('iPhone 6 Plus on iOS 9.2 executing Safari')
+        it('names a multi-remote run with no known browser like the spec reporter', () => {
+            printReporter.onRunnerEnd({
+                ...RUNNER,
+                isMultiRemote: true,
+                capabilities: { a: { platformName: 'linux' }, b: {} }
+            } as any)
+
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'MultiRemoteBrowser',
+                '❌ Failed to setup tests, no tests found'
+            ))
         })
 
-        it('should return desktop combo when using BrowserStack capabilities', () => {
-            expect(tmpReporter.getEnviromentCombo({
-                browser: 'Chrome',
-                browser_version: '50',
-                os: 'Windows',
-                os_version: '10'
-            })).toBe('Chrome (v50) on Windows 10')
+        it('should print the all-clear report when every test passed', () => {
+            // Failure totals live on this reporter. Passes stay on the base
+            // counts object, which the reporter mock does not increment.
+            printReporter.counts.tests = 1
+
+            printReporter.onRunnerEnd(RUNNER as any)
+
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'chrome',
+                '✅ All went well!'
+            ))
+        })
+
+        it('should print failures in suite start order and skip a suite that did not end', () => {
+            const suiteFive = {
+                uid : '5',
+                tests : [{
+                    state : 'failed',
+                    title : 'suite five',
+                    error : { type : 'Error', message : 'one' }
+                }]
+            }
+            const suiteThree = {
+                uid : '3',
+                tests : [{
+                    state : 'failed',
+                    title : 'suite three',
+                    error : { type : 'Error', message : 'two' }
+                }]
+            }
+            const suiteEight = {
+                uid : '8',
+                tests : [{
+                    state : 'failed',
+                    title : 'suite eight',
+                    error : { type : 'Error', message : 'three' }
+                }]
+            }
+
+            printReporter.onSuiteStart(suiteFive as any)
+            printReporter.onSuiteStart(suiteThree as any)
+            printReporter.onSuiteStart(suiteEight as any)
+            printReporter.onTestFail()
+            printReporter.onTestFail()
+            // End in the opposite order from start. Suite eight never ends.
+            printReporter.onSuiteEnd(suiteThree as any)
+            printReporter.onSuiteEnd(suiteFive as any)
+
+            printReporter.onRunnerEnd(RUNNER as any)
+
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                'chrome',
+                [
+                    '❌ Tests failed (2):',
+                    '  Fail : red suite five',
+                    '    Error : yellow one',
+                    '  Fail : red suite three',
+                    '    Error : yellow two'
+                ].join('\n')
+            ))
+        })
+
+        it.each([
+            ['desktop browser', {
+                browserName : 'chrome',
+                browserVersion : '50',
+                platformName : 'Windows 8.1'
+            }, 'chrome (v50) on Windows 8.1'],
+            ['mobile device', {
+                deviceName : 'iPhone 6 Plus',
+                'appium:platformVersion' : '9.2',
+                platformName : 'iOS'
+            }, 'iPhone 6 Plus on iOS 9.2'],
+            ['mobile app', {
+                deviceName : 'iPhone 6 Plus',
+                'appium:platformVersion' : '9.2',
+                platformName : 'iOS',
+                'appium:app' : 'sauce-storage:myApp.app'
+            }, 'iPhone 6 Plus on iOS 9.2 executing myApp.app'],
+            ['mobile app from a remote URL', {
+                deviceName : 'Pixel 9',
+                'appium:platformVersion' : '15',
+                platformName : 'Android',
+                'appium:app' : 'https://user:secret@storage.example.com/apps/my.apk?token=abc123'
+            }, 'Pixel 9 on Android 15 executing my.apk'],
+            ['mobile app from a local path', {
+                deviceName : 'iPhone 6 Plus',
+                'appium:platformVersion' : '9.2',
+                platformName : 'iOS',
+                'appium:app' : '/Users/me/builds/myApp.app'
+            }, 'iPhone 6 Plus on iOS 9.2 executing myApp.app'],
+            ['mobile browser', {
+                deviceName : 'iPhone 6 Plus',
+                'appium:platformVersion' : '9.2',
+                platformName : 'iOS',
+                browserName : 'Safari'
+            }, 'iPhone 6 Plus on iOS 9.2 executing Safari'],
+            ['BrowserStack desktop', {
+                browser : 'Chrome',
+                browser_version : '50',
+                os : 'Windows',
+                os_version : '10'
+            }, 'Chrome (v50) on Windows 10']
+        ] as const)('should print the %s environment', (_label, capabilities, environment) => {
+            printReporter.onRunnerEnd({ ...RUNNER, capabilities } as any)
+
+            expect(printReporter.write).toHaveBeenCalledWith(conciseReport(
+                environment,
+                '❌ Failed to setup tests, no tests found'
+            ))
         })
     })
 })

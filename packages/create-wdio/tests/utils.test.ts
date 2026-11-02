@@ -1,7 +1,5 @@
 import fs from 'node:fs/promises'
-import * as cp from 'node:child_process'
 import { vi, test, expect, beforeEach, afterEach, describe, it } from 'vitest'
-import readDir from 'recursive-readdir'
 import ejs from 'ejs'
 import { $ } from 'execa'
 import { runProgram, getPackageVersion,
@@ -17,17 +15,17 @@ import { runProgram, getPackageVersion,
     npmInstall,
     setupTypeScript,
     createWDIOConfig,
-    createWDIOScript,
     runAppiumInstaller,
     detectCompiler,
     findInConfig,
     replaceConfig,
     formatConfigFilePaths,
+    specifyVersionIfNeeded,
 
 } from '../src/utils.js'
 import { parseAnswers } from '../src/cli/utils.js'
 import path from 'node:path'
-import { readPackageUp } from 'read-pkg-up'
+import { readPackageUp } from 'read-package-up'
 import type { Questionnair } from '../src/types.js'
 import inquirer from 'inquirer'
 import { installPackages } from '../src/install.js'
@@ -39,6 +37,8 @@ vi.mock('node:fs/promises', () => ({
     default: {
         access: vi.fn().mockRejectedValue(new Error('ENOENT')),
         mkdir: vi.fn(),
+        readdir: vi.fn(),
+        readFile: vi.fn(),
         writeFile: vi.fn().mockReturnValue(Promise.resolve())
     }
 }))
@@ -52,17 +52,11 @@ vi.mock('child_process', () => {
     return m
 })
 vi.mock('inquirer')
-vi.mock('read-pkg-up')
+vi.mock('read-package-up')
 vi.mock('ejs')
 vi.mock('execa', () => ({
     execa: vi.fn(()=>({ stdout:'', stderr:'', exitCode:0 })),
     $: vi.fn().mockReturnValue(async (sh: string) => sh)
-}))
-vi.mock('recursive-readdir', () => ({
-    default: vi.fn().mockResolvedValue([
-        '/foo/bar/loo/page.js.ejs',
-        '/foo/bar/example.e2e.js'
-    ] as any)
 }))
 vi.mock('../src/install.js', () => ({
     installPackages: vi.fn(),
@@ -96,10 +90,24 @@ test('runProgram', async () => {
 
     expect(vi.mocked(console.log).mock.calls[1][0]).toMatch(/spawn foobarloo (ENOENT|EACCES)/)
     expect(process.exit).toBeCalledTimes(2)
+    expect(process.exit).toHaveBeenLastCalledWith(1)
 })
 
-test('getPackageVersion', async () => {
-    expect(await getPackageVersion()).toEqual(expect.any(String))
+test('runProgram passes a usage error exit code on when asked to', async () => {
+    await runProgram('node', ['-e', 'process.exit(2)'], {}, true).catch((e) => e)
+    expect(process.exit).toBeCalledWith(2)
+    expect(console.log).not.toBeCalledWith(expect.stringContaining('Ups, something went wrong'))
+})
+
+test('runProgram reports exit code 2 as a failure by default', async () => {
+    await runProgram('node', ['-e', 'process.exit(2)'], {}).catch((e) => e)
+    expect(process.exit).toBeCalledWith(1)
+    expect(console.log).toBeCalledWith(expect.stringContaining('Ups, something went wrong'))
+})
+
+test('getPackageVersion prefixes the version from package.json', async () => {
+    vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ version: '1.2.3' }) as any)
+    expect(await getPackageVersion()).toBe('v1.2.3')
 })
 
 describe('convertPackageHashToObject', () => {
@@ -118,12 +126,22 @@ describe('convertPackageHashToObject', () => {
     })
 })
 
+/**
+ * `fs.readdir(dir, { recursive: true, withFileTypes: true })` result
+ */
+const listing = (files: string[]) => files.map((file) => ({
+    name: path.basename(file),
+    parentPath: path.dirname(file),
+    isFile: () => true
+})) as any
+
 describe('generateTestFiles', () => {
     it('Mocha with page objects', async () => {
-        vi.mocked(readDir).mockResolvedValue([
+        vi.mocked(fs.readdir).mockResolvedValue(listing([
             '/foo/bar/loo/page.js.ejs',
-            '/foo/bar/example.e2e.js'
-        ] as any)
+            '/foo/bar/example.e2e.js.ejs',
+            '/foo/bar/README.md'
+        ]))
         const answers = {
             runner: 'local',
             framework: 'mocha',
@@ -135,31 +153,18 @@ describe('generateTestFiles', () => {
 
         await generateTestFiles(answers as any)
 
-        expect(readDir).toBeCalledTimes(2)
-        expect(vi.mocked(readDir).mock.calls[0][0]).toContain('mocha')
-        expect(vi.mocked(readDir).mock.calls[1][0]).toContain('pageobjects')
-
-        /**
-         * test readDir callback
-         */
-        const readDirCb = vi.mocked(readDir).mock.calls[0][1][0] as Function
-        const stats = { isDirectory: vi.fn().mockReturnValue(false) }
-        expect(readDirCb('/foo/bar.lala', stats)).toBe(true)
-        expect(readDirCb('/foo/bar.js.ejs', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.feature', stats)).toBe(false)
-        stats.isDirectory.mockReturnValue(true)
-        expect(readDirCb('/foo/bar.lala', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.js.ejs', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.feature', stats)).toBe(false)
+        expect(fs.readdir).toBeCalledTimes(2)
+        expect(fs.readdir).toHaveBeenNthCalledWith(1, expect.stringContaining('mocha'), { recursive: true, withFileTypes: true })
+        expect(fs.readdir).toHaveBeenNthCalledWith(2, expect.stringContaining('pageobjects'), { recursive: true, withFileTypes: true })
 
         expect(ejs.renderFile).toBeCalledTimes(4)
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/loo/page.js.ejs',
+            path.join('/foo/bar/loo/page.js.ejs'),
             { answers },
             expect.any(Function)
         )
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/example.e2e.js',
+            path.join('/foo/bar/example.e2e.js.ejs'),
             { answers },
             expect.any(Function)
         )
@@ -184,31 +189,18 @@ describe('generateTestFiles', () => {
 
         await generateTestFiles(answers as any)
 
-        expect(readDir).toBeCalledTimes(2)
-        expect(vi.mocked(readDir).mock.calls[0][0]).toContain('mochaJasmine')
-        expect(vi.mocked(readDir).mock.calls[1][0]).toContain('pageobjects')
-
-        /**
-         * test readDir callback
-         */
-        const readDirCb = vi.mocked(readDir).mock.calls[0][1][0] as Function
-        const stats = { isDirectory: vi.fn().mockReturnValue(false) }
-        expect(readDirCb('/foo/bar.lala', stats)).toBe(true)
-        expect(readDirCb('/foo/bar.js.ejs', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.feature', stats)).toBe(false)
-        stats.isDirectory.mockReturnValue(true)
-        expect(readDirCb('/foo/bar.lala', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.js.ejs', stats)).toBe(false)
-        expect(readDirCb('/foo/bar.feature', stats)).toBe(false)
+        expect(fs.readdir).toBeCalledTimes(2)
+        expect(fs.readdir).toHaveBeenNthCalledWith(1, expect.stringContaining('mochaJasmine'), { recursive: true, withFileTypes: true })
+        expect(fs.readdir).toHaveBeenNthCalledWith(2, expect.stringContaining('pageobjects'), { recursive: true, withFileTypes: true })
 
         expect(ejs.renderFile).toBeCalledTimes(4)
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/loo/page.js.ejs',
+            path.join('/foo/bar/loo/page.js.ejs'),
             { answers },
             expect.any(Function)
         )
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/example.e2e.js',
+            path.join('/foo/bar/example.e2e.js.ejs'),
             { answers },
             expect.any(Function)
         )
@@ -221,43 +213,11 @@ describe('generateTestFiles', () => {
             .toBe(true)
     })
 
-    it('Jasmine with page generation and no pageObjects', async () => {
-        vi.mocked(readDir).mockResolvedValue([] as any)
-        const answers = {
-            runner: 'local',
-            specs: './tests/e2e/**/*.js',
-            framework: 'jasmine',
-            generateTestFiles: false,
-            usePageObjects: false
-        }
-
-        await generateTestFiles(answers as any)
-
-        expect(readDir).toBeCalledTimes(1)
-        expect(ejs.renderFile).toBeCalledTimes(0)
-    })
-
-    it('Cucumber with page generation and no pageObjects', async () => {
-        vi.mocked(readDir).mockResolvedValue([] as any)
-        const answers = {
-            runner: 'local',
-            specs: './tests/e2e/**/*.js',
-            framework: 'cucumber',
-            generateTestFiles: false,
-            usePageObjects: false,
-        }
-
-        await generateTestFiles(answers as any)
-
-        expect(readDir).toBeCalledTimes(1)
-        expect(ejs.renderFile).toBeCalledTimes(0)
-    })
-
     it('Cucumber without page objects', async () => {
-        vi.mocked(readDir).mockResolvedValue([
-            '/foo/bar/loo/step_definition/example.step.js',
+        vi.mocked(fs.readdir).mockResolvedValue(listing([
+            '/foo/bar/loo/step_definition/example.step.js.ejs',
             '/foo/bar/example.feature'
-        ] as any)
+        ]))
         const answers = {
             runner: 'local',
             specs: './tests/e2e/*.js',
@@ -270,16 +230,16 @@ describe('generateTestFiles', () => {
         }
         await generateTestFiles(answers as any)
 
-        expect(readDir).toBeCalledTimes(1)
-        expect(vi.mocked(readDir).mock.calls[0][0]).toContain('cucumber')
+        expect(fs.readdir).toBeCalledTimes(1)
+        expect(fs.readdir).toHaveBeenNthCalledWith(1, expect.stringContaining('cucumber'), { recursive: true, withFileTypes: true })
         expect(ejs.renderFile).toBeCalledTimes(2)
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/loo/step_definition/example.step.js',
+            path.join('/foo/bar/loo/step_definition/example.step.js.ejs'),
             { answers },
             expect.any(Function)
         )
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/example.feature',
+            path.join('/foo/bar/example.feature'),
             { answers },
             expect.any(Function)
         )
@@ -287,11 +247,11 @@ describe('generateTestFiles', () => {
     })
 
     it('Cucumber with page objects and TypeScript', async () => {
-        vi.mocked(readDir).mockResolvedValue([
+        vi.mocked(fs.readdir).mockResolvedValue(listing([
             '/foo/bar/loo/page.js.ejs',
-            '/foo/bar/loo/step_definition/example.step.js',
+            '/foo/bar/loo/step_definition/example.step.js.ejs',
             '/foo/bar/example.feature'
-        ] as any)
+        ]))
         const answers = {
             runner: 'local',
             framework: 'cucumber',
@@ -304,16 +264,16 @@ describe('generateTestFiles', () => {
         }
         await generateTestFiles(answers as any)
 
-        expect(readDir).toBeCalledTimes(2)
-        expect(vi.mocked(readDir).mock.calls[0][0]).toContain('cucumber')
+        expect(fs.readdir).toBeCalledTimes(2)
+        expect(fs.readdir).toHaveBeenNthCalledWith(1, expect.stringContaining('cucumber'), { recursive: true, withFileTypes: true })
         expect(ejs.renderFile).toBeCalledTimes(6)
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/loo/step_definition/example.step.js',
+            path.join('/foo/bar/loo/step_definition/example.step.js.ejs'),
             { answers },
             expect.any(Function)
         )
         expect(ejs.renderFile).toBeCalledWith(
-            '/foo/bar/example.feature',
+            path.join('/foo/bar/example.feature'),
             { answers },
             expect.any(Function)
         )
@@ -553,6 +513,61 @@ test('getAnswers', async () => {
     expect(vi.mocked(inquirer.prompt).mock.calls[0][0][0].when).toBe(true)
 })
 
+test('getAnswers with --yes keeps answers given as flags', async () => {
+    const answers = await getAnswers(true, {
+        framework: '@wdio/cucumber-framework$--$cucumber',
+        isUsingTypeScript: false,
+        reporters: ['@wdio/dot-reporter$--$dot'],
+        browserEnvironment: ['firefox'],
+        e2eEnvironment: 'web'
+    })
+    expect(answers.framework).toBe('@wdio/cucumber-framework$--$cucumber')
+    expect(answers.isUsingTypeScript).toBe(false)
+    expect(answers.reporters).toEqual(['@wdio/dot-reporter$--$dot'])
+    expect(answers.browserEnvironment).toEqual(['firefox'])
+    // defaults still apply to the questions that weren't answered
+    expect(answers.runner).toBe('@wdio/local-runner$--$local$--$e2e')
+    expect(answers.stepDefinitions).toContain('step-definitions')
+    expect(answers.usePageObjects).toBe(true)
+})
+
+test('getAnswers with --yes leaves free text questions without a default unanswered', async () => {
+    for (const [desktopFramework, pathAnswer] of [
+        ['Tauri (https://tauri.app/)', 'tauriAppBinaryPath'],
+        ['Dioxus (https://dioxuslabs.com/)', 'dioxusAppBinaryPath']
+    ] as const) {
+        const answers = await getAnswers(true, {
+            runner: '@wdio/local-runner$--$local$--$desktop',
+            desktopFramework: desktopFramework as Questionnair['desktopFramework']
+        })
+        expect(answers).not.toHaveProperty(pathAnswer)
+    }
+    const answers = await getAnswers(true, { backend: 'In the cloud using Testingbot or LambdaTest or a different service' as Questionnair['backend'] })
+    expect(answers).not.toHaveProperty('hostname')
+    expect(answers.port).toBe('80')
+})
+
+test('getAnswers with --yes rejects a flag that does not apply', async () => {
+    await expect(getAnswers(true, { preset: '@vitejs/plugin-react$--$react' }))
+        .rejects.toThrow('--preset does not apply to this setup')
+})
+
+test('getAnswers passes flag answers to the wizard', async () => {
+    vi.mocked(inquirer.prompt).mockImplementation((async (_: unknown, answers: object) => ({
+        ...answers,
+        runner: '@wdio/local-runner$--$local$--$e2e',
+        backend: 'On my local machine',
+        reporters: [],
+        plugins: [],
+        services: []
+    })) as any)
+    const answers = await getAnswers(false, { framework: '@wdio/jasmine-framework$--$jasmine' })
+    expect(vi.mocked(inquirer.prompt).mock.calls[1][1]).toEqual(expect.objectContaining({
+        framework: '@wdio/jasmine-framework$--$jasmine'
+    }))
+    expect(answers.framework).toBe('@wdio/jasmine-framework$--$jasmine')
+})
+
 test('getProjectProps', async () => {
     vi.mocked(readPackageUp).mockResolvedValue(undefined)
     expect(await getProjectProps('/foo/bar')).toBe(undefined)
@@ -628,10 +643,26 @@ test('setupTypeScript', async () => {
             ]
         },
         packagesToInstall: [],
-        tsConfigFilePath: '/foobar/tsconfig.json'
+        tsConfigFilePath: '/foobar/tsconfig.json',
+        projectRootDir: '/foobar'
     } as any
     await setupTypeScript(parsedAnswers)
     expect(vi.mocked(fs.writeFile).mock.calls[0][1]).toMatchSnapshot()
+})
+
+test('setupTypeScript uses NodeNext for a CommonJS project', async () => {
+    vi.mocked(fs.writeFile).mockClear()
+    await setupTypeScript({
+        isUsingTypeScript: true,
+        esmSupport: false,
+        rawAnswers: { framework: 'foo', services: [] },
+        packagesToInstall: [],
+        tsConfigFilePath: '/foobar/tsconfig.json',
+        projectRootDir: '/foobar'
+    } as any)
+    const { compilerOptions } = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+    expect(compilerOptions.module).toBe('NodeNext')
+    expect(compilerOptions.moduleResolution).toBe('NodeNext')
 })
 
 test('setupTypeScript does not create tsconfig.json if TypeScript was not selected', async () => {
@@ -646,14 +677,15 @@ test('setupTypeScript does not create tsconfig.json if TypeScript was not select
             ]
         },
         packagesToInstall: [],
-        tsConfigFilePath: '/foobar/tsconfig.json'
+        tsConfigFilePath: '/foobar/tsconfig.json',
+        projectRootDir: '/foobar'
     } as any
     await setupTypeScript(parsedAnswers)
     expect(fs.writeFile).not.toBeCalled()
     expect(parsedAnswers.packagesToInstall).toEqual([])
 })
 
-test('setupTypeScript does not create tsconfig.json if there is already one', async () => {
+test('setupTypeScript creates a dedicated tsconfig even if there is already one', async () => {
     const parsedAnswers = {
         isUsingTypeScript: true,
         esmSupport: true,
@@ -665,26 +697,57 @@ test('setupTypeScript does not create tsconfig.json if there is already one', as
             ]
         },
         packagesToInstall: [],
-        tsConfigFilePath: '/foobar/tsconfig.json',
-        hasRootTSConfig: true
+        tsConfigFilePath: '/foobar/tsconfig.e2e.json',
+        hasRootTSConfig: true,
+        projectRootDir: '/foobar'
     } as any
     await setupTypeScript(parsedAnswers)
-    expect(fs.writeFile).not.toBeCalled()
+    const writtenContent = vi.mocked(fs.writeFile).mock.calls[0][1] as string
+    expect(writtenContent).toContain('"extends": "./tsconfig.json"')
+    expect(writtenContent).not.toContain('"extends": "tsconfig.json"')
+    expect(vi.mocked(fs.writeFile).mock.calls[0][0]).toBe('/foobar/tsconfig.e2e.json')
+    expect(writtenContent).toMatchSnapshot()
 })
 
-describe.skip('createWDIOScript', () => {
-    it('can run with success', async () => {
-        const promise = createWDIOScript({ wdioConfigPath: '/foo/bar/wdio.conf.js' } as any)
-        expect(await promise)
-            .toBe(true)
-        expect(cp.spawn).toBeCalledTimes(1)
+test('setupTypeScript extends the root config with a relative path from a nested directory', async () => {
+    const parsedAnswers = {
+        isUsingTypeScript: true,
+        esmSupport: true,
+        rawAnswers: {
+            framework: 'foo',
+            services: []
+        },
+        packagesToInstall: [],
+        tsConfigFilePath: '/foobar/test/tsconfig.json',
+        hasRootTSConfig: true,
+        projectRootDir: '/foobar',
+        destSpecRootPath: '/foobar/test'
+    } as any
+    await setupTypeScript(parsedAnswers)
+    const writtenContent = JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string)
+    expect(writtenContent.extends).toBe('../tsconfig.json')
+    expect(writtenContent.include).toEqual(['.', '../wdio.conf.ts'])
+})
+
+describe('specifyVersionIfNeeded', () => {
+    const PRERELEASE = '10.1.0-alpha.3+4bc237701'
+
+    it('pins monorepo packages to a prerelease CLI\'s version', () => {
+        expect(specifyVersionIfNeeded(['@wdio/local-runner', 'webdriverio'], PRERELEASE, 'latest'))
+            .toEqual(['@wdio/local-runner@^10.1.0-alpha.3', 'webdriverio@^10.1.0-alpha.3'])
     })
 
-    it('does not fail the process if spawn errors out', async () => {
-        vi.mocked(cp.spawn).mockReturnValue({ on: vi.fn().mockImplementation((ev, fn) => fn(1)) } as any)
-        expect(await createWDIOScript({ wdioConfigPath: '/foo/bar/wdio.conf.js' } as any))
-            .toBe(false)
-        expect(cp.spawn).toBeCalledTimes(1)
+    it.each(['@wdio/devtools-service', '@wdio/visual-service'])(
+        'leaves %s unpinned, since it never publishes the CLI\'s prerelease',
+        (pkg) => {
+            expect(specifyVersionIfNeeded([pkg, '@wdio/local-runner'], PRERELEASE, 'latest'))
+                .toEqual([pkg, '@wdio/local-runner@^10.1.0-alpha.3'])
+        }
+    )
+
+    it('leaves the independently versioned packages untagged on a dist-tag install', () => {
+        expect(specifyVersionIfNeeded(['@wdio/devtools-service', '@wdio/cli'], '10.1.0', 'next'))
+            .toEqual(['@wdio/devtools-service', '@wdio/cli@next'])
     })
 })
 
@@ -704,6 +767,8 @@ test('createWDIOConfig', async () => {
 })
 
 test('runAppiumInstaller', async () => {
+    const isTTY = process.stdin.isTTY
+    process.stdin.isTTY = true
     expect(await runAppiumInstaller({ e2eEnvironment: 'web' } as any))
         .toBe(undefined)
     expect(console.log).toBeCalledTimes(0)
@@ -724,13 +789,35 @@ test('runAppiumInstaller', async () => {
     expect(await runAppiumInstaller({ e2eEnvironment: 'mobile' } as any))
         .toEqual(['npx appium-installer'])
     expect($).toBeCalledTimes(1)
+    process.stdin.isTTY = isTTY
+})
+
+test('runAppiumInstaller skips the installer with --yes', async () => {
+    const isTTY = process.stdin.isTTY
+    process.stdin.isTTY = true
+    expect(await runAppiumInstaller({ e2eEnvironment: 'mobile' } as any, true))
+        .toBe(undefined)
+    expect(inquirer.prompt).toBeCalledTimes(0)
+    expect($).toBeCalledTimes(0)
+    expect(console.log).toBeCalledWith(expect.stringContaining('npx appium-installer'))
+    process.stdin.isTTY = isTTY
+})
+
+test('runAppiumInstaller skips the installer without a terminal', async () => {
+    const isTTY = process.stdin.isTTY
+    process.stdin.isTTY = false
+    expect(await runAppiumInstaller({ e2eEnvironment: 'mobile' } as any))
+        .toBe(undefined)
+    expect(inquirer.prompt).toBeCalledTimes(0)
+    expect($).toBeCalledTimes(0)
+    expect(console.log).toBeCalledWith(expect.stringContaining('npx appium-installer'))
+    process.stdin.isTTY = isTTY
 })
 afterEach(()=>{
     vi.mocked(inquirer.prompt).mockClear()
-    vi.mocked(readDir).mockClear()
+    vi.mocked(fs.readdir).mockClear()
     vi.mocked(ejs.renderFile).mockClear()
     vi.mocked(fs.writeFile).mockClear()
     vi.mocked(fs.mkdir).mockClear()
-    vi.mocked(cp.spawn).mockClear()
     vi.mocked(installPackages).mockClear()
 })

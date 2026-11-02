@@ -23,6 +23,1040 @@ See [CHANGELOG - v8](https://github.com/webdriverio/webdriverio/blob/v8/CHANGELO
 
 ---
 
+## v10.1.0 (2026-10-18)
+
+#### :boom: Breaking Change
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`, `wdio-session`
+  * [#16024](https://github.com/webdriverio/webdriverio/pull/16024) chore(deps): use expect-webdriverio 8.0.0 ([@plum117](https://github.com/plum117))
+
+#### :rocket: New Feature
+* `wdio-cucumber-framework`, `wdio-mocha-framework`, `wdio-reporter`, `wdio-runner`, `wdio-types`, `wdio-utils`, `wdio-webdriver-mock-service`, `webdriver`, `webdriverio`
+  * [#16058](https://github.com/webdriverio/webdriverio/pull/16058) feat(parallel): Parallel it() execution via BiDi browsing contexts ([@Winify](https://github.com/Winify))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#16133](https://github.com/webdriverio/webdriverio/pull/16133) fix(webdriverio): give the page its scroll events before a click in Safari on iOS ([@plum117](https://github.com/plum117))
+  * [#16126](https://github.com/webdriverio/webdriverio/pull/16126) fix(webdriverio): run a command again with the new element id after a stale element ([@plum117](https://github.com/plum117))
+  * [#16082](https://github.com/webdriverio/webdriverio/pull/16082) fix(webdriverio): emulate a device when Chrome says viewport meta is not implemented ([@plum117](https://github.com/plum117))
+  * [#16077](https://github.com/webdriverio/webdriverio/pull/16077) fix(webdriverio): wait once for an element that the page removed (revert #15627) ([@plum117](https://github.com/plum117))
+  * [#16066](https://github.com/webdriverio/webdriverio/pull/16066) fix(webdriverio): a stale list item whose index is gone is not found, like $() ([@plum117](https://github.com/plum117))
+  * [#16067](https://github.com/webdriverio/webdriverio/pull/16067) fix(webdriverio): pass element arguments of execute() in BiDi as in Classic ([@plum117](https://github.com/plum117))
+  * [#16064](https://github.com/webdriverio/webdriverio/pull/16064) fix(webdriverio): send the screenshot events of WebDriver BiDi screenshots to the reporters ([@plum117](https://github.com/plum117))
+  * [#16059](https://github.com/webdriverio/webdriverio/pull/16059) fix(webdriverio): find a re-rendered element again in the BiDi checks of isDisplayed, isFocused and isStable ([@plum117](https://github.com/plum117))
+  * [#16061](https://github.com/webdriverio/webdriverio/pull/16061) fix(webdriverio): catch a failed tree request in the context event handlers ([@plum117](https://github.com/plum117))
+  * [#16057](https://github.com/webdriverio/webdriverio/pull/16057) fix(webdriverio): type at() and slice() of a $() list before it is awaited ([@plum117](https://github.com/plum117))
+  * [#16055](https://github.com/webdriverio/webdriverio/pull/16055) fix(webdriverio): name the custom strategy in the messages of a custom$ element ([@plum117](https://github.com/plum117))
+  * [#16049](https://github.com/webdriverio/webdriverio/pull/16049) fix(webdriverio): give the page its scroll events before a click ([@plum117](https://github.com/plum117))
+  * [#16050](https://github.com/webdriverio/webdriverio/pull/16050) fix(webdriverio): use the not found item of $()[index] once the list reaches the index ([@plum117](https://github.com/plum117))
+  * [#16044](https://github.com/webdriverio/webdriverio/pull/16044) fix(webdriverio): give a not found item per instance for a multi-remote index that the list never reaches ([@plum117](https://github.com/plum117))
+  * [#16043](https://github.com/webdriverio/webdriverio/pull/16043) fix(webdriverio): give a not found element for a custom$ index that the list never reaches ([@plum117](https://github.com/plum117))
+  * [#16041](https://github.com/webdriverio/webdriverio/pull/16041) fix(webdriverio): give a not found element for a $() index that the list never reaches ([@plum117](https://github.com/plum117))
+  * [#16033](https://github.com/webdriverio/webdriverio/pull/16033) fix(webdriverio): scroll the element into view before a click with options ([@plum117](https://github.com/plum117))
+  * [#16026](https://github.com/webdriverio/webdriverio/pull/16026) fix(webdriverio): find elements in declarative shadow roots ([@plum117](https://github.com/plum117))
+  * [#16019](https://github.com/webdriverio/webdriverio/pull/16019) fix(webdriverio): use the window handle as the BiDi context on Appium web contexts ([@plum117](https://github.com/plum117))
+  * [#15999](https://github.com/webdriverio/webdriverio/pull/15999) fix(webdriverio): ElementArray.at() without Array.prototype.at in the browser ([@plum117](https://github.com/plum117))
+* `wdio-cli`
+  * [#16080](https://github.com/webdriverio/webdriverio/pull/16080) fix(@wdio/cli): keep spec file URLs intact in the run summary ([@yasenltd](https://github.com/yasenltd))
+* `wdio-utils`
+  * [#16114](https://github.com/webdriverio/webdriverio/pull/16114) fix(@wdio/utils): import plugins specified as file:// URLs ([@NUAAwqy](https://github.com/NUAAwqy))
+  * [#16008](https://github.com/webdriverio/webdriverio/pull/16008) fix(@wdio/utils): use an installed browser when only its archive cleanup fails ([@plum117](https://github.com/plum117))
+  * [#16023](https://github.com/webdriverio/webdriverio/pull/16023) fix(@wdio/utils): install browsers and Chromedriver atomically, download once when processes set them up together ([@plum117](https://github.com/plum117))
+  * [#16013](https://github.com/webdriverio/webdriverio/pull/16013) fix(@wdio/utils): warn when a browser download ignores the proxy, explain a missing unzip ([@plum117](https://github.com/plum117))
+* `wdio-mocha-framework`, `wdio-utils`
+  * [#16124](https://github.com/webdriverio/webdriverio/pull/16124) fix(@wdio/utils): name the WebdriverIO attempt in a Mocha timeout error ([@plum117](https://github.com/plum117))
+  * [#16032](https://github.com/webdriverio/webdriverio/pull/16032) fix(@wdio/utils): follow the Mocha timeout and let Mocha wait for after hooks ([@plum117](https://github.com/plum117))
+* `wdio-cucumber-framework`
+  * [#16118](https://github.com/webdriverio/webdriverio/pull/16118) fix(@wdio/cucumber-framework): keep the feature uid as the parent of a scenario in a random order ([@plum117](https://github.com/plum117))
+  * [#16068](https://github.com/webdriverio/webdriverio/pull/16068) fix(@wdio/cucumber-framework): report every scenario of grouped specs in a random order ([@plum117](https://github.com/plum117))
+  * [#16063](https://github.com/webdriverio/webdriverio/pull/16063) fix(@wdio/cucumber-framework): keep the scenario title at the end of a scenario-level test ([@plum117](https://github.com/plum117))
+* `create-wdio`, `wdio-types`, `wdio-utils`, `webdriverio`
+  * [#16096](https://github.com/webdriverio/webdriverio/pull/16096) fix(webdriverio): run the command hooks once for each element command ([@plum117](https://github.com/plum117))
+* `wdio-utils`, `webdriverio`
+  * [#16056](https://github.com/webdriverio/webdriverio/pull/16056) fix(@wdio/utils): don't wrap event handler functions as commands ([@Winify](https://github.com/Winify))
+  * [#16070](https://github.com/webdriverio/webdriverio/pull/16070) fix(@wdio/utils, webdriverio): give each list item its own element commands ([@plum117](https://github.com/plum117))
+  * [#16053](https://github.com/webdriverio/webdriverio/pull/16053) fix(@wdio/utils): give the not found item for an index of an async $ overwrite or a custom $ command ([@plum117](https://github.com/plum117))
+* `wdio-cucumber-framework`, `wdio-reporter`
+  * [#16069](https://github.com/webdriverio/webdriverio/pull/16069) fix(@wdio/cucumber-framework, @wdio/reporter): keep the undefined suffix and the duration of a pending step ([@plum117](https://github.com/plum117))
+* `webdriver`, `webdriverio`
+  * [#16065](https://github.com/webdriverio/webdriverio/pull/16065) fix(webdriver, webdriverio): catch the commands of event listeners when the session ends ([@plum117](https://github.com/plum117))
+  * [#16031](https://github.com/webdriverio/webdriverio/pull/16031) fix(webdriverio): apply the script timeout to execute in WebDriver BiDi sessions ([@plum117](https://github.com/plum117))
+* `webdriver`
+  * [#16054](https://github.com/webdriverio/webdriverio/pull/16054) fix(webdriver): reject pending BiDi commands when the connection closes ([@plum117](https://github.com/plum117))
+  * [#16007](https://github.com/webdriverio/webdriverio/pull/16007) fix(webdriver): keep the worker log open after deleteSession ([@plum117](https://github.com/plum117))
+  * [#15996](https://github.com/webdriverio/webdriverio/pull/15996) fix(webdriver): set the default of the bidiResponseTimeout option ([@plum117](https://github.com/plum117))
+* `wdio-browser-runner`, `wdio-runner`
+  * [#16040](https://github.com/webdriverio/webdriverio/pull/16040) fix(@wdio/runner): let Mocha report browser errors that happen during the tests ([@plum117](https://github.com/plum117))
+* `wdio-runner`, `wdio-webdriver-mock-service`, `webdriver`
+  * [#16039](https://github.com/webdriverio/webdriverio/pull/16039) fix(@wdio/runner): end the worker with reports when the session is already gone ([@plum117](https://github.com/plum117))
+* `wdio-appium-service`
+  * [#16021](https://github.com/webdriverio/webdriverio/pull/16021) fix(@wdio/appium-service): clear NODE_OPTIONS for the Appium version check ([@MannXo](https://github.com/MannXo))
+* `wdio-session`
+  * [#16025](https://github.com/webdriverio/webdriverio/pull/16025) fix(@wdio/session): accept only expect-webdriverio 8 as the optional peer ([@plum117](https://github.com/plum117))
+* `wdio-runner`, `wdio-utils`, `webdriverio`
+  * [#16009](https://github.com/webdriverio/webdriverio/pull/16009) fix(@wdio/utils): keep the worker log file when enableFileLogging runs again ([@plum117](https://github.com/plum117))
+* `wdio-browser-runner`, `wdio-utils`
+  * [#16015](https://github.com/webdriverio/webdriverio/pull/16015) fix(@wdio/utils): use geckodriver 8, edgedriver 8 and safaridriver 3 ([@plum117](https://github.com/plum117))
+* `create-wdio`
+  * [#15997](https://github.com/webdriverio/webdriverio/pull/15997) fix(create-wdio): use the select prompt instead of the removed list alias ([@plum117](https://github.com/plum117))
+* `wdio-types`, `webdriver`
+  * [#15987](https://github.com/webdriverio/webdriverio/pull/15987) feat(webdriver): add the bidiConnectTimeout option ([@plum117](https://github.com/plum117))
+* `wdio-jasmine-framework`
+  * [#15982](https://github.com/webdriverio/webdriverio/pull/15982) fix(@wdio/jasmine-framework): type expect.extend() on the global expect ([@plum117](https://github.com/plum117))
+
+#### :nail_care: Polish
+* `wdio-utils`, `wdio-webdriver-mock-service`, `webdriverio`
+  * [#16090](https://github.com/webdriverio/webdriverio/pull/16090) perf(@wdio/utils, webdriverio): let the items of an element list share their commands ([@plum117](https://github.com/plum117))
+* `wdio-session`
+  * [#16030](https://github.com/webdriverio/webdriverio/pull/16030) chore(deps): use @wdio/visual-service 11.0.0 ([@plum117](https://github.com/plum117))
+
+#### :memo: Documentation
+* `wdio-cucumber-framework`, `wdio-mocha-framework`, `webdriverio`
+  * [#16135](https://github.com/webdriverio/webdriverio/pull/16135) docs: Add parallel tests documentation and framework support- #16134 ([@Winify](https://github.com/Winify))
+* Other
+  * [#16042](https://github.com/webdriverio/webdriverio/pull/16042) docs: add the missing v10 migration notes (#15935) ([@plum117](https://github.com/plum117))
+  * [#16028](https://github.com/webdriverio/webdriverio/pull/16028) docs: give PartialMatcher its type argument in the custom matcher example ([@plum117](https://github.com/plum117))
+* `webdriverio`
+  * [#16034](https://github.com/webdriverio/webdriverio/pull/16034) docs(webdriverio): say that a mock with the same definition replaces the first one ([@plum117](https://github.com/plum117))
+
+#### :house: Internal
+* Other
+  * [#16089](https://github.com/webdriverio/webdriverio/pull/16089) chore(deps): bump camelcase from 9.0.0 to 10.0.0 in the major-deps-updates-main group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16088](https://github.com/webdriverio/webdriverio/pull/16088) chore(deps): bump the minor-deps-updates-main group with 7 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16085](https://github.com/webdriverio/webdriverio/pull/16085) chore(deps): bump actions/setup-node from 7.0.0 to 7.1.0 in the minor-deps-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16084](https://github.com/webdriverio/webdriverio/pull/16084) chore(deps): bump actions/upload-artifact from 7.0.1 to 7.0.2 in the patch-deps-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16035](https://github.com/webdriverio/webdriverio/pull/16035) chore(deps): override handlebars and shell-quote to patched versions ([@mccmrunal](https://github.com/mccmrunal))
+  * [#16020](https://github.com/webdriverio/webdriverio/pull/16020) chore(deps): bump undici from 7.29.0 to 8.11.2 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16005](https://github.com/webdriverio/webdriverio/pull/16005) chore(deps): bump @nuxt/kit from 3.17.6 to 3.21.11 in the minor-deps-updates-main group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15985](https://github.com/webdriverio/webdriverio/pull/15985) chore(deps): bump handlebars from 4.7.9 to 4.7.10 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15970](https://github.com/webdriverio/webdriverio/pull/15970) chore(deps): bump compression from 1.8.1 to 1.8.2 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#16003](https://github.com/webdriverio/webdriverio/pull/16003) test(e2e): run the React component tests with React 19 ([@plum117](https://github.com/plum117))
+  * [#16001](https://github.com/webdriverio/webdriverio/pull/16001) chore(deps): hold the major updates that change user behavior ([@plum117](https://github.com/plum117))
+  * [#15988](https://github.com/webdriverio/webdriverio/pull/15988) chore(deps): bump the patch-deps-updates-main group across 1 directory with 3 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15989](https://github.com/webdriverio/webdriverio/pull/15989) chore(deps-dev): bump @aws-sdk/client-device-farm from 3.1146.0 to 3.1147.0 in the minor-deps-updates-main group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15978](https://github.com/webdriverio/webdriverio/pull/15978) chore(deps): bump the patch-deps-updates-main group with 6 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `wdio-lighthouse-service`
+  * [#16087](https://github.com/webdriverio/webdriverio/pull/16087) chore(deps): bump the patch-deps-updates-main group across 1 directory with 16 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `webdriverio`
+  * [#16083](https://github.com/webdriverio/webdriverio/pull/16083) test(webdriverio): make the waitForEnabled test of a removed element stable ([@plum117](https://github.com/plum117))
+  * [#15986](https://github.com/webdriverio/webdriverio/pull/15986) fix(webdriverio): derive fake-timers types from install() ([@plum117](https://github.com/plum117))
+* `wdio-utils`
+  * [#16052](https://github.com/webdriverio/webdriverio/pull/16052) test(@wdio/utils): make 2 atomicInstall tests independent of the speed of the machine ([@plum117](https://github.com/plum117))
+* `wdio-ai-service`
+  * [#16022](https://github.com/webdriverio/webdriverio/pull/16022) test(e2e): keep the AI suite logs and log what the effect recorder counts ([@plum117](https://github.com/plum117))
+* `create-wdio`, `wdio-ai-service`, `wdio-browser-runner`, `wdio-cli`, `wdio-concise-reporter`, `wdio-config`, `wdio-cucumber-framework`, `wdio-dot-reporter`, `wdio-local-runner`, `wdio-logger`, `wdio-reporter`, `wdio-spec-reporter`, `webdriver`, `webdriverio`
+  * [#16012](https://github.com/webdriverio/webdriverio/pull/16012) chore(deps): bump the major-deps-updates-main group across 1 directory with 25 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `wdio-appium-service`
+  * [#16014](https://github.com/webdriverio/webdriverio/pull/16014) chore(deps): bump the patch-deps-updates-main group across 1 directory with 5 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `create-wdio`, `wdio-cli`
+  * [#15998](https://github.com/webdriverio/webdriverio/pull/15998) chore: replace the deprecated read-pkg-up with read-package-up ([@plum117](https://github.com/plum117))
+
+#### Committers: 6
+- David Prévost ([@plum117](https://github.com/plum117))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Parman Mohammadalizadeh ([@MannXo](https://github.com/MannXo))
+- Qingyuan Wang ([@NUAAwqy](https://github.com/NUAAwqy))
+- Vince Graics ([@Winify](https://github.com/Winify))
+- Yasen Dudin ([@yasenltd](https://github.com/yasenltd))
+
+
+## v10.0.2 (2026-10-08)
+
+#### :eyeglasses: Spec Compliancy
+* `wdio-protocols`, `webdriver`, `webdriverio`
+  * [#15977](https://github.com/webdriverio/webdriverio/pull/15977) fix(webdriver): regenerate BiDi types for the script.EvaluationResult rename ([@plum117](https://github.com/plum117))
+
+#### :rocket: New Feature
+* `wdio-session`, `wdio-snapshot`
+  * [#15964](https://github.com/webdriverio/webdriverio/pull/15964) feat(snapshot): tag repeated controls with their row context ([@Winify](https://github.com/Winify))
+* `wdio-ai-service`, `wdio-session`, `wdio-snapshot`
+  * [#15943](https://github.com/webdriverio/webdriverio/pull/15943) feat(snapshot): prepare @wdio/snapshot and session packages for MCP integration ([@Winify](https://github.com/Winify))
+* `create-wdio`, `wdio-session`, `wdio-snapshot`
+  * [#15942](https://github.com/webdriverio/webdriverio/pull/15942) feat(snapshot): @wdio/snapshot POC implementation ([@Winify](https://github.com/Winify))
+
+#### :bug: Bug Fix
+* `create-wdio`, `wdio-session`, `wdio-snapshot`
+  * [#15965](https://github.com/webdriverio/webdriverio/pull/15965) fix(@wdio/session): keep agents on the UI path and fail fast ([@Winify](https://github.com/Winify))
+* `webdriverio`
+  * [#15976](https://github.com/webdriverio/webdriverio/pull/15976) fix(webdriverio): find custom strategy, matcher and argument elements again ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15957](https://github.com/webdriverio/webdriverio/pull/15957) fix(webdriverio): preserve strict option and index in hasElementId ([@sh011](https://github.com/sh011))
+* `wdio-jasmine-framework`
+  * [#15967](https://github.com/webdriverio/webdriverio/pull/15967) fix(@wdio/jasmine-framework): add expect.multiRemote() to the Jasmine expect ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15947](https://github.com/webdriverio/webdriverio/pull/15947) fix(@wdio/jasmine-framework): support expect.extend() for custom matchers ([@devangpratap](https://github.com/devangpratap))
+* `wdio-globals`, `wdio-jasmine-framework`
+  * [#15954](https://github.com/webdriverio/webdriverio/pull/15954) fix(@wdio/jasmine-framework): keep expect-webdriverio's expect types and type expectAsync matchers ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :house: Internal
+* [#15979](https://github.com/webdriverio/webdriverio/pull/15979) chore(deps): bump the minor-deps-updates-main group across 1 directory with 3 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#15953](https://github.com/webdriverio/webdriverio/pull/15953) chore(deps): bump nx from 22.5.4 to 22.7.12 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#15952](https://github.com/webdriverio/webdriverio/pull/15952) chore(deps): bump proxy-addr from 2.0.7 to 2.0.8 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#15951](https://github.com/webdriverio/webdriverio/pull/15951) chore(deps): bump @modelcontextprotocol/sdk from 1.30.1 to 1.32.1 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#15950](https://github.com/webdriverio/webdriverio/pull/15950) chore(deps): bump dompurify from 3.4.13 to 3.4.16 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#15960](https://github.com/webdriverio/webdriverio/pull/15960) test(e2e): keep the Windows OS cursor away from the testrunner e2e browsers ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### Committers: 5
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- David Prévost ([@plum117](https://github.com/plum117))
+- Shrey Shekhar ([@sh011](https://github.com/sh011))
+- Vince Graics ([@Winify](https://github.com/Winify))
+- [@devangpratap](https://github.com/devangpratap)
+
+
+## v10.0.1 (2026-10-07)
+
+#### :rocket: New Feature
+* `create-wdio`
+  * [#15934](https://github.com/webdriverio/webdriverio/pull/15934) feat(create-wdio): offer the devtools service in the wizard ([@vishnuv688](https://github.com/vishnuv688))
+* `wdio-sauce-service`, `wdio-spec-reporter`, `wdio-types`, `webdriverio`
+  * [#15929](https://github.com/webdriverio/webdriverio/pull/15929) feat: support the Sauce Labs asia-south-2 data center ([@bahrimootaz](https://github.com/bahrimootaz))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15940](https://github.com/webdriverio/webdriverio/pull/15940) Fix/emulate device unsupported bidi 15938 ([@mccmrunal](https://github.com/mccmrunal))
+* Other
+  * [#15923](https://github.com/webdriverio/webdriverio/pull/15923) fix(website): fix and align the mobile navbar menu ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :memo: Documentation
+* [#15926](https://github.com/webdriverio/webdriverio/pull/15926) docs(blog): benchmark results in the v10 release post ([@christian-bromann](https://github.com/christian-bromann))
+* [#15925](https://github.com/webdriverio/webdriverio/pull/15925) feat(website): add large social share card ([@christian-bromann](https://github.com/christian-bromann))
+* [#15924](https://github.com/webdriverio/webdriverio/pull/15924) docs(website): update testrunner page to the v10 CLI ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :house: Internal
+* `wdio-browser-runner`, `wdio-lighthouse-service`
+  * [#15933](https://github.com/webdriverio/webdriverio/pull/15933) chore(deps): bump the minor-deps-updates-main group across 1 directory with 22 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `wdio-cucumber-framework`, `wdio-lighthouse-service`
+  * [#15919](https://github.com/webdriverio/webdriverio/pull/15919) chore(deps): bump the patch-deps-updates-main group across 1 directory with 20 updates ([@dependabot[bot]](https://github.com/apps/dependabot))
+* Other
+  * [#15931](https://github.com/webdriverio/webdriverio/pull/15931) fix: template for v10 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15917](https://github.com/webdriverio/webdriverio/pull/15917) chore(deps): bump fedora from 43 to 44 in /e2e/wdio/display-server/docker in the docker-major-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15918](https://github.com/webdriverio/webdriverio/pull/15918) chore(deps): bump alpine from 3.22 to 3.24 in /e2e/wdio/display-server/docker in the docker-minor-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15922](https://github.com/webdriverio/webdriverio/pull/15922) chore(website): temporarily disable translated locales ([@christian-bromann](https://github.com/christian-bromann))
+
+#### Committers: 5
+- Christian Bromann ([@christian-bromann](https://github.com/christian-bromann))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+- [@bahrimootaz](https://github.com/bahrimootaz)
+
+
+## v10.0.0 (2026-10-05)
+
+#### :eyeglasses: Spec Compliancy
+* `webdriverio`
+  * [#15868](https://github.com/webdriverio/webdriverio/pull/15868) fix(webdriverio): follow the WebDriver spec for elements of other browsing contexts ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :boom: Breaking Change
+* `webdriverio`
+  * [#15909](https://github.com/webdriverio/webdriverio/pull/15909) feat(webdriverio): React 18 & 19 support for react$ / react$ with a built-in resq replacement ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15727](https://github.com/webdriverio/webdriverio/pull/15727) breaking(webdriverio): return a MultiRemoteMock from multiremote mock() ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15714](https://github.com/webdriverio/webdriverio/pull/15714) breaking(webdriverio): drop ignored startActivity legacy options ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15680](https://github.com/webdriverio/webdriverio/pull/15680) breaking(webdriverio): remove deprecated throttle and touchAction commands ([@devangpratap](https://github.com/devangpratap))
+  * [#15675](https://github.com/webdriverio/webdriverio/pull/15675) breaking(webdriverio): stabilise multiremote select() and drop its env flag ([@PloneMraz](https://github.com/PloneMraz))
+  * [#15674](https://github.com/webdriverio/webdriverio/pull/15674) breaking(webdriverio): return a MultiRemoteElementArray from multiremote $ ([@PloneMraz](https://github.com/PloneMraz))
+* `wdio-session`, `wdio-types`, `wdio-utils`, `webdriver`, `webdriverio`
+  * [#15833](https://github.com/webdriverio/webdriverio/pull/15833) feat(webdriverio): hold a browsing context for a tab, a window, and a frame ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-session`, `webdriverio`
+  * [#15824](https://github.com/webdriverio/webdriverio/pull/15824) feat: drive browser.emulate() from the BiDi emulation module ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`, `wdio-session`, `webdriverio`
+  * [#15827](https://github.com/webdriverio/webdriverio/pull/15827) feat: replace browser.uploadFile with element.setFiles ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-protocols`, `webdriverio`
+  * [#15841](https://github.com/webdriverio/webdriverio/pull/15841) breaking: reinstate modified Appium screen recording endpoints ([@eglitise](https://github.com/eglitise))
+  * [#15705](https://github.com/webdriverio/webdriverio/pull/15705) breaking(webdriverio): remove executeAsync and hide switchToFrame ([@christian-bromann](https://github.com/christian-bromann))
+* `eslint-plugin-wdio`
+  * [#15837](https://github.com/webdriverio/webdriverio/pull/15837) breaking(eslint-plugin-wdio): require ESLint 10 and fix TypeScript mode ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-jasmine-framework`
+  * [#15808](https://github.com/webdriverio/webdriverio/pull/15808) breaking(@wdio/jasmine-framework): keep Jasmine sync matchers synchronous ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`, `wdio-session`
+  * [#15767](https://github.com/webdriverio/webdriverio/pull/15767) breaking: upgrade expect-webdriverio to 8.0.0-alpha.0 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-appium-service`, `wdio-cli`, `wdio-concise-reporter`, `wdio-protocols`, `wdio-reporter`, `wdio-sauce-service`, `wdio-spec-reporter`, `wdio-utils`, `webdriver`, `webdriverio`
+  * [#15742](https://github.com/webdriverio/webdriverio/pull/15742) breaking: drop remaining JSON Wire Protocol leftovers ([@christian-bromann](https://github.com/christian-bromann))
+* `eslint-plugin-wdio`, `wdio-cli`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-runner`, `wdio-types`, `webdriverio`
+  * [#15697](https://github.com/webdriverio/webdriverio/pull/15697) V10/remove deprecated config globals reporter apis 15656 ([@JustasMonkev](https://github.com/JustasMonkev))
+* `wdio-browser-runner`, `wdio-cli`, `wdio-display-server`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-reporter`, `wdio-shared-store-service`, `wdio-utils`, `webdriver`, `webdriverio`
+  * [#15737](https://github.com/webdriverio/webdriverio/pull/15737) breaking(browser-runner): upgrade Vitest 3 to 5 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `eslint-plugin-wdio`, `wdio-allure-reporter`, `wdio-appium-service`, `wdio-cli`, `wdio-config`, `wdio-display-server`, `wdio-firefox-profile-service`, `wdio-globals`, `wdio-junit-reporter`, `wdio-lighthouse-service`, `wdio-local-runner`, `wdio-reporter`, `wdio-runner`, `wdio-sauce-service`, `wdio-shared-store-service`, `wdio-spec-reporter`, `wdio-testingbot-service`, `wdio-types`, `wdio-utils`, `wdio-webdriver-mock-service`, `webdriverio`
+  * [#15707](https://github.com/webdriverio/webdriverio/pull/15707) breaking: v10 Align dropped multiremote naming for multi-remote / multiRemote ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-utils`, `webdriverio`
+  * [#15716](https://github.com/webdriverio/webdriverio/pull/15716) breaking(webdriverio): drop the JSONWP element id ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-runner`, `wdio-utils`, `webdriver`, `webdriverio`
+  * [#15721](https://github.com/webdriverio/webdriverio/pull/15721) breaking: treat every session as W3C ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-runner`, `webdriverio`
+  * [#15720](https://github.com/webdriverio/webdriverio/pull/15720) breaking(webdriverio): look up multiremote instances with getInstance ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15672](https://github.com/webdriverio/webdriverio/pull/15672) breaking(@wdio/runner): remove the LegacyCustomStubCommand and setupExpect shims ([@PloneMraz](https://github.com/PloneMraz))
+* `wdio-allure-reporter`, `wdio-reporter`, `wdio-runner`, `wdio-utils`, `webdriverio`
+  * [#15719](https://github.com/webdriverio/webdriverio/pull/15719) breaking: drop four v10 compatibility leftovers ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`
+  * [#15717](https://github.com/webdriverio/webdriverio/pull/15717) breaking(wdio-cli): drop unprefixed capability specs and exclude ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`, `wdio-jasmine-framework`, `wdio-utils`
+  * [#15718](https://github.com/webdriverio/webdriverio/pull/15718) breaking(jasmine): pass spec results explicitly and drop legacy options ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`, `wdio-utils`, `webdriverio`
+  * [#15715](https://github.com/webdriverio/webdriverio/pull/15715) breaking: drop JSONWP Appium caps and the mobile getValue fallback ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-lighthouse-service`, `wdio-runner`, `wdio-utils`, `webdriverio`
+  * [#15712](https://github.com/webdriverio/webdriverio/pull/15712) breaking(webdriverio): remove legacy command signatures ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-appium-service`, `wdio-browser-runner`, `wdio-protocols`, `wdio-types`, `wdio-webdriver-mock-service`, `webdriver`, `webdriverio`
+  * [#15709](https://github.com/webdriverio/webdriverio/pull/15709) breaking: require Appium 3 and drop Appium 1/2 HTTP fallbacks ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `eslint-plugin-wdio`, `wdio-allure-reporter`, `wdio-appium-service`, `wdio-browser-runner`, `wdio-cli`, `wdio-concise-reporter`, `wdio-config`, `wdio-cucumber-framework`, `wdio-display-server`, `wdio-dot-reporter`, `wdio-firefox-profile-service`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-json-reporter`, `wdio-junit-reporter`, `wdio-lighthouse-service`, `wdio-local-runner`, `wdio-logger`, `wdio-mocha-framework`, `wdio-protocols`, `wdio-repl`, `wdio-reporter`, `wdio-runner`, `wdio-sauce-service`, `wdio-shared-store-service`, `wdio-smoke-test-cjs-service`, `wdio-smoke-test-reporter`, `wdio-smoke-test-service`, `wdio-spec-reporter`, `wdio-static-server-service`, `wdio-sumologic-reporter`, `wdio-testingbot-service`, `wdio-utils`, `wdio-webdriver-mock-service`, `webdriver`, `webdriverio`
+  * [#15696](https://github.com/webdriverio/webdriverio/pull/15696) breaking: upgrade remaining majors unlocked by Node 22.19 ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-display-server`, `wdio-local-runner`, `wdio-types`, `wdio-xvfb`
+  * [#15088](https://github.com/webdriverio/webdriverio/pull/15088) feat: native headless Wayland (weston) support ([@goosewobbler](https://github.com/goosewobbler))
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-cli`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-mocha-framework`, `wdio-runner`
+  * [#15693](https://github.com/webdriverio/webdriverio/pull/15693) breaking(@wdio/mocha-framework): upgrade Mocha from 10 to 12 ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`, `wdio-config`, `wdio-runner`, `wdio-types`, `webdriverio`
+  * [#15684](https://github.com/webdriverio/webdriverio/pull/15684) breaking(webdriverio): make `# Changelog
+
+> **Tags:**
+> - :boom:       [Breaking Change]
+> - :eyeglasses: [Spec Compliancy]
+> - :rocket:     [New Feature]
+> - :bug:        [Bug Fix]
+> - :memo:       [Documentation]
+> - :house:      [Internal]
+> - :nail_care:  [Polish]
+
+_Note: Gaps between patch versions are faulty, broken or test releases._
+
+See [CHANGELOG - v4](https://github.com/webdriverio-boneyard/v4/blob/master/CHANGELOG.md).
+
+See [CHANGELOG - v5](https://github.com/webdriverio/webdriverio/blob/v5/CHANGELOG.md).
+
+See [CHANGELOG - v6](https://github.com/webdriverio/webdriverio/blob/v6/CHANGELOG.md)
+
+See [CHANGELOG - v7](https://github.com/webdriverio/webdriverio/blob/v7/CHANGELOG.md)
+
+See [CHANGELOG - v8](https://github.com/webdriverio/webdriverio/blob/v8/CHANGELOG.md)
+
+ strict and throw on multiple matches ([@mccmrunal](https://github.com/mccmrunal))
+* `create-wdio`, `eslint-plugin-wdio`, `wdio-allure-reporter`, `wdio-appium-service`, `wdio-browser-runner`, `wdio-cli`, `wdio-concise-reporter`, `wdio-config`, `wdio-cucumber-framework`, `wdio-dot-reporter`, `wdio-firefox-profile-service`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-json-reporter`, `wdio-junit-reporter`, `wdio-local-runner`, `wdio-logger`, `wdio-mocha-framework`, `wdio-protocols`, `wdio-repl`, `wdio-reporter`, `wdio-runner`, `wdio-sauce-service`, `wdio-shared-store-service`, `wdio-smoke-test-cjs-service`, `wdio-smoke-test-reporter`, `wdio-smoke-test-service`, `wdio-spec-reporter`, `wdio-static-server-service`, `wdio-sumologic-reporter`, `wdio-testingbot-service`, `wdio-types`, `wdio-utils`, `wdio-webdriver-mock-service`, `wdio-xvfb`, `webdriver`, `webdriverio`
+  * [#15692](https://github.com/webdriverio/webdriverio/pull/15692) breaking: require Node.js >=22.19.0 ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-utils`
+  * [#15553](https://github.com/webdriverio/webdriverio/pull/15553) breaking(wdio-utils): upgrade @puppeteer/browsers to v3 (CVE-2026-19693) ([@ilteoood](https://github.com/ilteoood))
+* `create-wdio`, `wdio-cli`, `wdio-cucumber-framework`
+  * [#15683](https://github.com/webdriverio/webdriverio/pull/15683) breaking(@wdio/cucumber-framework): upgrade @cucumber/cucumber to 13 ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-config`, `wdio-firefox-profile-service`, `wdio-types`
+  * [#15668](https://github.com/webdriverio/webdriverio/pull/15668) breaking(@wdio/types): rename `MultiremoteConfig` to `MultiRemoteConfig` ([@christian-bromann](https://github.com/christian-bromann))
+* Other
+  * [#15669](https://github.com/webdriverio/webdriverio/pull/15669) breaking(compiler): target Safari 14.1 and drop esbuild destructuring shim ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-firefox-profile-service`
+  * [#15667](https://github.com/webdriverio/webdriverio/pull/15667) breaking(@wdio/firefox-profile-service): remove `legacy` option for Firefox ≤ 55 ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :rocket: New Feature
+* `wdio-session`, `webdriverio`
+  * [#15912](https://github.com/webdriverio/webdriverio/pull/15912) fix(webdriverio, @wdio/session): widgets from live sites (C/4) ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-session`
+  * [#15910](https://github.com/webdriverio/webdriverio/pull/15910) feat(@wdio/session): output agents can act on (A/4) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15887](https://github.com/webdriverio/webdriverio/pull/15887) feat(create-wdio): answer every wizard question with a CLI flag ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-cli`, `wdio-session`
+  * [#15892](https://github.com/webdriverio/webdriverio/pull/15892) feat(@wdio/session): make wdio session cheaper and faster for coding agents ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-ai-service`, `wdio-session`
+  * [#15864](https://github.com/webdriverio/webdriverio/pull/15864) feat(@wdio/ai-service): BiDi effects, frames and windows, heal videos and API responses for extract() ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-ai-service`, `wdio-session`
+  * [#15863](https://github.com/webdriverio/webdriverio/pull/15863) feat(@wdio/ai-service): browser.act() and browser.extract() with cached, self-healing steps ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-session`, `wdio-utils`, `webdriverio`
+  * [#15862](https://github.com/webdriverio/webdriverio/pull/15862) feat(webdriverio): add a role/ selector for role and accessible name ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-types`, `wdio-utils`, `webdriverio`
+  * [#15861](https://github.com/webdriverio/webdriverio/pull/15861) feat(webdriverio): add custom commands to browsing contexts ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-types`, `wdio-utils`
+  * [#15871](https://github.com/webdriverio/webdriverio/pull/15871) feat(@wdio/utils): download Chromedriver from Electron releases ([@goosewobbler](https://github.com/goosewobbler))
+* `wdio-browser-runner`, `wdio-jasmine-framework`, `wdio-runner`, `wdio-session`, `wdio-types`, `wdio-utils`, `webdriverio`
+  * [#15855](https://github.com/webdriverio/webdriverio/pull/15855) feat: brand mocks and browsing contexts with wdio.kind ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`, `wdio-session`, `wdio-types`
+  * [#15860](https://github.com/webdriverio/webdriverio/pull/15860) feat: v10 Compliance + Multi-remote Assertion Support with expect-wdio upgrade ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-protocols`, `webdriver`, `webdriverio`
+  * [#15822](https://github.com/webdriverio/webdriverio/pull/15822) feat: use browsingContext.traverseHistory for back and forward ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-globals`, `wdio-utils`, `webdriverio`
+  * [#15828](https://github.com/webdriverio/webdriverio/pull/15828) feat: brand WebdriverIO objects with the wdio.kind and wdio.chainable symbols. ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-protocols`, `wdio-session`, `webdriverio`
+  * [#15826](https://github.com/webdriverio/webdriverio/pull/15826) feat(webdriverio): print PDFs in savePDF with browsingContext.print ([@christian-bromann](https://github.com/christian-bromann))
+* `webdriverio`
+  * [#15820](https://github.com/webdriverio/webdriverio/pull/15820) feat(webdriverio): add installExtension and uninstallExtension ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`, `wdio-utils`, `webdriverio`
+  * [#15768](https://github.com/webdriverio/webdriverio/pull/15768) feat(webdriverio): return element queries as an ElementArray ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-appium-service`, `wdio-cli`, `wdio-runner`, `wdio-session`, `wdio-utils`, `wdio`, `webdriverio`
+  * [#15728](https://github.com/webdriverio/webdriverio/pull/15728) feat: wdio session for browsers, apps, agents and docs (items 0–18) ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-display-server`, `wdio-local-runner`, `wdio-types`, `wdio-xvfb`
+  * [#15088](https://github.com/webdriverio/webdriverio/pull/15088) feat: native headless Wayland (weston) support ([@goosewobbler](https://github.com/goosewobbler))
+* `wdio-lighthouse-service`
+  * [#15635](https://github.com/webdriverio/webdriverio/pull/15635) feat(wdio-lighthouse-service): upgrade Google Lighthouse to v13 ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :bug: Bug Fix
+* `wdio-session`
+  * [#15914](https://github.com/webdriverio/webdriverio/pull/15914) fix(@wdio/session): readable failures: page load errors, no-op clicks, stale retries, stray rejections (D/4) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15911](https://github.com/webdriverio/webdriverio/pull/15911) fix(@wdio/session): frames by context id, page URL over BiDi, no stalls from busy ad frames (B/4) ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-session`, `webdriverio`
+  * [#15912](https://github.com/webdriverio/webdriverio/pull/15912) fix(webdriverio, @wdio/session): widgets from live sites (C/4) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15906](https://github.com/webdriverio/webdriverio/pull/15906) fix(webdriverio, @wdio/session): linear aria XPath fallback, unblockable session queue, bot-check decoys ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`
+  * [#15907](https://github.com/webdriverio/webdriverio/pull/15907) fix(browser-runner): keep source map lookups from deadlocking on page mocks ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15763](https://github.com/webdriverio/webdriverio/pull/15763) fix(@wdio/browser-runner): port Vite and Stencil file URL imports to v10 (#15597) ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-session`, `webdriver`, `webdriverio`
+  * [#15904](https://github.com/webdriverio/webdriverio/pull/15904) fix(@wdio/session, webdriver): fast, actionable clicks and navigations on busy live sites ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15825](https://github.com/webdriverio/webdriverio/pull/15825) fix: align TypeScript targets with Node 22 and the browser bundles ([@christian-bromann](https://github.com/christian-bromann))
+* `webdriverio`
+  * [#15898](https://github.com/webdriverio/webdriverio/pull/15898) fix(webdriverio): make mock.waitForResponse() work with Firefox 304 responses and in every session ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15884](https://github.com/webdriverio/webdriverio/pull/15884) fix(webdriverio): keep the element scope of a multi-remote entry that the first instance does not have ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15880](https://github.com/webdriverio/webdriverio/pull/15880) fix(webdriverio): multi-remote nextElement, previousElement and parentElement give a MultiRemoteElement ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15878](https://github.com/webdriverio/webdriverio/pull/15878) fix(webdriverio): give element references for a NodeList or HTMLColle… ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15877](https://github.com/webdriverio/webdriverio/pull/15877) fix(webdriverio): multi-remote custom$, react$ and shadow$ give a MultiRemoteElementArray ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15876](https://github.com/webdriverio/webdriverio/pull/15876) fix(webdriverio): multi-remote custom$, react$ and shadow$ give a MultiRemoteElement ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15870](https://github.com/webdriverio/webdriverio/pull/15870) fix(webdriverio): pass the query props when a list index is past the end ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15869](https://github.com/webdriverio/webdriverio/pull/15869) fix(webdriverio): store react$ options in the shape of the call ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15756](https://github.com/webdriverio/webdriverio/pull/15756) fix(webdriverio): port fetchResponse mock responses to v10 (#15691) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15759](https://github.com/webdriverio/webdriverio/pull/15759) fix(webdriverio): port once-per-phase intercept release to v10 (#15643) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15724](https://github.com/webdriverio/webdriverio/pull/15724) fix(webdriverio): return Blob and File values from BiDi execute ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-utils`
+  * [#15893](https://github.com/webdriverio/webdriverio/pull/15893) fix(@wdio/utils): keep a complete browser install when the install retries ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15761](https://github.com/webdriverio/webdriverio/pull/15761) fix(@wdio/utils): port shared driver install to v10 (#15678) ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-ai-service`, `webdriverio`
+  * [#15885](https://github.com/webdriverio/webdriverio/pull/15885) fix(webdriverio): deserialize BiDi execute nodes by their node type ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-utils`, `wdio`, `webdriverio`
+  * [#15840](https://github.com/webdriverio/webdriverio/pull/15840) fix(browser-runner): re-enable component mock tests` ([@JustasMonkev](https://github.com/JustasMonkev))
+* `wdio-browser-runner`, `webdriverio`
+  * [#15846](https://github.com/webdriverio/webdriverio/pull/15846) fix(webdriverio): multi-remote `$` items for missing and late elements ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-local-runner`
+  * [#15758](https://github.com/webdriverio/webdriverio/pull/15758) test: port watch mode smoke follow-up to v10 (#15688) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15765](https://github.com/webdriverio/webdriverio/pull/15765) fix(@wdio/local-runner): port worker NODE_OPTIONS merge to v10 (#15634) ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-lighthouse-service`, `wdio-runner`, `webdriverio`
+  * [#15760](https://github.com/webdriverio/webdriverio/pull/15760) fix(webdriverio): port throwing multi-remote getInstance to v10 (#15704) ([@christian-bromann](https://github.com/christian-bromann))
+* Other
+  * [#15755](https://github.com/webdriverio/webdriverio/pull/15755) fix(website): stop the Ukraine banner drawing extra borders ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-cli`, `wdio-firefox-profile-service`, `wdio-junit-reporter`, `wdio-reporter`
+  * [#15732](https://github.com/webdriverio/webdriverio/pull/15732) fix(deps): v10, bump dependencies with security advisories ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-json-reporter`
+  * [#15722](https://github.com/webdriverio/webdriverio/pull/15722) fix(wdio-json-reporter): write the default merged results file ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :nail_care: Polish
+* `create-wdio`, `wdio-session`
+  * [#15867](https://github.com/webdriverio/webdriverio/pull/15867) feat(session): self-documenting `wdio session --help` and a slimmer agent skill ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`, `wdio-jasmine-framework`, `wdio-runner`, `wdio-session`, `wdio-types`, `wdio-utils`, `webdriverio`
+  * [#15834](https://github.com/webdriverio/webdriverio/pull/15834) refactor: identify WebdriverIO objects with the wdio.kind brand, with shared @wdio/utils helpers ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-browser-runner`, `wdio-local-runner`, `wdio-runner`, `wdio-types`, `wdio-utils`
+  * [#15723](https://github.com/webdriverio/webdriverio/pull/15723) feat(browser-runner): type the browser channel IPC ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`, `wdio-local-runner`, `wdio-mocha-framework`, `wdio-runner`, `wdio-utils`, `wdio-webdriver-mock-service`, `webdriver`
+  * [#15706](https://github.com/webdriverio/webdriverio/pull/15706) perf: testrunner hot-path wins (mock bench) ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :memo: Documentation
+* Other
+  * [#15903](https://github.com/webdriverio/webdriverio/pull/15903) docs(v10): document $() / $() type and element list changes in the migration guide ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15886](https://github.com/webdriverio/webdriverio/pull/15886) docs(blog): schedule the v10 release post for Monday and sharpen it ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15866](https://github.com/webdriverio/webdriverio/pull/15866) docs(website): AI steps on the homepage and in the v10 release post ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15854](https://github.com/webdriverio/webdriverio/pull/15854) docs(v10): cover held browsing contexts in the release post ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15847](https://github.com/webdriverio/webdriverio/pull/15847) docs(v10): release blog post ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15839](https://github.com/webdriverio/webdriverio/pull/15839) docs(v10): scope the TypeScript ESLint config in the migration guide ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15762](https://github.com/webdriverio/webdriverio/pull/15762) fix(website): port AI chatbot responsiveness to v10 (#15682) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15713](https://github.com/webdriverio/webdriverio/pull/15713) docs(website): redirect the removed MJSONWP protocol page ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-session`
+  * [#15804](https://github.com/webdriverio/webdriverio/pull/15804) docs(session): play the Android demo ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `wdio-session`, `webdriverio`
+  * [#15766](https://github.com/webdriverio/webdriverio/pull/15766) docs: correct the v10 migration guide and add an agent skill ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`, `wdio-display-server`, `wdio-local-runner`, `wdio-session`, `wdio-types`, `wdio-utils`
+  * [#15751](https://github.com/webdriverio/webdriverio/pull/15751) docs(display-server): document Weston and the display server for v10 ([@goosewobbler](https://github.com/goosewobbler))
+* `wdio-appium-service`, `wdio-cucumber-framework`, `wdio-firefox-profile-service`, `wdio-jasmine-framework`, `wdio-junit-reporter`, `wdio-sauce-service`, `wdio-spec-reporter`, `wdio-static-server-service`, `wdio-testingbot-service`, `webdriver`
+  * [#15701](https://github.com/webdriverio/webdriverio/pull/15701) docs(website): v10 website revamp (#15700) ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :house: Internal
+* Other
+  * [#15915](https://github.com/webdriverio/webdriverio/pull/15915) test(e2e): run multi-remote specs in parallel workers again ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15901](https://github.com/webdriverio/webdriverio/pull/15901) ci: run the E2E launch tests with one browser per job ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15888](https://github.com/webdriverio/webdriverio/pull/15888) ci: check out the dispatched branch when publishing ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15872](https://github.com/webdriverio/webdriverio/pull/15872) ci: make the path filter's exclusions take effect ([@goosewobbler](https://github.com/goosewobbler))
+  * [#15874](https://github.com/webdriverio/webdriverio/pull/15874) test(e2e): use guinea-pig pages instead of external sites ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15757](https://github.com/webdriverio/webdriverio/pull/15757) test: port watch mode smoke test to v10 (#15644) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15754](https://github.com/webdriverio/webdriverio/pull/15754) test: cover --headless in the smoke harness ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15764](https://github.com/webdriverio/webdriverio/pull/15764) chore(deps): port pnpm/action-setup 6.1.0 bump to v10 (#15598) ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15753](https://github.com/webdriverio/webdriverio/pull/15753) fix(docs): don't fail docs:check when events.webdriver.io is down ([@devangpratap](https://github.com/devangpratap))
+  * [#15741](https://github.com/webdriverio/webdriverio/pull/15741) fix(deps): v10, pin @vitest/istanbul-lib-* to 1.0.1 for pnpm minimumReleaseAge ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15735](https://github.com/webdriverio/webdriverio/pull/15735) chore: upgrade pnpm to 11 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15733](https://github.com/webdriverio/webdriverio/pull/15733) test(e2e): narrow the h1 selector in the reloadSession launch test ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15725](https://github.com/webdriverio/webdriverio/pull/15725) docs(agents): prove changes with the existing harness ([@christian-bromann](https://github.com/christian-bromann))
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`, `wdio-session`
+  * [#15891](https://github.com/webdriverio/webdriverio/pull/15891) chore(deps)!: Upgrade to compliant v10 expect-wdio ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `webdriverio`
+  * [#15856](https://github.com/webdriverio/webdriverio/pull/15856) fix(webdriverio): route commands to their held browsing context, url() returns a context, frame() queries ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15770](https://github.com/webdriverio/webdriverio/pull/15770) test(webdriverio): drop duplicate command and selector assertions ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`, `eslint-plugin-wdio`, `wdio-allure-reporter`, `wdio-appium-service`, `wdio-browser-runner`, `wdio-cli`, `wdio-concise-reporter`, `wdio-config`, `wdio-cucumber-framework`, `wdio-display-server`, `wdio-dot-reporter`, `wdio-firefox-profile-service`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-json-reporter`, `wdio-junit-reporter`, `wdio-lighthouse-service`, `wdio-local-runner`, `wdio-logger`, `wdio-mocha-framework`, `wdio-protocols`, `wdio-repl`, `wdio-reporter`, `wdio-runner`, `wdio-sauce-service`, `wdio-session`, `wdio-shared-store-service`, `wdio-smoke-test-cjs-service`, `wdio-smoke-test-reporter`, `wdio-smoke-test-service`, `wdio-spec-reporter`, `wdio-static-server-service`, `wdio-sumologic-reporter`, `wdio-testingbot-service`, `wdio-types`, `wdio-utils`, `wdio-webdriver-mock-service`, `webdriver`, `webdriverio`
+  * [#15830](https://github.com/webdriverio/webdriverio/pull/15830) chore(deps): v10, upgrade TypeScript to 6 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-display-server`
+  * [#15823](https://github.com/webdriverio/webdriverio/pull/15823) test(@wdio/display-server): v10, install the stub signal handlers before the Wayland socket appears ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15787](https://github.com/webdriverio/webdriverio/pull/15787) test(display-server): drop test-only daemon and install seams ([@christian-bromann](https://github.com/christian-bromann))
+* `webdriver`
+  * [#15821](https://github.com/webdriverio/webdriverio/pull/15821) chore(webdriver): regenerate WebDriver BiDi bindings ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15769](https://github.com/webdriverio/webdriverio/pull/15769) test(webdriver): drop the test-only BiDi response hook ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-sauce-service`
+  * [#15780](https://github.com/webdriverio/webdriverio/pull/15780) test(sauce-service): drop dead emulator helper and duplicate coverage ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-mocha-framework`
+  * [#15783](https://github.com/webdriverio/webdriverio/pull/15783) test(mocha-framework): drop the dead compilers loader and vacuous tests ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-lighthouse-service`
+  * [#15802](https://github.com/webdriverio/webdriverio/pull/15802) test(lighthouse-service): drop unused gatherer and vacuous page-weight stub ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-runner`
+  * [#15782](https://github.com/webdriverio/webdriverio/pull/15782) test(runner): drop duplicate worker proofs and dead log filter ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-session`
+  * [#15781](https://github.com/webdriverio/webdriverio/pull/15781) test(session): drop dead helpers and a vacuous export assertion ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-local-runner`
+  * [#15791](https://github.com/webdriverio/webdriverio/pull/15791) test(local-runner): drop duplicate runner assertions ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-testingbot-service`
+  * [#15773](https://github.com/webdriverio/webdriverio/pull/15773) test(testingbot-service): guard annotation delivery and tunnel ids ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-jasmine-framework`
+  * [#15786](https://github.com/webdriverio/webdriverio/pull/15786) test(jasmine-framework): drop dead Jasmine 5 hooks and unread suite state ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`
+  * [#15784](https://github.com/webdriverio/webdriverio/pull/15784) test(create-wdio): drop tests that do not guard their claimed contract ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-appium-service`
+  * [#15794](https://github.com/webdriverio/webdriverio/pull/15794) test(appium-service): drop unused xpath converters and store duplicates ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-config`
+  * [#15792](https://github.com/webdriverio/webdriverio/pull/15792) test(config): repair vacuous parser checks and drop dead spies ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-logger`
+  * [#15788](https://github.com/webdriverio/webdriverio/pull/15788) test(logger): lock real log contracts and drop a dead mask guard ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cucumber-framework`
+  * [#15789](https://github.com/webdriverio/webdriverio/pull/15789) test(cucumber-framework): drop vacuous skip and formatter assertions ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-firefox-profile-service`
+  * [#15790](https://github.com/webdriverio/webdriverio/pull/15790) test(firefox-profile-service): drop unreachable profile probes ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-browser-runner`
+  * [#15797](https://github.com/webdriverio/webdriverio/pull/15797) test(browser-runner): assert runner contracts instead of test seams ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-concise-reporter`
+  * [#15796](https://github.com/webdriverio/webdriverio/pull/15796) test(concise-reporter): assert printed reports instead of private state ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-allure-reporter`
+  * [#15800](https://github.com/webdriverio/webdriverio/pull/15800) test(allure-reporter): drop dead helper coverage ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-types`
+  * [#15779](https://github.com/webdriverio/webdriverio/pull/15779) test(types): drop the unused browser request predicate ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-globals`
+  * [#15785](https://github.com/webdriverio/webdriverio/pull/15785) test(globals): assert install forwarding instead of vacuous throws ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-junit-reporter`
+  * [#15795](https://github.com/webdriverio/webdriverio/pull/15795) test(junit-reporter): assert report output at the public boundary ([@christian-bromann](https://github.com/christian-bromann))
+* `eslint-plugin-wdio`
+  * [#15799](https://github.com/webdriverio/webdriverio/pull/15799) test(eslint-plugin-wdio): compose recommended globals instead of snapshotting them ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`
+  * [#15801](https://github.com/webdriverio/webdriverio/pull/15801) test(cli): drop dead helpers and assertions that cannot fail ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-shared-store-service`
+  * [#15777](https://github.com/webdriverio/webdriverio/pull/15777) test(shared-store-service): assert the store over HTTP ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-repl`
+  * [#15775](https://github.com/webdriverio/webdriverio/pull/15775) test(repl): assert context, exit, and command results ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-reporter`
+  * [#15776](https://github.com/webdriverio/webdriverio/pull/15776) test(reporter): repair vacuous diff assertions and drop dead seams ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-protocols`, `wdio-reporter`, `webdriver`
+  * [#15743](https://github.com/webdriverio/webdriverio/pull/15743) refactor: extract /scripts into internal infra packages ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-dot-reporter`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-lighthouse-service`, `wdio-reporter`, `wdio-sauce-service`, `wdio-shared-store-service`, `wdio-testingbot-service`
+  * [#15695](https://github.com/webdriverio/webdriverio/pull/15695) chore: remove pnpm overrides - v10 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-browser-runner`, `wdio-protocols`, `wdio-utils`, `webdriver`
+  * [#15694](https://github.com/webdriverio/webdriverio/pull/15694) chore: bump drivers & cddl ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `create-wdio`, `eslint-plugin-wdio`, `wdio-allure-reporter`, `wdio-appium-service`, `wdio-browser-runner`, `wdio-cli`, `wdio-concise-reporter`, `wdio-config`, `wdio-cucumber-framework`, `wdio-dot-reporter`, `wdio-firefox-profile-service`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-json-reporter`, `wdio-junit-reporter`, `wdio-local-runner`, `wdio-logger`, `wdio-mocha-framework`, `wdio-repl`, `wdio-reporter`, `wdio-runner`, `wdio-sauce-service`, `wdio-shared-store-service`, `wdio-smoke-test-cjs-service`, `wdio-smoke-test-reporter`, `wdio-smoke-test-service`, `wdio-spec-reporter`, `wdio-static-server-service`, `wdio-sumologic-reporter`, `wdio-testingbot-service`, `wdio-types`, `wdio-utils`, `wdio-webdriver-mock-service`, `wdio-xvfb`, `webdriver`, `webdriverio`
+  * [#15673](https://github.com/webdriverio/webdriverio/pull/15673) chore: refresh root package.json dependencies for v10 ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-cli`, `wdio-protocols`, `wdio-reporter`, `webdriver`, `webdriverio`
+  * [#15671](https://github.com/webdriverio/webdriverio/pull/15671) Adopt agent development infrastructure (Phase 1 + 2) ([@christian-bromann](https://github.com/christian-bromann))
+* `eslint-plugin-wdio`, `wdio-jasmine-framework`, `webdriverio`
+  * [#15670](https://github.com/webdriverio/webdriverio/pull/15670) chore: migrate repository linting from ESLint to Oxlint ([@christian-bromann](https://github.com/christian-bromann))
+
+#### Committers: 9
+- Christian Bromann ([@christian-bromann](https://github.com/christian-bromann))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Edgars Eglītis ([@eglitise](https://github.com/eglitise))
+- JustasM ([@JustasMonkev](https://github.com/JustasMonkev))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Matteo Pietro Dazzi ([@ilteoood](https://github.com/ilteoood))
+- Plone Mraz ([@PloneMraz](https://github.com/PloneMraz))
+- [@devangpratap](https://github.com/devangpratap)
+- [@goosewobbler](https://github.com/goosewobbler)
+
+
+## v9.32.0 (2026-09-20)
+
+#### :rocket: New Feature
+* `wdio-cli`, `wdio-runner`, `wdio-types`, `wdio-utils`
+  * [#15092](https://github.com/webdriverio/webdriverio/pull/15092) feat(profiling): add support for cpu and heap profiling ([@mccmrunal](https://github.com/mccmrunal))
+* `webdriverio`
+  * [#15614](https://github.com/webdriverio/webdriverio/pull/15614) feat(webdriverio): add acceptDialog and dismissDialog for mobile permission dialogs ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`
+  * [#15528](https://github.com/webdriverio/webdriverio/pull/15528) feat(create-wdio): add Dioxus service to the project creation wizard and docs ([@goosewobbler](https://github.com/goosewobbler))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15632](https://github.com/webdriverio/webdriverio/pull/15632) fix(webdriverio): make addLocatorStrategy work on multi-remote browsers ([@nikolas-sapa](https://github.com/nikolas-sapa))
+  * [#15637](https://github.com/webdriverio/webdriverio/pull/15637) fix(webdriverio): keep a valid top-level context on switchToParentFrame ([@PloneMraz](https://github.com/PloneMraz))
+  * [#15638](https://github.com/webdriverio/webdriverio/pull/15638) fix(webdriverio): release the session-manager registration on removeListeners ([@PloneMraz](https://github.com/PloneMraz))
+  * [#15073](https://github.com/webdriverio/webdriverio/pull/15073) fix: resolve mock state error and race condition (#15072) ([@mccmrunal](https://github.com/mccmrunal))
+  * [#15089](https://github.com/webdriverio/webdriverio/pull/15089) fix(webdriverio): correctly use navigation ID for networkIdle wait ([@mccmrunal](https://github.com/mccmrunal))
+  * [#15621](https://github.com/webdriverio/webdriverio/pull/15621) fix(webdriverio): avoid retaining closed browser instances ([@ML642](https://github.com/ML642))
+  * [#15624](https://github.com/webdriverio/webdriverio/pull/15624) fix(webdriverio): let switchToParentFrame recover a destroyed context ([@PloneMraz](https://github.com/PloneMraz))
+  * [#15615](https://github.com/webdriverio/webdriverio/pull/15615) fix(webdriverio): use BiDi accessibility locator for aria selectors ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15627](https://github.com/webdriverio/webdriverio/pull/15627) fix(webdriverio): re-throw original stale element error when refetch fails ([@nikolas-sapa](https://github.com/nikolas-sapa))
+  * [#15629](https://github.com/webdriverio/webdriverio/pull/15629) fix(webdriverio): apply throttleNetwork conditions to service workers ([@nikolas-sapa](https://github.com/nikolas-sapa))
+  * [#15613](https://github.com/webdriverio/webdriverio/pull/15613) fix(webdriverio): handle dynamic function payloads in mock.respond ([@christian-bromann](https://github.com/christian-bromann))
+  * [#15574](https://github.com/webdriverio/webdriverio/pull/15574) fix(webdriverio): honor getHTML exclusion options ([@lucasmariano003-wq](https://github.com/lucasmariano003-wq))
+  * [#15573](https://github.com/webdriverio/webdriverio/pull/15573) fix(webdriverio): recover owning window after nested frame destruction ([@lucasmariano003-wq](https://github.com/lucasmariano003-wq))
+  * [#15607](https://github.com/webdriverio/webdriverio/pull/15607) fix(webdriverio): allow URLPattern as browser.mock url ([@Yash121l](https://github.com/Yash121l))
+  * [#15575](https://github.com/webdriverio/webdriverio/pull/15575) fix(webdriverio): retain detached-first shadow hosts ([@lucasmariano003-wq](https://github.com/lucasmariano003-wq))
+* Other
+  * [#15639](https://github.com/webdriverio/webdriverio/pull/15639) fix(webdriverio): preserve original stale-element error when refetch fails (Closes [#15550](https://github.com/webdriverio/webdriverio/issues/15550)) ([@nikolas-sapa](https://github.com/nikolas-sapa))
+  * [#15126](https://github.com/webdriverio/webdriverio/pull/15126) fix(wdio-protocols): map getActiveElement return type to ElementRefer… ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-junit-reporter`
+  * [#15616](https://github.com/webdriverio/webdriverio/pull/15616) fix(junit-reporter): uniquely associate Jasmine filename-only suites ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-sumologic-reporter`
+  * [#15617](https://github.com/webdriverio/webdriverio/pull/15617) fix(sumo-reporter):sumologic reporter bounded retries ([@ML642](https://github.com/ML642))
+* `wdio-utils`
+  * [#15619](https://github.com/webdriverio/webdriverio/pull/15619) fix(wdio-utils): settle some and every on all-hole arrays ([@devangpratap](https://github.com/devangpratap))
+  * [#15625](https://github.com/webdriverio/webdriverio/pull/15625) fix(utils): clean up incomplete driver cache dir before retrying install ([@nikolas-sapa](https://github.com/nikolas-sapa))
+  * [#15577](https://github.com/webdriverio/webdriverio/pull/15577) fix(wdio-utils): preserve sparse array length in async map ([@ML642](https://github.com/ML642))
+  * [#15596](https://github.com/webdriverio/webdriverio/pull/15596) fix(utils): encode custom plugin file URLs ([@ML642](https://github.com/ML642))
+* `wdio-browser-runner`
+  * [#15620](https://github.com/webdriverio/webdriverio/pull/15620) fix(mock-factory): correct original module type ([@ML642](https://github.com/ML642))
+* `wdio-allure-reporter`, `wdio-utils`
+  * [#15610](https://github.com/webdriverio/webdriverio/pull/15610) fix(wdio-allure-reporter): stabilize Allure historyId across browser versions ([@christian-bromann](https://github.com/christian-bromann))
+* `create-wdio`
+  * [#15612](https://github.com/webdriverio/webdriverio/pull/15612) fix(create-wdio): generate tsconfig without overwriting or breaking root extends ([@christian-bromann](https://github.com/christian-bromann))
+* `webdriver`
+  * [#15611](https://github.com/webdriverio/webdriverio/pull/15611) fix(webdriver): enable followRedirects for BiDi connections ([@christian-bromann](https://github.com/christian-bromann))
+* `wdio-lighthouse-service`, `wdio-runner`, `webdriverio`
+  * [#15317](https://github.com/webdriverio/webdriverio/pull/15317) Add undefined to getInstance as possible return type ([@la122](https://github.com/la122))
+* `wdio-allure-reporter`
+  * [#15094](https://github.com/webdriverio/webdriverio/pull/15094) fix(allure-reporter): classify AssertionError by error name property ([@mcwanza](https://github.com/mcwanza))
+  * [#15551](https://github.com/webdriverio/webdriverio/pull/15551) fix(wdio-allure-reporter): write results incrementally instead of only at runner end ([@devangpratap](https://github.com/devangpratap))
+* `wdio-cli`, `wdio-local-runner`, `wdio-types`
+  * [#15595](https://github.com/webdriverio/webdriverio/pull/15595) fix(@wdio/local-runner): report a non-zero exit code for signal terminated workers ([@nikolas-sapa](https://github.com/nikolas-sapa))
+
+#### :nail_care: Polish
+* `wdio-utils`
+  * [#15609](https://github.com/webdriverio/webdriverio/pull/15609) fix(utils): include execution context in timeout errors ([@lucasmariano003-wq](https://github.com/lucasmariano003-wq))
+
+#### :memo: Documentation
+* Other
+  * [#15642](https://github.com/webdriverio/webdriverio/pull/15642) fix(webdriverio): fix AI assistant reset button overlap with scrollbar ([@sh011](https://github.com/sh011))
+  * [#15542](https://github.com/webdriverio/webdriverio/pull/15542) docs: add RobotActions to the cloud services page ([@krishtoautomate](https://github.com/krishtoautomate))
+* `wdio-browser-runner`, `wdio-utils`
+  * [#15074](https://github.com/webdriverio/webdriverio/pull/15074) docs: clarify component testing coverage setup ([@mccmrunal](https://github.com/mccmrunal))
+* `webdriverio`
+  * [#15601](https://github.com/webdriverio/webdriverio/pull/15601) docs(webdriverio): add iterating over elements section to $ ([@devangpratap](https://github.com/devangpratap))
+
+#### :house: Internal
+* Other
+  * [#15636](https://github.com/webdriverio/webdriverio/pull/15636) ci: skip unrelated suites and shrink the PR test matrix ([@christian-bromann](https://github.com/christian-bromann))
+* `webdriverio`
+  * [#15604](https://github.com/webdriverio/webdriverio/pull/15604) chore(deps): update archiver to v8 ([@scs0209](https://github.com/scs0209))
+
+#### Committers: 17
+- Cesar Montoya ([@mcwanza](https://github.com/mcwanza))
+- Changsu Seong ([@scs0209](https://github.com/scs0209))
+- Christian Bromann ([@christian-bromann](https://github.com/christian-bromann))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Jack VanSickle ([@jackvansickle1](https://github.com/jackvansickle1))
+- Krish Pavuluri ([@krishtoautomate](https://github.com/krishtoautomate))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Martsin Lazouski ([@ML642](https://github.com/ML642))
+- Nikolas Sapalidis ([@nikolas-sapa](https://github.com/nikolas-sapa))
+- Plone Mraz ([@PloneMraz](https://github.com/PloneMraz))
+- Shrey Shekhar ([@sh011](https://github.com/sh011))
+- Sri Harsha ([@harsha509](https://github.com/harsha509))
+- Yash Lunawat ([@Yash121l](https://github.com/Yash121l))
+- [@devangpratap](https://github.com/devangpratap)
+- [@goosewobbler](https://github.com/goosewobbler)
+- [@la122](https://github.com/la122)
+- [@lucasmariano003-wq](https://github.com/lucasmariano003-wq)
+
+
+## v9.31.9 (2026-09-13)
+
+#### :rocket: New Feature
+* `wdio-utils`
+  * [#15563](https://github.com/webdriverio/webdriverio/pull/15563) feat(@wdio/utils): support CHROMEDRIVER_CDNURL for custom driver mirrors ([@mccmrunal](https://github.com/mccmrunal))
+
+#### :bug: Bug Fix
+* `wdio-utils`
+  * [#15586](https://github.com/webdriverio/webdriverio/pull/15586) fix: Upgrade EdgeDriver accounting browser's version missing corresponding driver architecture ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :house: Internal
+* `wdio-utils`
+  * [#15586](https://github.com/webdriverio/webdriverio/pull/15586) fix: Upgrade EdgeDriver accounting browser's version missing corresponding driver architecture ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### Committers: 2
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+
+
+## v9.31.8 (2026-09-12)
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15533](https://github.com/webdriverio/webdriverio/pull/15533) fix(webdriverio): restore nested/Shadow DOM scrolling in scrollIntoView ([@mccmrunal](https://github.com/mccmrunal))
+
+#### Committers: 2
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Martsin Lazouski ([@ML642](https://github.com/ML642))
+
+
+## v9.31.7 (2026-09-07)
+
+#### :rocket: New Feature
+* `wdio-utils`, `webdriverio`
+  * [#15571](https://github.com/webdriverio/webdriverio/pull/15571) feat: Move select into BETA with env flag still ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :house: Internal
+* `wdio-browser-runner`, `wdio-mocha-framework`
+  * [#15566](https://github.com/webdriverio/webdriverio/pull/15566) chore(deps): Update to mocha 11 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### Committers: 1
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+
+## v9.31.6 (2026-09-06)
+
+#### :rocket: New Feature
+* `create-wdio`
+  * [#15539](https://github.com/webdriverio/webdriverio/pull/15539) Third party service null-driver ([@ccharnkij](https://github.com/ccharnkij))
+
+#### :bug: Bug Fix
+* `wdio-sumologic-reporter`
+  * [#15547](https://github.com/webdriverio/webdriverio/pull/15547) fix(sumologic-reporter): retry after failed sync ([@Fnine59](https://github.com/Fnine59))
+* `wdio-utils`
+  * [#15562](https://github.com/webdriverio/webdriverio/pull/15562) fix(wdio-utils): track dialog listener lifecycle ([@Fnine59](https://github.com/Fnine59))
+* `webdriverio`
+  * [#15470](https://github.com/webdriverio/webdriverio/pull/15470) fix(webdriverio): clear shadow roots when navigation starts ([@iamhaseebn](https://github.com/iamhaseebn))
+  * [#15552](https://github.com/webdriverio/webdriverio/pull/15552) fix(webdriverio):reject invalid timeout values ([@ML642](https://github.com/ML642))
+* `wdio-config`
+  * [#15561](https://github.com/webdriverio/webdriverio/pull/15561) fix(wdio-config): apply keyword exclude to grouped specs ([@harsha509](https://github.com/harsha509))
+* `webdriver`
+  * [#15559](https://github.com/webdriverio/webdriverio/pull/15559) fix(webdriver): keep new driver PID after reloadSession ([@harsha509](https://github.com/harsha509))
+
+#### :nail_care: Polish
+* `wdio-utils`
+  * [#15562](https://github.com/webdriverio/webdriverio/pull/15562) fix(wdio-utils): track dialog listener lifecycle ([@Fnine59](https://github.com/Fnine59))
+
+#### :memo: Documentation
+* `webdriverio`
+  * [#15564](https://github.com/webdriverio/webdriverio/pull/15564) docs: Dialog auto dismis and once ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* Other
+  * [#15301](https://github.com/webdriverio/webdriverio/pull/15301) Feat/add mobile flutter docs remastered ([@Kauanldsbarbosa](https://github.com/Kauanldsbarbosa))
+  * [#15557](https://github.com/webdriverio/webdriverio/pull/15557) docs(devtools): document Python trace mode, granularity and retention ([@vishnuv688](https://github.com/vishnuv688))
+
+#### :house: Internal
+* Other
+  * [#15549](https://github.com/webdriverio/webdriverio/pull/15549) chore(deps): bump actions/checkout from 6.0.3 to 7.0.1 in the major-deps-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15555](https://github.com/webdriverio/webdriverio/pull/15555) chore(deps): bump @xmldom/xmldom from 0.9.8 to 0.9.12 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15548](https://github.com/webdriverio/webdriverio/pull/15548) chore(deps): bump lewagon/wait-on-check-action from 1.8.0 to 1.9.1 in the minor-deps-updates group ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `wdio-browser-runner`, `wdio-config`, `wdio-runner`, `wdio-utils`, `webdriver`
+  * [#15509](https://github.com/webdriverio/webdriverio/pull/15509) chore(deps): bump deepmerge-ts from 7.1.5 to 8.0.0 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* `wdio-browser-runner`
+  * [#15556](https://github.com/webdriverio/webdriverio/pull/15556) chore(deps): Upgrade to svelte 5 + unskip e2e ([@dprevost-LMI](https://github.com/dprevost-LMI))
+  * [#15334](https://github.com/webdriverio/webdriverio/pull/15334) chore(deps): bump vite from 5.4.21 to 6.4.3 ([@dependabot[bot]](https://github.com/apps/dependabot))
+
+#### Committers: 8
+- Chanatan Charnkijtawarush ([@ccharnkij](https://github.com/ccharnkij))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Fnine59 ([@Fnine59](https://github.com/Fnine59))
+- Haseeb Nazir ([@iamhaseebn](https://github.com/iamhaseebn))
+- Kauan Barbosa ([@Kauanldsbarbosa](https://github.com/Kauanldsbarbosa))
+- Martsin Lazouski ([@ML642](https://github.com/ML642))
+- Sri Harsha ([@harsha509](https://github.com/harsha509))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+
+
+## v9.31.5 (2026-08-29)
+
+#### :rocket: New Feature
+* `wdio-utils`, `webdriverio`
+  * [#15538](https://github.com/webdriverio/webdriverio/pull/15538) feat: UNSTABLE Review Multi-remote `select` implementations and remove filter ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :bug: Bug Fix
+* `wdio-utils`, `webdriverio`
+  * [#15538](https://github.com/webdriverio/webdriverio/pull/15538) feat: UNSTABLE Review Multi-remote `select` implementations and remove filter ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `webdriverio`
+  * [#15535](https://github.com/webdriverio/webdriverio/pull/15535) fix(webdriverio): handle BiDi no such node errors as stale ([@Fnine59](https://github.com/Fnine59))
+  * [#15537](https://github.com/webdriverio/webdriverio/pull/15537) fix(webdriverio): require all classic cookie filter attributes ([@ML642](https://github.com/ML642))
+
+#### :memo: Documentation
+* `wdio-protocols`, `webdriverio`
+  * [#15536](https://github.com/webdriverio/webdriverio/pull/15536) Docs/actions api guidance ([@ML642](https://github.com/ML642))
+
+#### Committers: 3
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Fnine59 ([@Fnine59](https://github.com/Fnine59))
+- Martsin Lazouski ([@ML642](https://github.com/ML642))
+
+
+## v9.31.4 (2026-08-27)
+
+#### :rocket: New Feature
+* `webdriverio`
+  * [#15532](https://github.com/webdriverio/webdriverio/pull/15532) feat: Beta ElementArray under feature flag for `multiRemote.$()` e.g. MultiRemoteElement[] ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-allure-reporter`
+  * [#15278](https://github.com/webdriverio/webdriverio/pull/15278) feat(wdio-allure-reporter): add support for global errors and global attachments ([@todti](https://github.com/todti))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15478](https://github.com/webdriverio/webdriverio/pull/15478) fix(webdriverio): track document element per context ([@Badisi](https://github.com/Badisi))
+* `webdriver`
+  * [#15516](https://github.com/webdriverio/webdriverio/pull/15516) fix(webdriver): serialize IPv6 BiDi WebSocket candidates correctly ([@ML642](https://github.com/ML642))
+
+#### :memo: Documentation
+* `webdriverio`
+  * [#15531](https://github.com/webdriverio/webdriverio/pull/15531) docs(webdriverio): document the $ async iterator methods ([@devangpratap](https://github.com/devangpratap))
+
+#### Committers: 5
+- Alex ([@todti](https://github.com/todti))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Martsin Lazouski ([@ML642](https://github.com/ML642))
+- [@Badisi](https://github.com/Badisi)
+- [@devangpratap](https://github.com/devangpratap)
+
+
+## v9.31.3 (2026-08-25)
+
+#### :bug: Bug Fix
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`, `wdio-webdriver-mock-service`
+  * [#15518](https://github.com/webdriverio/webdriverio/pull/15518) fix: typing for `expect-wdio/api` ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-local-runner`, `wdio-runner`
+  * [#15513](https://github.com/webdriverio/webdriverio/pull/15513) fix(@wdio/local-runner): retry spec files when session creation fails ([@lorenaskosinskas](https://github.com/lorenaskosinskas))
+
+#### :memo: Documentation
+* Other
+  * [#15524](https://github.com/webdriverio/webdriverio/pull/15524) docs(website): added Serenity/JS HTML Reporter ([@jan-molak](https://github.com/jan-molak))
+  * [#15526](https://github.com/webdriverio/webdriverio/pull/15526) docs(devtools): document the Python adapter as language tabs on the S… ([@vishnuv688](https://github.com/vishnuv688))
+  * [#15520](https://github.com/webdriverio/webdriverio/pull/15520) doc: A11y doc update ([@vishnuv688](https://github.com/vishnuv688))
+* `webdriverio`
+  * [#15510](https://github.com/webdriverio/webdriverio/pull/15510) docs(sponsor): add Momentic as Premium sponsor ([@christian-bromann](https://github.com/christian-bromann))
+
+#### :house: Internal
+* [#15517](https://github.com/webdriverio/webdriverio/pull/15517) fix(docs): unbreak non-English docs builds after flowchart component removal ([@AutomatedTester](https://github.com/AutomatedTester))
+
+#### Committers: 6
+- Christian Bromann ([@christian-bromann](https://github.com/christian-bromann))
+- David Burns ([@AutomatedTester](https://github.com/AutomatedTester))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Jan Molak ([@jan-molak](https://github.com/jan-molak))
+- Lorenas ([@lorenaskosinskas](https://github.com/lorenaskosinskas))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+
+
+## v9.31.2 (2026-08-21)
+
+#### :rocket: New Feature
+* `wdio-types`, `wdio-utils`, `webdriverio`
+  * [#15459](https://github.com/webdriverio/webdriverio/pull/15459) feat: UNSTABLE Enhance multi-remote instance/element support with `select` & `filter` ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-allure-reporter`
+  * [#15514](https://github.com/webdriverio/webdriverio/pull/15514) Add title path ([@formaceft-93](https://github.com/formaceft-93))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15479](https://github.com/webdriverio/webdriverio/pull/15479) fix(webdriverio): record matching mock responses even when not blocked ([@Badisi](https://github.com/Badisi))
+* `wdio-config`
+  * [#15511](https://github.com/webdriverio/webdriverio/pull/15511) fix: add .cts to supported file extensions ([@mauriciolauffer](https://github.com/mauriciolauffer))
+
+#### :nail_care: Polish
+* `create-wdio`
+  * [#15515](https://github.com/webdriverio/webdriverio/pull/15515) fix(create-wdio): install @serenity-js/html-reporter instead of @senity-js/serenity-bdd ([@jan-molak](https://github.com/jan-molak))
+
+#### Committers: 5
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Dmitrii ([@formaceft-93](https://github.com/formaceft-93))
+- Jan Molak ([@jan-molak](https://github.com/jan-molak))
+- Mauricio Lauffer ([@mauriciolauffer](https://github.com/mauriciolauffer))
+- [@Badisi](https://github.com/Badisi)
+
+
+## v9.31.0 (2026-08-18)
+
+#### :rocket: New Feature
+* `eslint-plugin-wdio`, `wdio-browser-runner`, `wdio-globals`, `wdio-jasmine-framework`, `wdio-local-runner`, `wdio-runner`
+  * [#15471](https://github.com/webdriverio/webdriverio/pull/15471) feat: Expect's multi-element `$()` support ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :bug: Bug Fix
+* `wdio-utils`
+  * [#15480](https://github.com/webdriverio/webdriverio/pull/15480) fix(@wdio/utils): keep an undefined element that passes filter ([@luantaraschi](https://github.com/luantaraschi))
+* `wdio-utils`, `webdriver`
+  * [#15488](https://github.com/webdriverio/webdriverio/pull/15488) fix: respect WEBDRIVER_CACHE_DIR during driver setup ([@shixi-li](https://github.com/shixi-li))
+* `webdriver`
+  * [#15504](https://github.com/webdriverio/webdriverio/pull/15504) fix(webdriver): retry requests aborted by connectionRetryTimeout ([@birtles](https://github.com/birtles))
+* `wdio-cli`
+  * [#15474](https://github.com/webdriverio/webdriverio/pull/15474) feat(cli/repl): support TS files ([@Delta456](https://github.com/Delta456))
+* `wdio-browser-runner`, `webdriverio`
+  * [#15468](https://github.com/webdriverio/webdriverio/pull/15468) chore(pnpm): fix failing pnpm tests ([@Delta456](https://github.com/Delta456))
+* `webdriverio`
+  * [#15477](https://github.com/webdriverio/webdriverio/pull/15477) fix(webdriverio): reset current context when browsing context is destroyed ([@Badisi](https://github.com/Badisi))
+  * [#15473](https://github.com/webdriverio/webdriverio/pull/15473) fix(webdriverio): scroll by deltaX/deltaY in scrollIntoView wheel action ([@wswebcreation](https://github.com/wswebcreation))
+  * [#15350](https://github.com/webdriverio/webdriverio/pull/15350) fix(webdriverio): guard ShadowRootManager preload script against partial-Bidi remotes ([@navin772](https://github.com/navin772))
+* `wdio-utils`, `webdriverio`
+  * [#15493](https://github.com/webdriverio/webdriverio/pull/15493) fix(wdio-utils): compose element command overrides ([@KuznetsovRoman](https://github.com/KuznetsovRoman))
+* `wdio-allure-reporter`
+  * [#15502](https://github.com/webdriverio/webdriverio/pull/15502) fix(allure-reporter): don't collapse Windows paths to drive letter in toPackageLabel ([@mccmrunal](https://github.com/mccmrunal))
+* Other
+  * [#15463](https://github.com/webdriverio/webdriverio/pull/15463) Fix/win pnpm spawn enoent ([@mccmrunal](https://github.com/mccmrunal))
+
+#### :memo: Documentation
+* Other
+  * [#15492](https://github.com/webdriverio/webdriverio/pull/15492) docs(website): publish a machine-readable surface and un-hide the flowcharts ([@AutomatedTester](https://github.com/AutomatedTester))
+  * [#15489](https://github.com/webdriverio/webdriverio/pull/15489) doc: A11y documentation update ([@vishnuv688](https://github.com/vishnuv688))
+* `webdriverio`
+  * [#15490](https://github.com/webdriverio/webdriverio/pull/15490) docs: make generated API command pages machine-readable ([@AutomatedTester](https://github.com/AutomatedTester))
+  * [#15491](https://github.com/webdriverio/webdriverio/pull/15491) docs: fix API doc generator output for machine extraction ([@AutomatedTester](https://github.com/AutomatedTester))
+* `wdio-appium-service`
+  * [#15501](https://github.com/webdriverio/webdriverio/pull/15501) docs(appium-service): document appiumStartTimeout option ([@wswebcreation](https://github.com/wswebcreation))
+
+#### :house: Internal
+* [#15503](https://github.com/webdriverio/webdriverio/pull/15503) ci: Force `'no-sandbox'` on macOS fixing `Failed to create a session` for Chromiun ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* [#15484](https://github.com/webdriverio/webdriverio/pull/15484) ci: fix alpine e2e issue by freezing pnpm to 10 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* [#15463](https://github.com/webdriverio/webdriverio/pull/15463) Fix/win pnpm spawn enoent ([@mccmrunal](https://github.com/mccmrunal))
+
+#### Committers: 13
+- Brian Birtles ([@birtles](https://github.com/birtles))
+- David Burns ([@AutomatedTester](https://github.com/AutomatedTester))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- Dimitar Mihaylov ([@mitk0936](https://github.com/mitk0936))
+- Luan Taraschi ([@luantaraschi](https://github.com/luantaraschi))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Navin Chandra ([@navin772](https://github.com/navin772))
+- Roman Kuznetsov ([@KuznetsovRoman](https://github.com/KuznetsovRoman))
+- Shixi Li ([@shixi-li](https://github.com/shixi-li))
+- Swastik Baranwal ([@Delta456](https://github.com/Delta456))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+- Wim Selles ([@wswebcreation](https://github.com/wswebcreation))
+- [@Badisi](https://github.com/Badisi)
+
+
+## v9.30.1 (2026-08-03)
+
+#### :bug: Bug Fix
+* `wdio-browser-runner`, `wdio-types`, `webdriver`
+  * [#15461](https://github.com/webdriverio/webdriverio/pull/15461) fix(webdriver): make WebDriver Bidi response timeout configurable ([@mccmrunal](https://github.com/mccmrunal))
+* `webdriver`
+  * [#15221](https://github.com/webdriverio/webdriverio/pull/15221) fix(webdriver): guard Object.keys call on stringified request body ([@mnaoumov](https://github.com/mnaoumov))
+* Other
+  * [#15455](https://github.com/webdriverio/webdriverio/pull/15455) Fix/deps security overrides ([@mccmrunal](https://github.com/mccmrunal))
+  * [#15453](https://github.com/webdriverio/webdriverio/pull/15453) Fix/deps security overrides ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-junit-reporter`
+  * [#15452](https://github.com/webdriverio/webdriverio/pull/15452) fix(wdio-junit-reporter): report scenarios as testcases with cucumber Opts.scenarioLevelReporter ([@mccmrunal](https://github.com/mccmrunal))
+* `eslint-plugin-wdio`
+  * [#15441](https://github.com/webdriverio/webdriverio/pull/15441) fix: Update es-lint-plugin globals peer deps ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :memo: Documentation
+* [#15369](https://github.com/webdriverio/webdriverio/pull/15369) Added trace player devtools doc for webpage ([@vishnuv688](https://github.com/vishnuv688))
+
+#### :house: Internal
+* Other
+  * [#15448](https://github.com/webdriverio/webdriverio/pull/15448) chore(deps): bump preact from 10.26.9 to 10.29.8 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15447](https://github.com/webdriverio/webdriverio/pull/15447) chore(deps): bump minimatch from 10.1.1 to 10.2.5 ([@dependabot[bot]](https://github.com/apps/dependabot))
+  * [#15451](https://github.com/webdriverio/webdriverio/pull/15451) fix(deps): pin fast-xml-parser to 5.2.5 on the AWS SDK path to fix docs deploy ([@AutomatedTester](https://github.com/AutomatedTester))
+* `wdio-browserstack-service`
+  * [#15404](https://github.com/webdriverio/webdriverio/pull/15404) chore(@wdio/browserstack-service): remove service from this repository ([@christian-bromann](https://github.com/christian-bromann))
+
+#### Committers: 7
+- Christian Bromann ([@christian-bromann](https://github.com/christian-bromann))
+- David Burns ([@AutomatedTester](https://github.com/AutomatedTester))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Michael Naumov ([@mnaoumov](https://github.com/mnaoumov))
+- Mykyta Chursin ([@unickq](https://github.com/unickq))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+
+
+## v9.30.0 (2026-07-21)
+
+#### :eyeglasses: Spec Compliancy
+* `wdio-protocols`, `webdriver`
+  * [#15370](https://github.com/webdriverio/webdriverio/pull/15370) fix: update CDDL and regenerate to fix null litteral ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15400](https://github.com/webdriverio/webdriverio/pull/15400) fix(webdriverio): stop unrelated shadow roots leaking into scoped element lookups ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-browser-runner`, `wdio-utils`
+  * [#15399](https://github.com/webdriverio/webdriverio/pull/15399) fix(deps): bump geckodriver to 6.1.1 to fix geckoDriverVersion CLI leak ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-allure-reporter`
+  * [#15390](https://github.com/webdriverio/webdriverio/pull/15390) PR: Bug Fix 🐛fix(allure-reporter): attach suite-level before/after all hook steps to every test ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-browserstack-service`
+  * [#15376](https://github.com/webdriverio/webdriverio/pull/15376) fix(browserstack-service): report mocha hooks in the CLI/testhub flow [SDK-6809] ([@pranay-v29](https://github.com/pranay-v29))
+  * [#15381](https://github.com/webdriverio/webdriverio/pull/15381) fix(browserstack-service): coerce stringified boolean accessibility options ([@xxshubhamxx](https://github.com/xxshubhamxx))
+  * [#15382](https://github.com/webdriverio/webdriverio/pull/15382) fix(browserstack-service): finalize orphaned test runs on interrupted exit (SDK-4671) ([@xxshubhamxx](https://github.com/xxshubhamxx))
+  * [#15383](https://github.com/webdriverio/webdriverio/pull/15383) fix(a11y): route WDIO CLI-flow App Automate sessions to app-accessibility (SDK-3813) ([@xxshubhamxx](https://github.com/xxshubhamxx))
+  * [#15380](https://github.com/webdriverio/webdriverio/pull/15380) fix(browserstack-service): skip a11y scan for BiDi window/context commands (SDK-5047) ([@xxshubhamxx](https://github.com/xxshubhamxx))
+  * [#15379](https://github.com/webdriverio/webdriverio/pull/15379) fix(wdio-browserstack-service): ship a11y Browser type augmentations ([@harshit-browserstack](https://github.com/harshit-browserstack))
+* `wdio-protocols`, `webdriver`
+  * [#15370](https://github.com/webdriverio/webdriverio/pull/15370) fix: update CDDL and regenerate to fix null litteral ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :house: Internal
+* `wdio-config`
+  * [#15398](https://github.com/webdriverio/webdriverio/pull/15398) fix(deps): patch minimatch instances missed by prior override ([@mccmrunal](https://github.com/mccmrunal))
+* Other
+  * [#15396](https://github.com/webdriverio/webdriverio/pull/15396) Mrunal/vulnerabilities fixes ([@mccmrunal](https://github.com/mccmrunal))
+* `wdio-browserstack-service`, `webdriver`
+  * [#15393](https://github.com/webdriverio/webdriverio/pull/15393) chore: Fixed vulnerabilities ([@mccmrunal](https://github.com/mccmrunal))
+
+#### Committers: 6
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Pranay Varma ([@pranay-v29](https://github.com/pranay-v29))
+- Shubham Garg ([@xxshubhamxx](https://github.com/xxshubhamxx))
+- Wim Selles ([@wswebcreation](https://github.com/wswebcreation))
+- [@harshit-browserstack](https://github.com/harshit-browserstack)
+
+
+## v9.29.1 (2026-06-26)
+
+#### :rocket: New Feature
+* `wdio-browserstack-service`
+  * [#15335](https://github.com/webdriverio/webdriverio/pull/15335) feat(browserstack-service): one-to-many Test-Case-ID tagging (setCust… ([@anish353](https://github.com/anish353))
+
+#### :bug: Bug Fix
+* `wdio-logger`
+  * [#15354](https://github.com/webdriverio/webdriverio/pull/15354) fix: Force logger build by adjusting security doc on pattern masking ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `webdriverio`
+  * [#15353](https://github.com/webdriverio/webdriverio/pull/15353) fix(webdriverio): skip isConnected check for non-shadow element scope in BiDi ([@mccmrunal](https://github.com/mccmrunal))
+
+#### :memo: Documentation
+* `wdio-logger`
+  * [#15354](https://github.com/webdriverio/webdriverio/pull/15354) fix: Force logger build by adjusting security doc on pattern masking ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* Other
+  * [#15341](https://github.com/webdriverio/webdriverio/pull/15341) docs(tracing): Add blog post for Tracing Mode in `devtools` service ([@Winify](https://github.com/Winify))
+
+#### Committers: 5
+- Anish Kumar Sinha ([@anish353](https://github.com/anish353))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Shubham Garg ([@xxshubhamxx](https://github.com/xxshubhamxx))
+- Vince Graics ([@Winify](https://github.com/Winify))
+
+
+## v9.29.0 (2026-06-18)
+
+#### :bug: Bug Fix
+* `webdriverio`
+  * [#15293](https://github.com/webdriverio/webdriverio/pull/15293) fix: make `waitForResponse` wait for networkCollector's response ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-utils`
+  * [#15305](https://github.com/webdriverio/webdriverio/pull/15305) fix(wdio-utils): use supported EdgeDriver CDN ([@cyphercodes](https://github.com/cyphercodes))
+
+#### :nail_care: Polish
+* `wdio-browserstack-service`
+  * [#15316](https://github.com/webdriverio/webdriverio/pull/15316) Fix/wdio reloadsession finishedmetadata ([@shivamku-BS](https://github.com/shivamku-BS))
+
+#### :house: Internal
+* [#15320](https://github.com/webdriverio/webdriverio/pull/15320) ci: fix ubuntu e2e failures ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### Committers: 6
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Rayan Salhab ([@cyphercodes](https://github.com/cyphercodes))
+- Shivam Kumar ([@shivamku-BS](https://github.com/shivamku-BS))
+- Vince Graics ([@Winify](https://github.com/Winify))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+
+
+## v9.28.0 (2026-06-10)
+
+#### :bug: Bug Fix
+* [#15291](https://github.com/webdriverio/webdriverio/pull/15291) fix: logger not cjs compliant ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### :house: Internal
+* Other
+  * [#15292](https://github.com/webdriverio/webdriverio/pull/15292) ci: Fix unzip hangs issue with node 24.16 ([@dprevost-LMI](https://github.com/dprevost-LMI))
+* `wdio-browserstack-service`, `wdio-protocols`, `webdriver`
+  * [#15283](https://github.com/webdriverio/webdriverio/pull/15283) fix: main pipeline failures & browserStack `config.accessibility` & more ([@dprevost-LMI](https://github.com/dprevost-LMI))
+
+#### Committers: 9
+- Aakash Hotchandani ([@AakashHotchandani](https://github.com/AakashHotchandani))
+- David Prevost ([@dprevost-LMI](https://github.com/dprevost-LMI))
+- JinHyuk Sung ([@sjh9714](https://github.com/sjh9714))
+- Kamalpreet Kaur ([@kamal-kaur04](https://github.com/kamal-kaur04))
+- MRUNAL CHAUDHARI ([@mccmrunal](https://github.com/mccmrunal))
+- Noritaka Kobayashi ([@noritaka1166](https://github.com/noritaka1166))
+- Vishnu Vardhan ([@vishnuv688](https://github.com/vishnuv688))
+- Wim Selles ([@wswebcreation](https://github.com/wswebcreation))
+- [@harshit-browserstack](https://github.com/harshit-browserstack)
+
+
 ## v9.27.2 (2026-05-26)
 
 #### :rocket: New Feature

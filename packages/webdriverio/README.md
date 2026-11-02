@@ -39,7 +39,7 @@ await browser.deleteSession()
 
 See the raw [protocol example](https://www.npmjs.com/package/webdriver#example) using the `webdriver` package to get a glance at the differences.
 
-For more information on [options](https://webdriver.io/docs/options#webdriver-options), [multiremote usage](https://webdriver.io/docs/multiremote) or integration into [cloud services](https://webdriver.io/docs/cloudservices) please check out the [docs](https://webdriver.io/docs/gettingstarted).
+For more information on [options](https://webdriver.io/docs/options#webdriver-options), [multi-remote usage](https://webdriver.io/docs/multiremote) or integration into [cloud services](https://webdriver.io/docs/cloudservices) please check out the [docs](https://webdriver.io/docs/gettingstarted).
 
 ---
 
@@ -47,5 +47,9 @@ For more information on [options](https://webdriver.io/docs/options#webdriver-op
 <p align="center">
     <a href="https://www.browserstack.com/automation-webdriverio">
         <img src="https://webdriver.io/img/sponsors/browserstack_black.svg" alt="BrowserStack" width="300" />
+    </a>
+    &nbsp;
+    <a href="https://momentic.ai/">
+        <img src="https://webdriver.io/img/sponsors/momentic_black.svg" alt="Momentic" width="300" />
     </a>
 </p>

@@ -1,9 +1,16 @@
 ---
 id: component-testing
 title: Component Testing
+description: "Run unit and component tests in real browsers with the WebdriverIO browser runner, powered by Vite, including setup, test harness and debugging."
 ---
 
 With WebdriverIOs [Browser Runner](/docs/runner#browser-runner) you can run tests within an actual desktop or mobile browser while using WebdriverIO and the WebDriver protocol to automate and interact what gets rendered on the page. This approach has [many advantages](/docs/runner#browser-runner) compared to other test frameworks that only allow testing against [JSDOM](https://www.npmjs.com/package/jsdom).
+
+## Browser support
+
+The browser runner executes the test bundle in the browser. That bundle runs in Chrome 90, Edge 90, Firefox 90 and Safari 14.1, and in later versions of those browsers.
+
+End-to-end tests run in Node.js. Code passed to [`browser.execute`](/docs/api/browser/execute) runs in the automated browser instead, which can be older than the versions above. Keep that code at ES2021.
 
 ## How does it Work?
 
@@ -36,7 +43,7 @@ __Note:__ WebdriverIO by default will run browser tests in CI headlessly, e.g. a
 
 At the end of this process you should find a `wdio.conf.js` that contains various WebdriverIO configurations, including a `runner` property, e.g.:
 
-```ts reference useHTTPS runmeRepository="git@github.com:webdriverio/example-recipes.git" runmeFileToOpen="component-testing%2FREADME.md"
+```ts reference useHTTPS
 https://github.com/webdriverio/example-recipes/blob/fd54f94306ed8e7b40f967739164dfe4d6d76b41/wdio.comp.conf.js
 ```
 

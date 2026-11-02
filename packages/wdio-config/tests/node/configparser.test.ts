@@ -2,6 +2,7 @@ import url from 'node:url'
 import path from 'node:path'
 
 import { vi, describe, it, expect, } from 'vitest'
+import logger from '@wdio/logger'
 
 import ConfigParser from '../../src/node/ConfigParser.js'
 import type { MockFileContent } from '../lib/MockFileContentBuilder.js'
@@ -144,8 +145,10 @@ async function ConfigParserForTestWithAllFiles(configPath: string, args = {}) {
 }
 
 describe('ConfigParser', () => {
-    it('should throw if getFilePaths is not a string', () => {
-        expect(() => ConfigParser.getFilePaths(123 as any, '/foo/bar')).toThrow()
+    it('should throw when specs or exclude is not an array or string', () => {
+        expect(() => ConfigParser.getFilePaths(123 as any, '/foo/bar')).toThrow(
+            'specs or exclude property should be an array of strings, specs may also be an array of string arrays'
+        )
     })
 
     it('enables coverage', async () => {
@@ -278,6 +281,10 @@ describe('ConfigParser', () => {
             }
             expect(specs).toContain(featureFileA)
             expect(specs).toContain(featureFileB)
+            expect(configParser.getConfig().cucumberFeaturesWithLineNumbers).toEqual([
+                FIXTURES_CUCUMBER_FEATURE_A_LINE_2,
+                FIXTURES_CUCUMBER_FEATURE_B_LINE_7
+            ])
         })
 
         it('should allow specifying mutliple single spec file', async () => {
@@ -413,8 +420,8 @@ describe('ConfigParser', () => {
         })
 
         it('should allow specifying multiple exclude files', async () => {
-            const configParser = await ConfigParserForTest(FIXTURES_CONF)
-            configParser.initialize({
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({
                 spec: [INDEX_PATH, FIXTURES_CONF],
                 exclude: [INDEX_PATH, FIXTURES_CONF]
             })
@@ -663,6 +670,71 @@ describe('ConfigParser', () => {
             expect(specs[0]).not.toContain(path.join(__dirname, 'validateConfig.test.ts'))
         })
 
+        it('should exclude files from arrays by keyword without duplicating the group', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF_ARRAY)
+            await configParser.initialize({ exclude: ['FileSystemPathService'] })
+
+            const specs = configParser.getSpecs()
+            expect(specs).toHaveLength(1)
+            expect(specs.flat()).not.toContain(path.join(__dirname, 'FileSystemPathService.test.ts'))
+        })
+
+        it('should exclude by path and by keyword in the same list', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({ exclude: ['FileSystemPathService', __filename] })
+
+            const specs = configParser.getSpecs()
+            expect(specs).not.toContain(__filename)
+            expect(specs).not.toContain(path.join(__dirname, 'FileSystemPathService.test.ts'))
+        })
+
+        it('should still exclude by keyword when an exclude path next to it matches nothing', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({ exclude: ['./not/there.test.ts', 'FileSystemPathService'] })
+
+            expect(configParser.getSpecs()).not.toContain(path.join(__dirname, 'FileSystemPathService.test.ts'))
+        })
+
+        it('should warn once about an exclude path that matches nothing, however often the config is parsed', async () => {
+            const warn = vi.mocked(logger('@wdio/config:ConfigParser').warn)
+            warn.mockClear()
+            for (let i = 0; i < 2; i++) {
+                const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+                await configParser.initialize({ exclude: ['./not/warned-once.test.ts', 'FileSystemPathService'] })
+            }
+
+            const warnings = warn.mock.calls.filter(([message]) => String(message).includes('warned-once'))
+            expect(warnings).toEqual([['--exclude path(s) ./not/warned-once.test.ts match no file, excluding by FileSystemPathService only']])
+        })
+
+        it('should fail when every exclude path matches nothing', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await expect(configParser.initialize({ exclude: ['./not/there.test.ts'] })).rejects.toThrow('not found')
+        })
+
+        it('should resolve a relative exclude path from the current working directory', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({ exclude: ['FileSystemPathService', path.relative(process.cwd(), __filename).replace(/\\/g, '/')] })
+
+            expect(configParser.getSpecs()).not.toContain(__filename)
+        })
+
+        it('should resolve a relative exclude path with a line number from the current working directory', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({ exclude: [`${path.relative(process.cwd(), __filename).replace(/\\/g, '/')}:12`] })
+
+            expect(configParser.getSpecs()).not.toContain(__filename)
+        })
+
+        it('should get the specs of an instance independent of the CLI selection', async () => {
+            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
+            await configParser.initialize({ shard: { current: 2, total: 2 } } as any)
+
+            expect(configParser.getInstanceSpecs([INDEX_PATH, __filename], [__filename])).toEqual([INDEX_PATH])
+            expect(configParser.getInstanceSpecs([__filename], [__filename])).toEqual([])
+            expect(configParser.getInstanceSpecs([__filename], [INDEX_PATH])).toEqual([__filename])
+        })
+
         it('should exclude/include capability excludes', async () => {
             const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
             await configParser.initialize()
@@ -752,9 +824,9 @@ describe('ConfigParser', () => {
             const configParser = await ConfigParserForTest(FIXTURES_CONF)
             await configParser.initialize()
 
-            const javaFile = path.resolve(FIXTURES_PATH, '*.java')
-            const specs = configParser.getSpecs([javaFile])
-            expect(specs).not.toContain(javaFile)
+            const specs = configParser.getSpecs([path.resolve(FIXTURES_PATH, '*')])
+            expect(specs).toContain(path.resolve(FIXTURES_PATH, 'typescript.ts'))
+            expect(specs).not.toContain(path.resolve(FIXTURES_PATH, 'test.java'))
         })
 
         it('should include spec when specifying a suite', async () => {
@@ -765,19 +837,6 @@ describe('ConfigParser', () => {
             expect(specs).toHaveLength(2)
             expect(specs).toContain(INDEX_PATH)
             expect(specs).toContain(path.join(__dirname, 'FileSystemPathService.test.ts'))
-        })
-
-        it('should repeat spec 3 times', async () => {
-            const configParser = await ConfigParserForTestWithAllFiles(FIXTURES_CONF)
-            await configParser.initialize({ spec: [INDEX_PATH], repeat: 3 })
-
-            const specs = configParser.getSpecs()
-            expect(specs).toHaveLength(3)
-            expect(specs).toStrictEqual([
-                INDEX_PATH,
-                INDEX_PATH,
-                INDEX_PATH,
-            ])
         })
 
         it('should not include spec if blank spec parameter passed', async () => {

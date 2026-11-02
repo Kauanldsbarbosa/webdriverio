@@ -5,8 +5,9 @@ import { environment } from '../environment.js'
 import { WebDriverRequest } from './request.js'
 import type { RequestOptions } from './types.js'
 
-// As per this https://github.com/node-fetch/node-fetch/issues/1624#issuecomment-1407717012 we are setting ipv4first as default IP resolver.
-// This can be removed when we drop Node18 support.
+// Node's default DNS order is `verbatim`, which can prefer IPv6. WebDriver
+// endpoints are more reliable when IPv4 is tried first.
+// https://github.com/node-fetch/node-fetch/issues/1624#issuecomment-1407717012
 dns.setDefaultResultOrder('ipv4first')
 
 export const SESSION_DISPATCHERS: Map<string, Dispatcher> = new Map()
@@ -16,17 +17,32 @@ export const SESSION_DISPATCHERS: Map<string, Dispatcher> = new Map()
  */
 export class FetchRequest extends WebDriverRequest {
     async fetch (url: URL, opts: RequestInit) {
-        const response = await fetch(url, opts as UndiciRequestInit) as unknown as Promise<Response>
-        if (opts.method === 'DELETE') {
-            // regex should only target the delete session request, not other
-            // delete requests, full list: https://www.w3.org/TR/webdriver2/#endpoints
-            const match = url.pathname.match(/\/session\/([^/]+)$/)
-            const sessionId = match?.[1]
-            if (sessionId) {
-                this.cleanupSessionDispatcher(sessionId)
+        return await fetch(url, opts as UndiciRequestInit) as unknown as Response
+    }
+
+    async makeRequest (options: RequestOptions, sessionId?: string) {
+        try {
+            return await super.makeRequest(options, sessionId)
+        } finally {
+            /**
+             * Release the dispatcher once the delete session request is done,
+             * whatever the outcome. It has to survive the retries of that
+             * request, so it can't be closed per attempt.
+             */
+            const sessionIdToClean = this.method === 'DELETE' ? this.getDeletedSessionId(sessionId) : undefined
+            if (sessionIdToClean) {
+                this.cleanupSessionDispatcher(sessionIdToClean)
             }
         }
-        return response
+    }
+
+    /**
+     * regex should only target the delete session request, not other
+     * delete requests, full list: https://www.w3.org/TR/webdriver2/#endpoints
+     */
+    private getDeletedSessionId (sessionId?: string) {
+        const id = this.endpoint.match(/\/session\/([^/]+)$/)?.[1]
+        return id === ':sessionId' ? sessionId : id
     }
 
     private getDispatcher(url: URL, options: RequestOptions, sessionId?: string): Dispatcher {
@@ -45,6 +61,7 @@ export class FetchRequest extends WebDriverRequest {
             // a ProxyAgent or has proxy-specific properties
             if (globalDispatcher && (
                 globalDispatcher.constructor.name === 'ProxyAgent' ||
+                globalDispatcher.constructor.name === 'MockAgent' ||
                 'proxy' in globalDispatcher ||
                 // Also check for other custom dispatcher types
                 (globalDispatcher.constructor.name !== 'Agent' && globalDispatcher.constructor.name !== 'MockAgent')
@@ -63,16 +80,23 @@ export class FetchRequest extends WebDriverRequest {
         const shouldUseProxy =
             PROXY_URL && !NO_PROXY?.some((str) => url.hostname.endsWith(str))
 
+        /**
+         * accept self-signed or otherwise invalid certificates if `strictSSL` is disabled
+         */
+        const tlsOptions = options.strictSSL === false ? { rejectUnauthorized: false } : undefined
+
         const dispatcher = shouldUseProxy ? new ProxyAgent({
             uri: PROXY_URL,
             connectTimeout: options.connectionRetryTimeout,
             headersTimeout: options.connectionRetryTimeout,
             bodyTimeout: options.connectionRetryTimeout,
+            ...(tlsOptions ? { requestTls: tlsOptions, proxyTls: tlsOptions } : {})
         }) :
             new Agent({
                 connectTimeout: options.connectionRetryTimeout,
                 headersTimeout: options.connectionRetryTimeout,
                 bodyTimeout: options.connectionRetryTimeout,
+                ...(tlsOptions ? { connect: tlsOptions } : {})
             })
 
         if (sessionId){

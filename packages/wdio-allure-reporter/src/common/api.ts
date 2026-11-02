@@ -1,4 +1,4 @@
-import type { StepContext } from 'allure-js-commons'
+import type { StepContext, StatusDetails } from 'allure-js-commons'
 import {
     allureId,
     attachment as allureAttachment,
@@ -7,6 +7,9 @@ import {
     descriptionHtml,
     epic,
     feature,
+    globalAttachment as allureGlobalAttachment,
+    globalAttachmentPath as allureGlobalAttachmentPath,
+    globalError as allureGlobalError,
     historyId,
     issue,
     label,
@@ -24,7 +27,14 @@ import {
     testCaseId,
     tms
 } from 'allure-js-commons'
+import { setGlobalTestRuntime } from 'allure-js-commons/sdk/runtime'
 import { events } from '../constants.js'
+import { WdioTestRuntime } from '../WdioTestRuntime.js'
+
+// the launcher never constructs the worker-side reporter, so the api needs a runtime of its own
+if (!(globalThis as { allureTestRuntime?: unknown }).allureTestRuntime) {
+    setGlobalTestRuntime(new WdioTestRuntime())
+}
 
 // @ts-ignore
 /**
@@ -169,16 +179,6 @@ export async function addTag(tagName: string) {
 }
 
 /**
- * Add environment value
- * @name addEnvironment
- * @deprecated addEnvironment is deprecated. Use reportedEnvironmentVars in config instead.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function addEnvironment (name: string, value: string) {
-    console.warn('⚠️ addEnvironment is deprecated and has no longer any functionality. Use reportedEnvironmentVars in wdio config instead. Read more in https://webdriver.io/docs/allure-reporter.')
-}
-
-/**
  * Assign test description to test
  * @name addDescription
  * @param {string} descriptionText - description for test
@@ -219,6 +219,38 @@ export async function addAttachment (name: string, content: string | Buffer | ob
  */
 export async function addArgument (name: string, value: string) {
     await parameter(name, value)
+}
+
+/**
+ * Add a global error to the report (not tied to any specific test)
+ * @name addGlobalError
+ * @param {StatusDetails} details - error details with optional message and trace
+ */
+export async function addGlobalError(details: StatusDetails) {
+    await allureGlobalError(details)
+}
+
+/**
+ * Add a global attachment to the report (not tied to any specific test)
+ * @name addGlobalAttachment
+ * @param {string} name - attachment name
+ * @param {string | Buffer} content - attachment content
+ * @param {string} contentType - attachment MIME type
+ */
+export async function addGlobalAttachment(name: string, content: string | Buffer, contentType: ContentType | string = ContentType.TEXT) {
+    const buf = Buffer.isBuffer(content) ? content : Buffer.from(content as string, 'utf8')
+    await allureGlobalAttachment(name, buf, { contentType })
+}
+
+/**
+ * Add a global attachment from a file path to the report (not tied to any specific test)
+ * @name addGlobalAttachmentFromPath
+ * @param {string} name - attachment name
+ * @param {string} path - path to the file
+ * @param {string} [contentType='text/plain'] - attachment MIME type
+ */
+export async function addGlobalAttachmentFromPath(name: string, path: string, contentType: ContentType | string = ContentType.TEXT) {
+    await allureGlobalAttachmentPath(name, path, { contentType })
 }
 
 /**
@@ -332,9 +364,11 @@ export default {
     addEpic,
     addOwner,
     addTag,
-    addEnvironment,
     addDescription,
     addAttachment,
+    addGlobalError,
+    addGlobalAttachment,
+    addGlobalAttachmentFromPath,
     startStep,
     endStep,
     addStep,

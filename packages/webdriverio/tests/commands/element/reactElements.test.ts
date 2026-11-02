@@ -30,7 +30,6 @@ describe('elem.react$', () => {
                 { some: 'props' },
                 true,
                 {
-                    ELEMENT: elem.elementId,
                     [ELEMENT_KEY]: elem.elementId
                 },
             ])
@@ -53,13 +52,12 @@ describe('elem.react$', () => {
             {},
             {},
             {
-                ELEMENT: elem.elementId,
                 [ELEMENT_KEY]: elem.elementId
             },
         ])
     })
 
-    it('should call getElements with React flag true', async () => {
+    it('queries the list again with the same props and state', async () => {
         const browser = await remote({
             baseUrl: 'http://foobar.com',
             capabilities: {
@@ -67,13 +65,24 @@ describe('elem.react$', () => {
             }
         })
 
-        const elems = await browser.react$$('myComp')
+        const elem = await browser.$('#foo')
+        const elems = await elem.react$$('MyComp', {
+            props: { some: 'props' },
+            state: { some: 'state' }
+        })
+        /**
+         * expect-webdriverio queries a list again with `parent[foundWith](selector, ...props)`
+         */
+        const parent = elems.parent as unknown as Record<string, (...args: unknown[]) => WebdriverIO.ElementArray>
+        await parent[elems.foundWith](elems.selector, ...elems.props)
 
-        expect(
-            (
-                await elems.filter(elem => Boolean(elem.isReactElement))
-            ).length
-        ).toBe(3)
-        expect(elems.foundWith).toBe('react$$')
+        expect(JSON.parse(vi.mocked(fetch).mock.calls.pop()![1]!.body as any).args).toEqual([
+            'MyComp',
+            { some: 'props' },
+            { some: 'state' },
+            {
+                [ELEMENT_KEY]: elem.elementId
+            },
+        ])
     })
 })

@@ -10,9 +10,39 @@ import type * as Network from './Network.js'
 import type * as CustomCommands from './CustomCommands.js'
 
 /**
- * exported constant values
+ * exported constant values and browser-channel helpers
  */
-export { MESSAGE_TYPES } from './Workers.js'
+export {
+    MESSAGE_TYPES,
+    BROWSER_TO_RUNNER_TYPES,
+    RUNNER_TO_BROWSER_TYPES,
+    BROWSER_REQUEST_TYPES,
+    browserChannelMessage,
+    isBrowserChannelMessage,
+    isWorkerProcessEvent,
+    parseBrowserToRunnerMessage,
+    parseRunnerToBrowserMessage,
+    routeBrowserToRunnerMessage,
+    workerProcessEvent,
+} from './BrowserChannel.js'
+
+export type {
+    BrowserChannelMessage,
+    AnyBrowserChannelMessage,
+    AnyBrowserToRunnerMessage,
+    AnyRunnerToBrowserMessage,
+    BrowserChannelType,
+    BrowserToRunnerType,
+    RunnerToBrowserType,
+    BrowserRequestType,
+    BrowserChannelRoute,
+    ChannelError,
+    WorkerProcessEvent,
+    CoverageMapPayload,
+    BrowserTestEvent,
+    SocketMessageValue,
+    SocketMessagePayload,
+} from './BrowserChannel.js'
 
 export type { Automation, Capabilities, Options, Services, Frameworks, Reporters, Workers, CustomCommands }
 
@@ -62,7 +92,19 @@ declare global {
             /**
              * parent of the element if fetched via `$(parent).$(child)`
              */
-            parent: WebdriverIO.Element | WebdriverIO.Browser
+            parent: WebdriverIO.Element | WebdriverIO.Browser | WebdriverIO.BrowsingContext
+        }
+        /**
+         * A tab, a window, or a frame you hold. BiDi commands on this object
+         * target `contextId` and do not move the session's current context.
+         */
+        interface BrowsingContext {
+            contextId: string
+            browser: WebdriverIO.Browser
+            isFrame: boolean
+            url: string
+            parent?: WebdriverIO.BrowsingContext
+            request?: WebdriverIO.Request
         }
         interface MultiRemoteElement {}
         interface ElementArray {}
@@ -80,12 +122,21 @@ declare global {
         interface CucumberOpts { [key: string]: any }
         interface Config extends Options.Testrunner, Capabilities.WithRequestedTestrunnerCapabilities {}
         interface RemoteConfig extends Options.WebdriverIO, Capabilities.WithRequestedCapabilities {}
-        interface MultiremoteConfig extends Options.Testrunner, Capabilities.WithRequestedMultiremoteCapabilities {}
+        interface MultiRemoteConfig extends Options.Testrunner, Capabilities.WithRequestedMultiRemoteCapabilities {}
         interface HookFunctionExtension {}
         interface WDIOVSCodeServiceOptions {}
         interface BrowserRunnerOptions {}
         interface ChromedriverOptions extends DriverOptions {}
-        interface GeckodriverOptions extends DriverOptions {}
+        interface GeckodriverOptions extends DriverOptions {
+            /**
+             * Version of Geckodriver to download. Firefox browser versions use a
+             * different versioning scheme than Geckodriver, so the `browserVersion`
+             * capability cannot be used to select the driver. Defaults to the
+             * latest available Geckodriver version.
+             * @see https://github.com/mozilla/geckodriver/releases
+             */
+            geckoDriverVersion?: string
+        }
         interface EdgedriverOptions extends DriverOptions {}
         interface SafaridriverOptions {}
     }

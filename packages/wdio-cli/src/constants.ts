@@ -8,19 +8,21 @@ const pkgJSON = require('../package.json')
 export const pkg = pkgJSON
 export const CLI_EPILOGUE = `Documentation: https://webdriver.io\n@wdio/cli (v${pkg.version})`
 
-export const SUPPORTED_COMMANDS = ['run', 'install', 'config', 'repl']
+export const SUPPORTED_COMMANDS = ['run', 'install', 'config', 'repl', 'session']
 
 export const ANDROID_CONFIG = {
     platformName: 'Android',
-    automationName: 'UiAutomator2',
-    deviceName: 'Test'
+    'appium:automationName': 'UiAutomator2',
+    'appium:deviceName': 'Test'
 }
 
 export const IOS_CONFIG = {
     platformName: 'iOS',
-    automationName: 'XCUITest',
-    deviceName: 'iPhone Simulator'
+    'appium:automationName': 'XCUITest',
+    'appium:deviceName': 'iPhone Simulator'
 }
+
+export const TS_FILE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts']
 const SUPPORTED_SNAPSHOTSTATE_OPTIONS = ['all', 'new', 'none'] as const
 
 export const TESTRUNNER_DEFAULTS: Options.Definition<Options.Testrunner & { capabilities: unknown }> = {
@@ -300,8 +302,15 @@ export const TESTRUNNER_DEFAULTS: Options.Definition<Options.Testrunner & { capa
                 throw new Error('the "shard" option needs to have "current" and "total" properties with number values')
             }
 
-            if (p.current < 0 || p.current > p.total) {
-                throw new Error('the "shard.current" value has to be between 0 and "shard.total"')
+            if (!Number.isInteger(p.total) || p.total < 1) {
+                throw new Error('the "shard.total" value has to be a positive integer')
+            }
+
+            /**
+             * shards are one-based: a shard 0 would run no spec and pass (#16240)
+             */
+            if (!Number.isInteger(p.current) || p.current < 1 || p.current > p.total) {
+                throw new Error('the "shard.current" value has to be an integer between 1 and "shard.total"')
             }
         }
     },

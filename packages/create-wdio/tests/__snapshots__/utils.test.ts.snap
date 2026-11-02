@@ -2,6 +2,7 @@
 
 exports[`getAnswers 1`] = `
 {
+  "agentSupport": true,
   "backend": "On my local machine",
   "framework": "@wdio/mocha-framework$--$mocha",
   "generateTestFiles": true,
@@ -41,11 +42,11 @@ exports[`npmInstall 1`] = `
 exports[`setupTypeScript 1`] = `
 "{
     "compilerOptions": {
-        "moduleResolution": "node",
+        "moduleResolution": "bundler",
         "module": "ESNext",
-        "target": "es2022",
+        "target": "es2024",
         "lib": [
-            "es2022",
+            "es2024",
             "dom"
         ],
         "types": [
@@ -65,6 +66,41 @@ exports[`setupTypeScript 1`] = `
         "noUnusedParameters": true,
         "noFallthroughCasesInSwitch": true
     },
+    "include": [
+        "test",
+        "wdio.conf.ts"
+    ]
+}"
+`;
+
+exports[`setupTypeScript creates a dedicated tsconfig even if there is already one 1`] = `
+"{
+    "compilerOptions": {
+        "moduleResolution": "bundler",
+        "module": "ESNext",
+        "target": "es2024",
+        "lib": [
+            "es2024",
+            "dom"
+        ],
+        "types": [
+            "node",
+            "@wdio/globals/types",
+            "expect-webdriverio",
+            "foo",
+            "@wdio/electron-service"
+        ],
+        "skipLibCheck": true,
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "strict": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noFallthroughCasesInSwitch": true
+    },
+    "extends": "./tsconfig.json",
     "include": [
         "test",
         "wdio.conf.ts"

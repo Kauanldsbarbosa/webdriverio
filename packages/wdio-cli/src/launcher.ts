@@ -1,18 +1,20 @@
+import fs from 'node:fs/promises'
 import exitHook from 'async-exit-hook'
-import { resolve } from 'import-meta-resolve'
 
 import logger from '@wdio/logger'
 import { validateConfig, DEFAULT_MAX_INSTANCES_PER_CAPABILITY_VALUE } from '@wdio/config'
 import { ConfigParser } from '@wdio/config/node'
-import { initializePlugin, initializeLauncherService, sleep, enableFileLogging } from '@wdio/utils'
+import { initializePlugin, initializeLauncherService, sleep, enableFileLogging, specFilePath } from '@wdio/utils'
 import { setupDriver, setupBrowser } from '@wdio/utils/node'
-import type { Capabilities, Services } from '@wdio/types'
+import type { Capabilities, Frameworks, Services } from '@wdio/types'
 
 import CLInterface from './interface.js'
-import { runLauncherHook, runOnCompleteHook, runServiceHook, nodeVersion, type HookError } from './utils.js'
-import { TESTRUNNER_DEFAULTS, WORKER_GROUPLOGS_MESSAGES } from './constants.js'
+import { runLauncherHook, runOnCompleteHook, runServiceHook, type HookError, shouldEnableTsx, enableTsx } from './utils.js'
+import { TESTRUNNER_DEFAULTS, TS_FILE_EXTENSIONS, WORKER_GROUPLOGS_MESSAGES } from './constants.js'
 import type { RunCommandArguments } from './types.js'
 const log = logger('@wdio/cli:launcher')
+
+const LAUNCHER_FRAMEWORKS = new Set(['vitest', '@wdio/vitest-framework'])
 
 interface Schedule {
     cid: number
@@ -28,21 +30,36 @@ interface WorkerSpecs {
     rid?: string
 }
 
+/** Vitest `provide` structured-clones the args into forked workers, and programmatic callers may pass functions or classes */
+function cloneableEntries<T extends object>(args: T): Partial<T> {
+    return Object.fromEntries(Object.entries(args).filter(([, value]) => {
+        try {
+            structuredClone(value)
+            return true
+        } catch {
+            return false
+        }
+    })) as Partial<T>
+}
+
 export interface EndMessage {
     cid: string, // is actually rid
     exitCode: number,
     specs: string[],
-    retries: number
+    retries: number,
+    /**
+     * set if the worker was terminated by a signal instead of exiting on its
+     * own, in which case `exitCode` is derived from that signal
+     */
+    signal?: NodeJS.Signals | null
 }
-
-const TS_FILE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts']
 
 class Launcher {
     #isInitialized: boolean = false
 
     public configParser: ConfigParser
-    public isMultiremote = false
-    public isParallelMultiremote = false
+    public isMultiRemote = false
+    public isParallelMultiRemote = false
     public runner?: Services.RunnerInstance
     public interface?: CLInterface
 
@@ -52,9 +69,12 @@ class Launcher {
     private _rid: number[] = []
     private _runnerStarted = 0
     private _runnerFailed = 0
+    private _hasLoggedProfiling = false
 
     private _launcher?: Services.ServiceInstance[]
     private _resolve?: Function
+    #frameworkAbort = new AbortController()
+    #frameworkLaunch?: Promise<number>
 
     constructor(
         private _configFilePath: string,
@@ -73,10 +93,10 @@ class Launcher {
         const config = this.configParser.getConfig()
 
         const capabilities = this.configParser.getCapabilities()
-        this.isParallelMultiremote = Array.isArray(capabilities) &&
+        this.isParallelMultiRemote = Array.isArray(capabilities) &&
             capabilities.length > 0 &&
             capabilities.every(cap => Object.values(cap).length > 0 && Object.values(cap).every(c => typeof c === 'object' && (c as { capabilities: WebdriverIO.Capabilities }).capabilities))
-        this.isMultiremote = this.isParallelMultiremote || !Array.isArray(capabilities)
+        this.isMultiRemote = this.isParallelMultiRemote || !Array.isArray(capabilities)
         validateConfig(TESTRUNNER_DEFAULTS, { ...config, capabilities })
 
         await enableFileLogging(config.outputDir)
@@ -93,6 +113,13 @@ class Launcher {
         let exitCode = 0
         let error: HookError | undefined = undefined
         const caps = this.configParser.getCapabilities() as Capabilities.TestrunnerCapabilities
+
+        // Rejecting here keeps every hook, service and runner shutdown from running for a run that never starts
+        const framework = await this.#loadFrameworkLauncher(config)
+        if (framework) {
+            // ConfigParser keeps the --repeat CLI flag on the config, outside of its declared type
+            this.#assertFrameworkSupportsRun(config.framework, caps, (config as { repeat?: number }).repeat)
+        }
 
         try {
             const { ignoredWorkerServices, launcherServices } = await initializeLauncherService(config, caps)
@@ -113,14 +140,14 @@ class Launcher {
             await runServiceHook(this._launcher, 'onPrepare', config, caps)
 
             /**
-             * For Parallel-Multiremote, only get the specs and excludes from the first object
+             * For parallel multi-remote, only get the specs and excludes from the first object
              */
             const totalWorkerCnt = Array.isArray(capabilities)
                 ? capabilities
                     .map((c) => {
-                        if (this.isParallelMultiremote) {
-                            const keys = Object.keys(c as Capabilities.RequestedMultiremoteCapabilities)
-                            const caps = (c as Capabilities.RequestedMultiremoteCapabilities)[keys[0]].capabilities as WebdriverIO.Capabilities
+                        if (this.isParallelMultiRemote) {
+                            const keys = Object.keys(c as Capabilities.RequestedMultiRemoteCapabilities)
+                            const caps = (c as Capabilities.RequestedMultiRemoteCapabilities)[keys[0]].capabilities as WebdriverIO.Capabilities
                             return this.configParser.getSpecs(caps['wdio:specs'], caps['wdio:exclude']).length
                         }
                         const standaloneCaps = c as Capabilities.RequestedStandaloneCapabilities
@@ -130,7 +157,11 @@ class Launcher {
                     .reduce((a, b) => a + b, 0)
                 : 1
 
-            this.interface = new CLInterface(config, totalWorkerCnt, this._isWatchMode)
+            if (framework && config.specFileRetries > 0) {
+                log.warn('specFileRetries is not supported with this framework and is ignored')
+            }
+            // The framework schedules specs itself, so no spec file is ever retried
+            this.interface = new CLInterface(framework ? { ...config, specFileRetries: 0 } : config, totalWorkerCnt, this._isWatchMode)
             config.runnerEnv!.FORCE_COLOR = Number(this.interface.hasAnsiSupport).toString()
 
             /**
@@ -141,21 +172,57 @@ class Launcher {
                 setupBrowser(config, caps)
             ])
 
-            exitCode = await this._runMode(config, caps)
+            const cliInterface = this.interface
+            if (framework) {
+                this.#frameworkLaunch = framework.launch({
+                    // ConfigParser keeps capabilities outside of getConfig()
+                    config: { ...config, capabilities: caps } as WebdriverIO.Config,
+                    specs: this.configParser.getSpecs().flat().map(specFilePath),
+                    configFile: this._configFilePath,
+                    args: cloneableEntries(this._args),
+                    signal: this.#frameworkAbort.signal,
+                    onEvent: (event) => {
+                        if (event.type === 'job:start') {
+                            const { cid, caps, specs } = event
+                            cliInterface.emit('job:start', { cid, caps, specs, hasTests: true })
+                        } else if (event.type === 'job:end') {
+                            cliInterface.emit('job:end', { cid: event.cid, passed: event.passed, retries: 0 })
+                        } else {
+                            cliInterface.onMessage(event.message as Parameters<CLInterface['onMessage']>[0])
+                        }
+                    }
+                })
+            }
+            exitCode = this.#frameworkLaunch
+                ? Number(await this.#frameworkLaunch.catch((err) => {
+                    // onComplete hooks must not see a green exit code for a crashed run
+                    exitCode = 1
+                    throw err
+                }) > 0)
+                : await this._runMode(config, caps)
             await logger.waitForBuffer()
             this.interface.finalise()
         } catch (err) {
             error = err as HookError
         } finally {
-            if (!this._hasTriggeredExitRoutine) {
-                this._hasTriggeredExitRoutine = true
-                const passesCodeCoverage = await this.runner.shutdown()
-                if (!passesCodeCoverage) {
-                    exitCode = exitCode || 1
+            try {
+                if (!this._hasTriggeredExitRoutine) {
+                    this._hasTriggeredExitRoutine = true
+                    const passesCodeCoverage = await this.runner.shutdown()
+                    if (!passesCodeCoverage) {
+                        exitCode = exitCode || 1
+                    }
+                }
+
+                exitCode = await this.#runOnCompleteHook(config, caps, exitCode)
+            } finally {
+                // A failing dispose must not replace the run's own error or exit code.
+                try {
+                    await this.runner.dispose?.()
+                } catch (err) {
+                    log.warn('Failed to dispose the runner:', err)
                 }
             }
-
-            exitCode = await this.#runOnCompleteHook(config, caps, exitCode)
         }
 
         if (error) {
@@ -168,8 +235,44 @@ class Launcher {
         return exitCode
     }
 
+    #assertFrameworkSupportsRun(framework: string, caps: Capabilities.TestrunnerCapabilities, repeat?: number) {
+        if (this._isWatchMode) {
+            throw new Error(`--watch is not supported by the ${framework} framework yet`)
+        }
+        // the framework gets the specs as a set of files, so the copies --repeat adds would run once
+        if (repeat) {
+            throw new Error(`--repeat is not supported by the ${framework} framework yet`)
+        }
+        const capList = (Array.isArray(caps) ? caps : [caps]) as unknown as Record<string, unknown>[]
+        for (const cap of capList) {
+            const matches = cap && 'alwaysMatch' in cap
+                ? [cap.alwaysMatch, ...(Array.isArray(cap.firstMatch) ? cap.firstMatch : [])]
+                : [cap]
+            for (const match of matches as (Record<string, unknown> | undefined)[]) {
+                for (const key of ['wdio:specs', 'wdio:exclude']) {
+                    if (match && key in match) {
+                        throw new Error(`Capability "${key}" is set, but per-capability specs are not supported by the ${framework} framework yet`)
+                    }
+                }
+            }
+        }
+    }
+
     /**
-     * initialize launcher by loading `tsx` if needed
+     * Only frameworks in {@link LAUNCHER_FRAMEWORKS} may export `launch` to
+     * schedule specs themselves; all others run in WDIO workers and are never
+     * imported here. A listed framework that fails to load is a hard error.
+     */
+    async #loadFrameworkLauncher(config: Required<WebdriverIO.Config>) {
+        if (!config.framework || !LAUNCHER_FRAMEWORKS.has(config.framework)) {
+            return
+        }
+        const plugin = await initializePlugin(config.framework, 'framework') as Partial<Frameworks.FrameworkLauncher>
+        return typeof plugin.launch === 'function' ? plugin as Frameworks.FrameworkLauncher : undefined
+    }
+
+    /**
+     * initialize launcher by loading `tsx` only when TypeScript is involved
      */
     async initialize() {
         /**
@@ -180,34 +283,48 @@ class Launcher {
         }
 
         /**
-         * add tsx to process NODE_OPTIONS so it will be passed along the worker process
+         * Load tsx before parsing a TypeScript config (or when a custom
+         * tsconfig path was provided). For plain JS configs, wait until after
+         * config load so we can inspect specs / require hooks.
          */
-        const tsxPath = resolve('tsx', import.meta.url)
-        if (!process.env.NODE_OPTIONS || !process.env.NODE_OPTIONS.includes(tsxPath)) {
-            /**
-             * The `--import` flag is only available in Node 20.6.0 / 18.19.0 and later.
-             * This switching can be removed once the minimum supported version of Node exceeds 20.6.0 / 18.19.0
-             * see https://nodejs.org/api/module.html#customization-hooks and https://tsx.is/dev-api/node-cli#module-mode-only
-             */
-            const moduleLoaderFlag = nodeVersion('major') >= 21 ||
-                (nodeVersion('major') === 20 && nodeVersion('minor') >= 6) ||
-                (nodeVersion('major') === 18 && nodeVersion('minor') >= 19) ? '--import' : '--loader'
-            process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS || ''} ${moduleLoaderFlag} ${tsxPath}`
-        }
-
-        /**
-         * load tsx in the main process if config file is a .ts file to allow config parser to load it
-         */
-        if (TS_FILE_EXTENSIONS.some((ext) => this._configFilePath.endsWith(ext))) {
-            await import(tsxPath)
+        if (shouldEnableTsx(this._configFilePath, this._args)) {
+            const tsxPath = await enableTsx()
+            if (TS_FILE_EXTENSIONS.some((ext) => this._configFilePath.endsWith(ext))) {
+                await import(tsxPath)
+            }
         }
 
         this.#isInitialized = true
 
         /**
-         * initialize config parser
+         * initialize config parser — a JS config may still import TypeScript
+         * helpers, so retry once with tsx if the first load fails.
          */
-        await this.configParser.initialize(this._args)
+        try {
+            await this.configParser.initialize(this._args)
+        } catch (err) {
+            const alreadyHasTsx = Boolean(process.env.NODE_OPTIONS?.includes('tsx'))
+            if (alreadyHasTsx) {
+                throw err
+            }
+            log.info('Config load failed without tsx; enabling tsx and retrying once')
+            const tsxPath = await enableTsx()
+            await import(tsxPath)
+            await this.configParser.initialize(this._args)
+        }
+
+        /**
+         * Specs or framework require entries may still need tsx in workers
+         * even when the config file itself is JavaScript.
+         */
+        if (shouldEnableTsx(
+            this._configFilePath,
+            this._args,
+            this.configParser.getConfig(),
+            this.configParser.getCapabilities() as Capabilities.TestrunnerCapabilities
+        )) {
+            await enableTsx()
+        }
     }
 
     /**
@@ -249,7 +366,7 @@ class Launcher {
              */
             (Array.isArray(caps) && caps.length === 0) ||
             /**
-             * user wants to use multiremote but capability object is empty
+             * user wants to use multi-remote but capability object is empty
              */
             (!Array.isArray(caps) && Object.keys(caps).length === 0)
         ) {
@@ -269,26 +386,26 @@ class Launcher {
          * schedule test runs
          */
         let cid = 0
-        if (this.isMultiremote && !this.isParallelMultiremote) {
+        if (this.isMultiRemote && !this.isParallelMultiRemote) {
             /**
-             * Multiremote mode
+             * Multi-remote mode
              */
             this._schedule.push({
                 cid: cid++,
-                caps: caps as Capabilities.RequestedMultiremoteCapabilities,
-                specs: this._formatSpecs(caps as Capabilities.RequestedMultiremoteCapabilities, specFileRetries),
+                caps: caps as Capabilities.RequestedMultiRemoteCapabilities,
+                specs: this._formatSpecs(caps as Capabilities.RequestedMultiRemoteCapabilities, specFileRetries),
                 availableInstances: config.maxInstances || 1,
                 runningInstances: 0
             })
         } else {
             /**
-             * Regular mode & Parallel Multiremote
+             * Regular mode & parallel multi-remote
              */
             for (const capabilities of caps as Capabilities.RequestedStandaloneCapabilities[]) {
                 /**
                  * when using browser runner we only allow one session per browser
                  */
-                const availableInstances = this.isParallelMultiremote ? config.maxInstances || 1 : config.runner === 'browser'
+                const availableInstances = this.isParallelMultiRemote ? config.maxInstances || 1 : config.runner === 'browser'
                     ? 1
                     : (capabilities as WebdriverIO.Capabilities)['wdio:maxInstances'] || config.maxInstancesPerCapability || DEFAULT_MAX_INSTANCES_PER_CAPABILITY_VALUE
 
@@ -331,25 +448,17 @@ class Launcher {
     /**
      * Format the specs into an array of objects with files and retries
      */
-    private _formatSpecs(capabilities: (Capabilities.RequestedMultiremoteCapabilities | Capabilities.RequestedStandaloneCapabilities), specFileRetries: number) {
+    private _formatSpecs(capabilities: (Capabilities.RequestedMultiRemoteCapabilities | Capabilities.RequestedStandaloneCapabilities), specFileRetries: number) {
         let caps: WebdriverIO.Capabilities
         if ('alwaysMatch' in capabilities) {
             caps = capabilities.alwaysMatch as WebdriverIO.Capabilities
-        } else if (typeof Object.keys(capabilities)[0] === 'object' && 'capabilities' in (capabilities as Capabilities.RequestedMultiremoteCapabilities)[Object.keys(capabilities)[0]]) {
+        } else if (typeof Object.keys(capabilities)[0] === 'object' && 'capabilities' in (capabilities as Capabilities.RequestedMultiRemoteCapabilities)[Object.keys(capabilities)[0]]) {
             caps = {} as WebdriverIO.Capabilities
         } else {
             caps = capabilities as WebdriverIO.Capabilities
         }
-        const specs = (
-            // @ts-expect-error deprecated
-            caps.specs ||
-            caps['wdio:specs']
-        )
-        const excludes = (
-            // @ts-expect-error deprecated
-            caps.exclude ||
-            caps['wdio:exclude']
-        )
+        const specs = caps['wdio:specs']
+        const excludes = caps['wdio:exclude']
         const files = this.configParser.getSpecs(specs, excludes)
 
         return files.map((file: string | string[]) => {
@@ -470,8 +579,8 @@ class Launcher {
 
         const config = this.configParser.getConfig()
 
-        // wait before retrying the spec file
-        if (typeof config.specFileRetriesDelay === 'number' && config.specFileRetries > 0 && config.specFileRetries !== retries) {
+        // wait before retrying the spec file, first attempts start with retries=-1 ("unknown") and must not wait
+        if (typeof config.specFileRetriesDelay === 'number' && config.specFileRetries > 0 && !this._isWatchMode && retries >= 0) {
             await sleep(config.specFileRetriesDelay * 1000)
         }
 
@@ -505,6 +614,51 @@ class Launcher {
 
         // if you would like to add --debug-brk, use a different port, etc...
         const capExecArgs = [...(config.execArgv || [])]
+        const profilingArgs: string[] = []
+        const enableCpuProf = Boolean(this._args.cpuProf || config.cpuProf)
+        const enableHeapProf = Boolean(this._args.heapProf || config.heapProf)
+        const profileOutputDir = config.profileOutputDir || './profiles'
+
+        if (enableCpuProf || enableHeapProf) {
+            try {
+                await fs.mkdir(profileOutputDir, { recursive: true })
+            } catch (err) {
+                log.warn(`Failed to create profiling output directory "${profileOutputDir}": ${(err as Error).message}`)
+            }
+
+            if (!this._hasLoggedProfiling) {
+                const enabled = [
+                    enableCpuProf ? 'CPU' : undefined,
+                    enableHeapProf ? 'Heap' : undefined
+                ].filter(Boolean).join(' + ')
+                log.info(`Profiling enabled (${enabled}). Output: ${profileOutputDir}`)
+                this._hasLoggedProfiling = true
+            }
+        }
+
+        const hasExecArg = (argPrefix: string) => capExecArgs.some((arg) => (
+            arg === `--${argPrefix}` || arg.startsWith(`--${argPrefix}=`)
+        ))
+
+        if (enableCpuProf) {
+            if (!hasExecArg('cpu-prof')) {
+                profilingArgs.push('--cpu-prof')
+            }
+            if (!hasExecArg('cpu-prof-dir')) {
+                profilingArgs.push(`--cpu-prof-dir=${profileOutputDir}`)
+            }
+        }
+
+        if (enableHeapProf) {
+            if (!hasExecArg('heap-prof')) {
+                profilingArgs.push('--heap-prof')
+            }
+            if (!hasExecArg('heap-prof-dir')) {
+                profilingArgs.push(`--heap-prof-dir=${profileOutputDir}`)
+            }
+        }
+
+        capExecArgs.push(...profilingArgs)
 
         // The default value for child.fork execArgs is process.execArgs,
         // so continue to use this unless another value is specified in config.
@@ -592,8 +746,9 @@ class Launcher {
      * @param  {number} exitCode  exit code of child process
      * @param  {Array} specs      Specs that were run
      * @param  {number} retries   Number or retries remaining
+     * @param  {string} signal    signal that terminated the worker, if any
      */
-    private async _endHandler({ cid: rid, exitCode, specs, retries }: EndMessage): Promise<void> {
+    private async _endHandler({ cid: rid, exitCode, specs, retries, signal }: EndMessage): Promise<void> {
         const passed = this._isWatchModeHalted() || exitCode === 0
 
         if (!passed && retries > 0) {
@@ -623,9 +778,9 @@ class Launcher {
 
         log.info('Run onWorkerEnd hook')
         const config = this.configParser.getConfig()
-        await runLauncherHook(config.onWorkerEnd, rid, exitCode, specs, retries)
+        await runLauncherHook(config.onWorkerEnd, rid, exitCode, specs, retries, signal)
             .catch((error) => this._workerHookError(error))
-        await runServiceHook(this._launcher!, 'onWorkerEnd', rid, exitCode, specs, retries)
+        await runServiceHook(this._launcher!, 'onWorkerEnd', rid, exitCode, specs, retries, signal)
             .catch((error) => this._workerHookError(error))
 
         /**
@@ -658,6 +813,7 @@ class Launcher {
      * session first before killing
      */
     private _exitHandler(callback?: (value: boolean) => void): void | Promise<void> {
+        this.#frameworkAbort.abort()
         if (!callback || !this.runner || !this.interface) {
             return
         }
@@ -668,7 +824,11 @@ class Launcher {
 
         this._hasTriggeredExitRoutine = true
         this.interface.sigintTrigger()
-        return this.runner.shutdown().then(callback)
+        if (this.#frameworkLaunch) {
+            const runner = this.runner
+            return this.#frameworkLaunch.then(() => undefined, () => undefined).then(() => runner.shutdown()).then(callback)
+        }
+        return this.runner.shutdown().then(callback) // no dispose(): the process exits next, and that kills the display server
     }
 
     /**

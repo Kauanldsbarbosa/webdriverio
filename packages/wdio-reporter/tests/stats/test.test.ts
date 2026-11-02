@@ -1,6 +1,8 @@
 import { describe, expect, vi, it, beforeEach } from 'vitest'
 
 import { AssertionError } from 'node:assert'
+import path from 'node:path'
+import url from 'node:url'
 import TestStats from '../../src/stats/test.js'
 
 describe('TestStats', () => {
@@ -22,6 +24,66 @@ describe('TestStats', () => {
 
     beforeEach(() => {
         vi.resetAllMocks()
+    })
+
+    it('keeps the context and the parent of a parallel test', () => {
+        const parallel = new TestStats({
+            type: 'test:start', title: 'a', parent: 'suite', fullTitle: 'suite a', pending: false,
+            cid: '0-0', specs: [], uid: 'test-0-0-0', contextId: 'ctx-1', parentUid: 'suite-1'
+        })
+
+        expect(parallel.contextId).toBe('ctx-1')
+        expect(parallel.parentUid).toBe('suite-1')
+    })
+
+    it('keeps the null parent of a top-level parallel test', () => {
+        const topLevel = new TestStats({
+            type: 'test:start', title: 'a', parent: '', fullTitle: 'a', pending: false,
+            cid: '0-0', specs: [], uid: 'test-0-0-1', contextId: 'ctx-1', parentUid: null
+        })
+
+        expect(topLevel.parentUid).toBeNull()
+    })
+
+    it('adds no context or parent property when the payload has none', () => {
+        expect(Object.keys(stat)).not.toContain('contextId')
+        expect(Object.keys(stat)).not.toContain('parentUid')
+    })
+
+    it('keeps the spec file of the test only when the payload has it', () => {
+        expect('file' in stat).toBe(false)
+        const withFile = new TestStats({
+            type: 'test:start', title: 'a', parent: '', fullTitle: 'a', pending: false,
+            cid: '0-0', specs: [], uid: 'test-0-0-2', file: '/specs/b.spec.js'
+        })
+        expect(withFile.file).toBe('/specs/b.spec.js')
+    })
+
+    it('keeps no spec file that is not a text', () => {
+        for (const file of [null, 1, '']) {
+            const withValue = new TestStats({
+                type: 'test:start', title: 'a', parent: '', fullTitle: 'a', pending: false,
+                cid: '0-0', specs: [], uid: 'test-0-0-4', file: file as never
+            })
+            expect('file' in withValue).toBe(false)
+        }
+    })
+
+    // Jasmine gives the file of an ESM spec as a URL, Mocha parallel mode the URL of the runner
+    it('keeps the spec file of the test as a path', () => {
+        const file = path.resolve('specs', 'b.spec.js')
+        const withUrl = new TestStats({
+            type: 'test:start', title: 'a', parent: '', fullTitle: 'a', pending: false,
+            cid: '0-0', specs: [], uid: 'test-0-0-3', file: url.pathToFileURL(file).href
+        })
+        expect(withUrl.file).toBe(file)
+    })
+
+    it('completes at a given end instead of now', () => {
+        stat.complete(new Date(100))
+
+        expect(stat.end!.getTime()).toBe(100)
+        expect(stat.duration).toBe(100 - stat.start.getTime())
     })
 
     it('defines a start date', () => {
@@ -96,28 +158,37 @@ describe('TestStats', () => {
     })
 
     it('should not diff if error is already diffed', () => {
-        stat.fail([new AssertionError({ message: 'foobar\nExpected: foo\nReceived: bar42', actual: 'true', expected: 'false' })])
-        expect(stat.error?.message).toContain('bar42')
+        const error = new AssertionError({ message: 'foobar\nExpected: foo\nReceived: bar42', actual: 'true', expected: 'false' })
+        const message = error.message
+        stat.fail([error])
+        expect(stat.error?.message).toBe(message)
     })
 
-    it('should not call stringifyDiffObjs if actual is a Proxy', () => {
-        const TestStatsSpy = vi.spyOn(TestStats.prototype as any, '_stringifyDiffObjs')
-        stat.fail([new AssertionError({
+    it('does not diff assertion errors whose actual value is a Proxy', () => {
+        const error = new AssertionError({
             message: 'Expect $(`#flash`) to be existing\n\nExpected \u001b[32m"existing"\u001b[39m\nReceived \u001b[31m"\u001b[7mnot \u001b[27mexisting"\u001b[39m',
             expected: 'hi',
             actual: new Proxy(new Promise(()=>{}), {})
-        })])
-        expect(TestStatsSpy).not.toHaveBeenCalled()
+        })
+        const message = error.message
+        stat.fail([error])
+        expect(stat.error?.message).toBe(message)
     })
 
-    it('should call stringifyDiffObjs if actual is not a Proxy', () => {
-        const TestStatsSpy = vi.spyOn(TestStats.prototype as any, '_stringifyDiffObjs')
-        stat.fail([new AssertionError({
+    it('still diffs WebdriverIO expect errors that are not already formatted', () => {
+        const error = new AssertionError({
             message: 'Expect $(`#flash`) to be existing\n\nExpected \u001b[32m"existing"\u001b[39m\nReceived \u001b[31m"\u001b[7mnot \u001b[27mexisting"\u001b[39m',
             expected: 'hi',
             actual: 'false'
-        })])
-        expect(TestStatsSpy).toHaveBeenCalled()
+        })
+        const message = error.message
+        stat.fail([error])
+        expect(stat.error?.message).not.toBe(message)
+        expect(stat.error?.message).toContain(message)
+        expect(stat.error?.message).toContain('actual')
     })
 
+    it('has no own retried property until a retry marks it', () => {
+        expect(Object.prototype.hasOwnProperty.call(stat, 'retried')).toBe(false)
+    })
 })

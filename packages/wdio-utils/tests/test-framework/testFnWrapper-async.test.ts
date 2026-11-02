@@ -2,10 +2,12 @@ import type { MockedFunction } from 'vitest'
 import { vi, describe, it, expect, afterEach } from 'vitest'
 
 import * as shim from '../../src/shim.js'
-import { testFnWrapper, filterStackTrace } from '../../src/test-framework/testFnWrapper.js'
+import { testFnWrapper, testFrameworkFnWrapper, filterStackTrace } from '../../src/test-framework/testFnWrapper.js'
+import { setDebugAgentPause } from '../../src/test-framework/debugAgent.js'
 
 vi.mock('../../src/shim', () => ({
     executeHooksWithArgs: vi.fn(),
+    followFrameworkTimer: vi.fn(),
     executeAsync: async (fn: Function, { limit, attempts }: any, args = []) => fn('async', limit, attempts, ...args),
     runSync: null,
 }))
@@ -157,8 +159,149 @@ describe('testFnWrapper', () => {
         }])
     })
 
+    it('emits the after-hook with the identity captured BEFORE the await, not a mutated one', async () => {
+        // Simulate a timeout: the framework advances context.test to the NEXT runnable while the
+        // spec body runs. afterFnArgs reads the (mutable) current identity, mocha-style:
+        // [identityObject, context]. The snapshot must freeze the ORIGINAL identity.
+        const original = { title: 'timed-out test', parent: 'suite' }
+        const next = { title: 'next test', parent: 'suite' }
+        let currentIdentity = original
+        const sharedContext = { kind: 'context' }
+        const afterFnArgs = () => [currentIdentity, sharedContext]
+
+        // The spec body 'advances the pointer' the way mocha does on timeout.
+        const specFn = () => {
+            currentIdentity = next
+            return 'done'
+        }
+
+        const args = [
+            'Test',
+            { specFn, specFnArgs: [] },
+            { beforeFn: 'beforeFn', beforeFnArgs: () => [] },
+            { afterFn: 'afterFn', afterFnArgs },
+            '0-9',
+            0
+        ] as any[]
+
+        // @ts-expect-error
+        await testFnWrapper(...args)
+
+        const afterCall = executeHooksWithArgs.mock.calls.find((c: any[]) => c[0] === 'afterTest')
+        expect(afterCall).toBeDefined()
+        const emittedArgs = afterCall![2]
+        // identity (index 0) must be the ORIGINAL runnable, never the mutated 'next' one.
+        expect(emittedArgs[0]).toBe(original)
+        expect(emittedArgs[0].title).toBe('timed-out test')
+        // the live context (index 1) is still forwarded.
+        expect(emittedArgs[1]).toBe(sharedContext)
+    })
+
+    it('falls back to an empty args array when afterFnArgs is undefined', async () => {
+        const args = [
+            'Test',
+            { specFn: () => 'ok', specFnArgs: [] },
+            { beforeFn: 'beforeFn', beforeFnArgs: () => [] },
+            { afterFn: 'afterFn', afterFnArgs: undefined },
+            '0-9',
+            0
+        ] as any[]
+
+        // @ts-expect-error
+        const result = await testFnWrapper(...args)
+        expect(result).toBe('ok')
+        const afterCall = executeHooksWithArgs.mock.calls.find((c: any[]) => c[0] === 'afterTest')
+        expect(afterCall).toBeDefined()
+        // only the pushed result object should be present (no identity since afterFnArgs was absent).
+        expect(afterCall![2]).toHaveLength(1)
+        expect(afterCall![2][0]).toMatchObject({ result: 'ok', passed: true })
+    })
+
+    it('should apply a framework spec result and filter its expectation stack', async () => {
+        const failure = {
+            matcherName: 'toBe',
+            stack: [
+                '    at spec (/foo/bar/baz/example.e2e.js:27:9)',
+                '    at Context.testFrameworkFnWrapper (/foo/bar/baz/node_modules/@wdio/utils/build/test-framework/testFnWrapper.js:50:32)'
+            ].join('\n')
+        }
+        const specResult = { id: 'spec-1', failedExpectations: [failure] }
+        const args = [
+            'Test',
+            {
+                specFn: () => 'body',
+                specFnArgs: [],
+                frameworkResult: () => ({ result: specResult, errors: specResult.failedExpectations })
+            },
+            { beforeFn: 'beforeFn', beforeFnArgs: () => [] },
+            { afterFn: 'afterFn', afterFnArgs: () => [] },
+            '0-9',
+            0
+        ] as any[]
+
+        // @ts-expect-error
+        const result = await testFnWrapper(...args)
+
+        expect(result).toBe(specResult)
+        expect(failure.stack).not.toContain('node_modules/@wdio/utils')
+        expect(failure.stack).toContain('example.e2e.js')
+        const afterCall = executeHooksWithArgs.mock.calls.find((c: any[]) => c[0] === 'afterTest')
+        expect(afterCall![2][0]).toMatchObject({
+            result: specResult,
+            error: failure,
+            passed: false
+        })
+    })
+
+    it('pauses a failed test before afterTest and close fails the test', async () => {
+        const order: string[] = []
+        executeHooksWithArgs.mockImplementation(async (name: string) => {
+            order.push(name)
+            return []
+        })
+        setDebugAgentPause(async () => {
+            order.push('pause')
+            throw new Error('Session closed from wdio session')
+        })
+        const failure = new Error('assertion failed')
+        const args = [
+            'Test',
+            { specFn: () => { throw failure }, specFnArgs: [] },
+            { beforeFn: 'beforeFn', beforeFnArgs: () => [{ title: 'reads the title', file: '/tmp/spec.ts' }] },
+            { afterFn: 'afterFn', afterFnArgs: () => [{ title: 'reads the title', file: '/tmp/spec.ts' }] },
+            '0-0',
+            0
+        ] as any[]
+
+        // @ts-expect-error test args
+        await expect(testFnWrapper(...args)).rejects.toThrow('Session closed from wdio session')
+        expect(order).toEqual(['beforeTest', 'pause', 'afterTest'])
+        const afterCall = executeHooksWithArgs.mock.calls.find((call) => call[0] === 'afterTest')
+        const report = (afterCall?.[2] as { error?: Error, passed?: boolean }[])[1]
+        expect(report.error?.message).toBe('Session closed from wdio session')
+        expect(report.passed).toBe(false)
+    })
+
+    it('pauses a failed cucumber step', async () => {
+        setDebugAgentPause(async () => {
+            throw new Error('paused on step')
+        })
+        const args = [
+            'Step',
+            { specFn: () => { throw new Error('step failed') }, specFnArgs: [] },
+            { beforeFn: 'beforeFn', beforeFnArgs: () => [{ title: 'a step', file: '/tmp/spec.ts' }] },
+            { afterFn: 'afterFn', afterFnArgs: () => [{ title: 'a step', file: '/tmp/spec.ts' }] },
+            '0-0',
+            0
+        ] as any[]
+
+        // @ts-expect-error test args
+        await expect(testFnWrapper(...args)).rejects.toThrow('paused on step')
+    })
+
     afterEach(() => {
         executeHooksWithArgs.mockClear()
+        setDebugAgentPause(undefined)
     })
 })
 
@@ -209,5 +352,54 @@ describe('filterStackTrace', () => {
         `
 
         expect(filteredStack).toBe(filterStackTrace(stacktrace))
+    })
+})
+
+describe('timeout title', () => {
+    // an array element keeps an arrow function without a name, like an inline hook
+    const [anonymous] = [() => {}]
+    const titleOf = async (type: string, identity: unknown, hookName?: string, specFn: Function = anonymous, scope: object = {}) => {
+        const executeAsync = vi.fn(async () => undefined)
+        await testFrameworkFnWrapper.call(
+            scope, { executeHooksWithArgs: vi.fn(), executeAsync } as any, type,
+            { specFn, specFnArgs: [] },
+            { beforeFn: [], beforeFnArgs: () => [] },
+            { afterFn: [], afterFnArgs: (ctx: unknown) => [identity, ctx] },
+            '0-0', 0, hookName, 5000
+        )
+        return (executeAsync.mock.calls[0] as unknown[])[4]
+    }
+    const spec = { description: 'pays the order', fullName: 'checkout pays the order' }
+
+    it('gives the full name of a Jasmine spec', async () => {
+        expect(await titleOf('Test', spec)).toBe('checkout pays the order')
+        expect(await titleOf('Test', { description: 'pays the order' })).toBe('pays the order')
+        expect(await titleOf('Test', { fullName: 42, description: 'pays the order' })).toBe('pays the order')
+    })
+
+    it('names a Jasmine hook, with the full spec name only for a beforeEach / afterEach', async () => {
+        function loginAsAdmin () {}
+        expect(await titleOf('Hook', spec, 'beforeEach')).toBe("'before each' hook for 'checkout pays the order'")
+        expect(await titleOf('Hook', spec, 'beforeEach', loginAsAdmin)).toBe("'before each' hook: loginAsAdmin for 'checkout pays the order'")
+        expect(await titleOf('Hook', spec, 'afterEach')).toBe("'after each' hook for 'checkout pays the order'")
+        expect(await titleOf('Hook', { description: 'pays the order' }, 'beforeEach')).toBe("'before each' hook for 'pays the order'")
+        expect(await titleOf('Hook', {}, 'beforeEach')).toBe("'before each' hook")
+        // the identity of a beforeAll / afterAll is the previous spec
+        expect(await titleOf('Hook', spec, 'beforeAll')).toBe("'before all' hook")
+        expect(await titleOf('Hook', spec, 'afterAll', loginAsAdmin)).toBe("'after all' hook: loginAsAdmin")
+        expect(await titleOf('Hook', spec, 'toString')).toBeUndefined()
+    })
+
+    it('reports a hook with no function as an error, not as a TypeError of the wrapper', async () => {
+        expect(await titleOf('Hook', spec, 'beforeEach', null as unknown as Function)).toBe("'before each' hook for 'checkout pays the order'")
+    })
+
+    it('gives no title with a Mocha runnable, for a Cucumber step or hook, or an identity without a name', async () => {
+        expect(await titleOf('Test', spec, undefined, anonymous, { _runnable: { title: 'pays the order' } })).toBeUndefined()
+        expect(await titleOf('Hook', spec, 'beforeEach', anonymous, { _runnable: { title: 'hook' } })).toBeUndefined()
+        expect(await titleOf('Step', { text: 'I pay the order' })).toBeUndefined()
+        expect(await titleOf('Hook', { text: 'I pay the order' })).toBeUndefined()
+        expect(await titleOf('Test', {})).toBeUndefined()
+        expect(await titleOf('Test', undefined)).toBeUndefined()
     })
 })

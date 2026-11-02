@@ -1,6 +1,7 @@
 ---
 id: runner
 title: Runner
+description: "Choose between the local runner and the browser runner, and configure browser runner options such as presets, Vite config and coverage."
 ---
 
 import CodeBlock from '@theme/CodeBlock';
@@ -41,7 +42,7 @@ export const {
 
 ## Browser Runner
 
-As opposed to the [Local Runner](https://www.npmjs.com/package/@wdio/local-runner) the [Browser Runner](https://www.npmjs.com/package/@wdio/browser-runner) initiates and executes the framework within the browser. This allows you to run unit tests or component tests in an actual browser rather than in a JSDOM like many other test frameworks.
+As opposed to the [Local Runner](https://www.npmjs.com/package/@wdio/local-runner) the [Browser Runner](https://www.npmjs.com/package/@wdio/browser-runner) initiates and executes the framework within the browser. This allows you to run unit tests or component tests in an actual browser rather than in a JSDOM like many other test frameworks. The test bundle runs in Chrome 90, Edge 90, Firefox 90 and Safari 14.1 or newer. See [Browser support](/docs/component-testing#browser-support).
 
 While [JSDOM](https://www.npmjs.com/package/jsdom) is widely used for testing purposes, it is in the end not an actual browser nor can you emulate mobile environments with it. With this runner WebdriverIO enables you to easily run your tests in the browser and use WebDriver commands to interact with elements rendered on the page.
 
@@ -228,7 +229,7 @@ __Default:__ `false`
 
 #### `clean`
 
-Clean coverage results before running tests.
+Clean coverage results before running tests. The reports directory is only cleaned when `enabled` is `true`, so existing output in it is left alone while coverage is disabled.
 
 __Type:__ `boolean`<br />
 __Default:__ `true`

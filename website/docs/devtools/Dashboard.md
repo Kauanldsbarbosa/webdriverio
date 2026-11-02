@@ -1,0 +1,58 @@
+---
+id: dashboard
+title: The Dashboard
+description: "Watch test runs live in the DevTools dashboard, rerun single tests or suites, and configure the dashboard window and backend."
+---
+
+Live mode opens the DevTools UI in an external browser window and streams your test run in real time. It's the interactive counterpart to [Trace Mode](/docs/devtools/wdio/trace-mode), which skips the UI and writes a portable offline artifact instead. Live mode is enabled by default (`mode: 'live'`), so simply running your WebdriverIO tests launches the dashboard.
+
+When you run your tests, the DevTools UI automatically opens in an external browser window and tests begin executing immediately with real-time visualization. After the initial run completes, use the play buttons to rerun individual tests or suites, and the stop button to terminate running tests at any time.
+
+## What the dashboard shows
+
+- **Live browser preview** — watch the browser under test as commands execute.
+- **Test progress** — suites and tests update as they run.
+- **Command execution** — each action streams in as it happens. A wait appears as soon as it starts, as one row with the commands its condition issues nested under it; see [Waits](/docs/devtools/wdio/trace-mode#waits).
+- **Workbench tabs** — Actions and Metadata, plus Source, Log, Console, Network and Errors (each badged with a count), and Compare after a [Preserve & Rerun](/docs/devtools/wdio/preserve-and-rerun).
+
+## Live-mode features
+
+- **[Interactive Test Rerunning & Visualization](/docs/devtools/wdio/interactive-test-rerunning)** — Real-time browser previews with test rerunning
+- **[Preserve & Rerun (Compare)](/docs/devtools/wdio/preserve-and-rerun)** — Snapshot a failing test, rerun it, and diff the two runs side-by-side
+- **[Console Logs](/docs/devtools/wdio/console-logs)** — Capture and inspect browser console output
+- **[Network Logs](/docs/devtools/wdio/network-logs)** — Monitor API calls and network activity
+- **[Metadata](/docs/devtools/wdio/metadata)** — Session capabilities, environment, and timing per browser session
+- **[TestLens](/docs/devtools/wdio/testlens)** — Navigate to source code with intelligent code navigation
+- **[Multi-Framework Support](/docs/devtools/wdio/multi-framework-support)** — Works with Mocha, Jasmine, and Cucumber
+- **[Session Screencast](/docs/devtools/wdio/screencast)** — Automatic video recording of browser sessions
+
+## Configuring the dashboard window
+
+The `port`, `hostname`, and `devtoolsCapabilities` options control the DevTools UI server and the window it opens in. See the [Configuration Reference](/docs/devtools/reference) for details.
+
+## Running the backend on its own
+
+The adapters start the dashboard server in-process, so you normally never touch it. It also ships as a standalone binary, which is what you want when the dashboard should outlive a single run - or when the tests are not JavaScript, as with the Python adapter (see the [Selenium](/docs/devtools/selenium) page).
+
+```bash
+npx @wdio/devtools-backend
+```
+
+```
+Usage: devtools-backend [options]
+
+Options:
+  --port <number>     Preferred port; a free one is chosen if it is taken
+  --hostname <host>   Host to bind (default: localhost)
+  -h, --help          Show this message
+```
+
+Both `--port 8080` and `--port=8080` forms are accepted. `--port` is a *preference*, not a promise: if that port is taken the server binds a free one instead of failing. It prints the port it actually bound, which is the line to read rather than the one you asked for:
+
+```
+devtools-backend listening at http://localhost:3000
+```
+
+The Python adapter attaches to an already-listening server when `DEVTOOLS_PORT` is set, instead of starting a second one. The JavaScript adapters start their backend in-process; use their `port` option to choose the port.
+
+A second binary, `show-trace`, opens a trace archive in the offline player - see [Trace Player](/docs/devtools/trace-player).

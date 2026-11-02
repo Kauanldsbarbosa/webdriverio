@@ -1,6 +1,7 @@
 ---
 id: browser-logs
 title: Browser Logs
+description: "Capture browser console logs during a test with WebDriver Bidi log events and assert against the collected messages."
 ---
 
 When running tests the browser may log important information that you are interested or want to assert against.
@@ -62,9 +63,7 @@ describe('should log when doing a certain action', () => {
 
 <TabItem value='classic'>
 
-If you still use WebDriver Classic or disabled Bidi usage via the `'wdio:enforceWebDriverClassic': true` capability, you can use the `getLogs` JSONWire command to fetch the latest logs. Since WebdriverIO has removed these deprecated commands you will have to use the [JSONWP Service](https://github.com/webdriverio-community/wdio-jsonwp-service) to add the command back to your browser instance.
-
-After you added or initiate the service you can fetch logs via:
+If Bidi is disabled with the `'wdio:enforceWebDriverClassic': true` capability, Chromium sessions can still read the browser log buffer with `getLogs`:
 
 ```ts
 const logs = await browser.getLogs('browser')

@@ -1,21 +1,23 @@
 import { getBrowserObject } from '@wdio/utils'
 import type { ElementReference } from '@wdio/protocols'
 
-import { resqScript } from '../constant.js'
-import { enhanceElementsArray } from '../../utils/index.js'
+import { reactScript } from '../constant.js'
 import { getElements } from '../../utils/getElementObject.js'
-import { waitToLoadReact, react$$ as react$$Script } from '../../scripts/resq.js'
+import { ElementArray } from '../../element/array.js'
+import { waitToLoadReact, react$$ as react$$Script } from '../../scripts/react.js'
 import type { ReactSelectorOptions } from '../../types.js'
 
 /**
  *
  * The `react$$` command is a useful command to query multiple React Components
- * by their actual name and filter them by props and state.
+ * by their actual name and filter them by props and state. It returns a
+ * [`WebdriverIO.ElementArray`](/docs/api/browser/$$), the same list as [`$$`](/docs/api/browser/$$).
  *
  * :::info
  *
- * The command only works with applications using React v16.x. Read more about React
- * selectors in the [Selectors](/docs/selectors#react-selectors) guide.
+ * The command works with applications using React v16 to v19, with `createRoot` or
+ * `ReactDOM.render`. Read more about React selectors in the
+ * [Selectors](/docs/selectors#react-selectors) guide.
  *
  * :::
  *
@@ -40,19 +42,33 @@ import type { ReactSelectorOptions } from '../../types.js'
  * @return {WebdriverIO.ElementArray}
  *
  */
-export async function react$$(
+export function react$$(
     this: WebdriverIO.Element,
     selector: string,
     { props = {}, state = {} }: ReactSelectorOptions = {}
-) {
-    const browser = await getBrowserObject(this)
-    await this.executeScript(resqScript.toString(), [])
-    await browser.execute(waitToLoadReact)
-    const res = await browser.execute(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        react$$Script as any, selector, props, state, this
-    ) as ElementReference[]
+): WebdriverIO.ElementArray {
+    return ElementArray.fromAsyncCallback(async () => {
+        const browser = await getBrowserObject(this)
+        /**
+         * `execute` of the element runs in the context of the element, also in a frame.
+         * It gives the element as first argument, which these two scripts do not use.
+         */
+        await this.execute(reactScript)
+        await this.execute(waitToLoadReact)
+        const res = await browser.execute(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            react$$Script as any, selector, props, state, this
+        ) as ElementReference[]
 
-    const elements = await getElements.call(this, selector, res, { isReactElement: true })
-    return enhanceElementsArray(elements, this, selector, 'react$$', [props, state])
+        return getElements.call(this, selector, res, { isReactElement: true, reactOptions: { props, state } })
+    }, {
+        selector,
+        foundWith: 'react$$',
+        parent: this,
+        /**
+         * the arguments after the selector, so that
+         * `parent[foundWith](selector, ...props)` runs the same query again
+         */
+        props: [{ props, state }]
+    })
 }

@@ -1,17 +1,24 @@
 import os from 'node:os'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import fs from 'node:fs'
 import process from 'node:process'
 
+import { setCommandHookStore } from '@wdio/utils'
+
 import { downloadFile } from './node/downloadFile.js'
+import { extensionDataFromPath } from './node/extensionArchive.js'
 import { savePDF } from './node/savePDF.js'
 import { saveRecordingScreen } from './node/saveRecordingScreen.js'
-import { uploadFile } from './node/uploadFile.js'
 import { saveScreenshot } from './node/saveScreenshot.js'
 import { saveElementScreenshot } from './node/saveElementScreenshot.js'
 
 export * from './index.js'
 
 import { environment, type EnvironmentVariables } from './environment.js'
+import { setParallelContextStore } from './session/context.js'
+
+setParallelContextStore(new AsyncLocalStorage<string>())
+setCommandHookStore(new AsyncLocalStorage<true>())
 
 environment.value = {
     osType: () => os.type(),
@@ -19,7 +26,7 @@ environment.value = {
     downloadFile,
     savePDF,
     saveRecordingScreen,
-    uploadFile,
+    extensionDataFromPath,
     saveScreenshot,
     saveElementScreenshot,
     variables: process.env as EnvironmentVariables

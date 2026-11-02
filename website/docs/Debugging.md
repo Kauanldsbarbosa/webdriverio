@@ -1,6 +1,7 @@
 ---
 id: debugging
 title: Debugging
+description: "Debug WebdriverIO tests with browser.debug, VS Code or WebStorm breakpoints, strategies for flaky tests, and CPU and heap profiling."
 ---
 
 Debugging is significantly more difficult when several processes spawn dozens of tests in multiple browsers.
@@ -44,6 +45,16 @@ jasmineOpts: {
 See [timeouts](timeouts) for more information on how to do that using other frameworks.
 
 To proceed with the tests after debugging, in the shell use `^C` shortcut or the `.exit` command.
+
+### Pause for a coding agent (`--debug=agent`)
+
+`wdio run --debug=agent` raises the framework timeout to 24 hours and pauses the worker when a spec calls `await browser.debug()` or when a test fails. The run prints a line like:
+
+```text
+Paused in cart.e2e.ts › adds a blue t-shirt. Inspect with `wdio session -s debug-0-0 snapshot`, continue with `wdio session -s debug-0-0 resume`.
+```
+
+Inspect the paused browser with [`wdio session`](/docs/session/debug) (`snapshot`, `exec`, …), then `wdio session -s debug-0-0 resume` to continue. `wdio session -s debug-0-0 close` fails the paused test with `Session closed from wdio session`. The session name is `debug-<cid>` (`debug-0-0` for the first worker). The rest of that workflow is in the [WebdriverIO Session](/docs/session) section.
 ## Dynamic configuration
 
 Note that `wdio.conf.js` can contain Javascript. Since you probably do not want to permanently change your timeout value to 1 day, it can be often helpful to change these settings from the command line using an environment variable.
@@ -161,3 +172,39 @@ await expect(elem).toBeDisplayed()
 ```
 Using these assertions, WebdriverIO will automatically wait until the condition matches. When asserting text this means that the element needs to exist and the text needs to be equal to the expected value.
 We talk more about this in our [Best Practices Guide](https://webdriver.io/docs/bestpractices#use-the-built-in-assertions).
+
+## Performance Profiling
+
+WebdriverIO allows you to capture performance profiles of your tests to identify bottlenecks in your test execution or memory leaks. This uses Node.js native profiling capabilities.
+
+### CPU Profiling
+
+To capture a CPU profile, you can use the `--cpu-prof` CLI flag or set `cpuProf: true` in your configuration.
+
+```bash
+npx wdio run wdio.conf.js --cpu-prof
+```
+
+This will generate a `.cpuprofile` file in the `./profiles` directory (default) for each worker process. You can load this file into **Chrome DevTools > Performance > Load Profile** to analyze the execution.
+
+### Heap Profiling
+
+To capture a Heap profile, use the `--heap-prof` CLI flag or set `heapProf: true` in your configuration.
+
+```bash
+npx wdio run wdio.conf.js --heap-prof
+```
+
+This generates a `.heapprofile` file in the `./profiles` directory (uses sampling heap profiler). You can load this into **Chrome DevTools > Memory > Load** to analyze memory usage.
+
+### Timing Metrics
+
+When profiling is enabled, WebdriverIO also automatically logs timing metrics for the setup, execution, and teardown phases of your test, helping you understand where time is being spent.
+
+```
+📊 Performance Metrics:
+────────────────────────────────────────
+  Setup:     1.25s
+  Execution: 3.42s
+  Teardown:  0.15s
+```
